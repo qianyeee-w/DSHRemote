@@ -1,0 +1,22 @@
+# Node
+node_modules/
+*.tgz
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+*.keystore
+*.jks
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 本地密钥和凭据，任何情况下都不要提交
+*.pem
+*.key
+.env

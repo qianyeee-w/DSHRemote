@@ -1,10 +1,24 @@
 # DSHRemote 插件：一行 Host 侧插件。
-# 要覆盖配置，在 profile 自己的 cordis.patch.yml 中按 id 整行替换，并写全所有键：
+#
+# 要修改配置，在 profile 自己的 cordis.patch.yml 中按 id 整行替换。
+# DSH 会整行替换 config，所以要把需要的键全部写上；未知的键会导致插件加载失败。
 #   - id: dshremote
 #     name: dshremote
-#     config: { ... }
+#     config:
+#       enabled: true
+#       lanPort: 3190
+#       ...
 - insert:
     - id: dshremote
       name: dshremote
       config:
+        # 是否启用
         enabled: true
+        # 局域网 HTTPS 端口（手机连接这个端口）
+        lanPort: 3190
+        # 局域网服务的监听地址。0.0.0.0 表示所有网卡；也可以填某个网卡的 IP
+        lanBind: 0.0.0.0
+        # 本机配对页的端口，只监听 127.0.0.1
+        adminPort: 3191
+        # 第一次启动时自动在浏览器里打开配对页
+        openAdminOnFirstRun: true

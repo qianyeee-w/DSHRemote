@@ -31,6 +31,8 @@ plugin/
 ├── index.js              # 插件入口：name / inject / apply，只负责组装和生命周期
 ├── cordis.patch.yml      # 插件挂载与默认配置
 ├── src/
+│   ├── config.js         # 配置校验：非法值、未知键直接报错，不静默回退
+│   ├── storage.js        # <DSH_HOME>/dshremote/ 下的状态文件：原子写入、POSIX 0700/0600、损坏时报错
 │   └── dsh/
 │       └── versions.js   # 支持的 DSH 版本范围（唯一定义处）
 └── test/
@@ -48,7 +50,8 @@ plugin/
 - DSH 的端口每次启动都可能变化，**每个请求都要实时读取** `ctx.webServer.port`，不要缓存。
 - 插件的生命周期用 `ctx.effect()` 管理。加载时不要阻塞等待 DSH 启动，在后台轮询即可。
 - **日志**：使用 `ctx.logger`，并且带上 `[dshremote]` 前缀。`dsh web` 默认不输出插件的 info 日志，所以排查问题时不能指望日志；需要让用户看到的状态，要显示在本机配对页上。
-- 状态文件放在 `<DSH_HOME>/dshremote/` 下。设备 token 只存哈希。
+- 状态文件一律通过 `src/storage.js` 读写，不要直接用 `fs` 写状态目录。设备 token 只存哈希。
+- 新增配置项时，同时修改 `src/config.js` 的 `DEFAULT_CONFIG` 和 `cordis.patch.yml`（单元测试会检查两者一致）。
 - 插件代码要能同时在 Windows 和 Linux 上运行：路径一律用 `path.join` 拼接；启动子进程时，用 `process.execPath` 运行 JS 入口，不要依赖 shell 或 `.cmd` 包装。
 
 ## 安装方式

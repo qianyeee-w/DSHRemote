@@ -5,6 +5,8 @@
  * 只负责组装各模块和管理生命周期；具体逻辑在 src/ 下。
  * 使用的 DSH 服务只有 webServer 和 connection（见 plugin/AGENTS.md）。
  */
+import { parseConfig } from './src/config.js'
+import { openStorage } from './src/storage.js'
 
 export const name = 'dshremote'
 export const inject = ['webServer', 'connection']
@@ -17,15 +19,22 @@ const LOG_PREFIX = '[dshremote]'
  * @param {unknown} [rawConfig] cordis.patch.yml 中的配置
  */
 export function apply(ctx, rawConfig) {
-  const config = /** @type {{ enabled?: unknown } | undefined} */ (rawConfig)
-  if (config?.enabled === false) {
-    ctx.logger?.info?.(`${LOG_PREFIX} 已安装但未启用（enabled: false）`)
+  // 配置非法时直接抛出：DSH 会把插件标记为加载失败，用户能在插件列表里看到
+  const config = parseConfig(rawConfig)
+  /** @param {'info' | 'warn' | 'error'} level @param {string} message */
+  const log = (level, message) => ctx.logger?.[level]?.(`${LOG_PREFIX} ${message}`)
+
+  if (!config.enabled) {
+    log('info', '已安装但未启用（enabled: false）')
     return
   }
-  ctx.effect(() => {
-    ctx.logger?.info?.(`${LOG_PREFIX} 已加载`)
+
+  ctx.effect(async () => {
+    // 加载时不阻塞：后续任务在这里启动各项服务
+    const storage = await openStorage()
+    log('info', `已加载，状态目录：${storage.dir}`)
     return () => {
-      ctx.logger?.info?.(`${LOG_PREFIX} 已卸载`)
+      log('info', '已卸载')
     }
   }, 'dshremote lifecycle')
 }

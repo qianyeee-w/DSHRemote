@@ -1,7 +1,10 @@
 // @ts-check
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdtemp, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DEFAULT_CONFIG } from '../../src/config.js'
 import * as plugin from '../../index.js'
 import { DSH_BASELINE_VERSION, SUPPORTED_DSH_RANGE } from '../../src/dsh/versions.js'
 
@@ -31,15 +34,40 @@ test('enabled: false 时不注册任何生命周期', () => {
   assert.equal(effects, 0)
 })
 
-test('默认启用：注册一个生命周期，卸载函数可调用', () => {
-  /** @type {(() => void) | undefined} */
-  let dispose
-  const ctx = {
-    /** @param {() => () => void} fn */
-    effect: (fn) => { dispose = fn() },
-    logger: { info() {} },
+test('默认启用：注册一个生命周期，打开状态目录，卸载函数可调用', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dshremote-skeleton-'))
+  const previous = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    /** @type {Promise<() => void> | undefined} */
+    let pending
+    const ctx = {
+      /** @param {() => Promise<() => void>} fn */
+      effect: (fn) => { pending = fn() },
+      logger: { info() {} },
+    }
+    plugin.apply(ctx, { enabled: true })
+    assert.ok(pending, '应当注册生命周期')
+    const dispose = await pending
+    assert.ok((await stat(join(home, 'dshremote'))).isDirectory())
+    assert.equal(typeof dispose, 'function')
+    dispose()
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+    await rm(home, { recursive: true, force: true })
   }
-  plugin.apply(ctx, { enabled: true })
-  assert.equal(typeof dispose, 'function')
-  dispose?.()
+})
+
+test('配置非法时 apply 直接抛出，让 DSH 把插件标记为加载失败', () => {
+  const ctx = { effect() { assert.fail('不应注册生命周期') }, logger: { info() {} } }
+  assert.throws(() => plugin.apply(ctx, { lanPort: 'abc' }), /配置错误/)
+  assert.throws(() => plugin.apply(ctx, { unknownKey: 1 }), /未知的配置项/)
+})
+
+test('cordis.patch.yml 的默认配置与 DEFAULT_CONFIG 一致', async () => {
+  const yml = await readFile(new URL('../../cordis.patch.yml', import.meta.url), 'utf8')
+  for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+    assert.match(yml, new RegExp(`^\\s+${key}: ${String(value).replaceAll('.', '\\.')}$`, 'm'), `cordis.patch.yml 中 ${key} 应为 ${value}`)
+  }
 })

@@ -114,7 +114,7 @@ npm install --omit=dev
 然后：
 
 1. 在 **Windows 的配对页**上点「生成配对码」。记下页面上显示的「地址」（Windows 的局域网 IP）和「配对码」，以及「这台电脑」一栏里完整的「证书指纹」。指纹可以复制带空格的分组形式。
-2. 在**那台机器**上运行（配对码 5 分钟内有效）：
+2. 在**那台机器**上，进入 `DSHRemote/plugin` 目录运行（注意不是仓库根目录，配对码 5 分钟内有效）：
 
    ```sh
    node scripts/verify.mjs --host <Windows 的局域网 IP> --code <配对码> --fingerprint "<证书指纹>"

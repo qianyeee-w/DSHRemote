@@ -17,12 +17,13 @@ import { DEFAULT_CONFIG } from '../../src/config.js'
 import { spkiFingerprint } from '../../src/tls/certificate.js'
 import { CERT_FILE } from '../../src/tls/identity.js'
 import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
-import { startDshWeb, DSH_VERSION, log } from '../helpers/dsh-runtime.mjs'
+import { startDshWeb, DSH_VERSION, log, freePort } from '../helpers/dsh-runtime.mjs'
 import { pinnedRequest, pinnedWebSocket, collectMessages } from '../helpers/pinned-client.js'
 import { startFakeLlm, STREAM_REPLY, TOOL_DONE_REPLY } from '../contract/fake-llm.mjs'
 
-const LAN_PORT = 3290
-const ADMIN_PORT = 3291
+// 用临时找到的空闲端口：开发机上 3190 / 3191 可能已被占用（例如用户自己的 dsh web 服务）
+const LAN_PORT = await freePort()
+const ADMIN_PORT = await freePort()
 const STEP_TIMEOUT_MS = 30_000
 
 /** @type {{ name: string, ok: boolean, detail?: string }[]} */

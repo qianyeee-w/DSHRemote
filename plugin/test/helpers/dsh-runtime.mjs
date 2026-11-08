@@ -11,6 +11,7 @@
  * 跨平台：一律用 node 直接运行 DSH 的 JS 入口，不依赖 shell 和 .cmd 包装。
  */
 import { spawn, execFileSync } from 'node:child_process'
+import net from 'node:net'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve, basename } from 'node:path'
@@ -23,6 +24,22 @@ const STARTUP_TIMEOUT_MS = 120_000
 
 /** @param {string} message */
 export const log = (message) => console.error(`[${basename(process.argv[1] ?? 'dsh-runtime').replace(/\.m?js$/, '')}] ${message}`)
+
+/**
+ * 找一个当前空闲的 TCP 端口。测试中插件的端口一律用它，不用默认的 3190 / 3191：
+ * 开发机上可能已经有程序用着这两个端口（例如用户自己的 dsh web 服务）。
+ * @returns {Promise<number>}
+ */
+export function freePort() {
+  return new Promise((resolvePort, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen(0, '0.0.0.0', () => {
+      const { port } = /** @type {import('node:net').AddressInfo} */ (server.address())
+      server.close(() => resolvePort(port))
+    })
+  })
+}
 
 /** npm 版的 dsh 安装插件时会调用 pnpm；找不到就尽早给出明确的提示。 */
 export function assertPnpm() {

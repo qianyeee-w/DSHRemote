@@ -23,7 +23,7 @@ import { DEFAULT_CONFIG } from '../../src/config.js'
 import { spkiFingerprint } from '../../src/tls/certificate.js'
 import { CERT_FILE } from '../../src/tls/identity.js'
 import { pinnedRequest } from '../helpers/pinned-client.js'
-import { startDshWeb, DSH_VERSION } from '../helpers/dsh-runtime.mjs'
+import { startDshWeb, DSH_VERSION, freePort } from '../helpers/dsh-runtime.mjs'
 
 /** @param {URL} launch @param {string} path @param {{ method?: string, headers?: Record<string,string>, body?: string }} [options] */
 function request(launch, path, options = {}) {
@@ -75,7 +75,7 @@ async function checkLanInfo(dshHome) {
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
       const fingerprint = spkiFingerprint(readFileSync(certPath, 'utf8'))
-      const res = await pinnedRequest({ host: '127.0.0.1', port: DEFAULT_CONFIG.lanPort, fingerprint, path: '/v1/info' })
+      const res = await pinnedRequest({ host: '127.0.0.1', port: ports.lan, fingerprint, path: '/v1/info' })
       const body = res.json()
       if (res.status === 200 && body.protocol === 1) {
         if (body.dsh?.version !== DSH_VERSION) return { ok: false, detail: `/v1/info 报告的 DSH 版本不对：${JSON.stringify(body.dsh)}` }
@@ -97,7 +97,7 @@ async function checkLanInfo(dshHome) {
  */
 async function checkAdminPage(dshHome) {
   const fingerprint = spkiFingerprint(readFileSync(join(dshHome, 'dshremote', CERT_FILE), 'utf8'))
-  const base = new URL(`http://127.0.0.1:${DEFAULT_CONFIG.adminPort}/?token=x`)
+  const base = new URL(`http://127.0.0.1:${ports.admin}/?token=x`)
   try {
     const page = /** @type {{ status: number, body: string }} */ (await request(base, '/'))
     if (page.status !== 200) return { ok: false, detail: `配对页返回 ${page.status}` }
@@ -119,6 +119,9 @@ async function checkAdminPage(dshHome) {
     return { ok: false, detail: `无法访问配对页：${error instanceof Error ? error.message : String(error)}` }
   }
 }
+
+/** 插件这次使用的端口（main 中选定） */
+const ports = { lan: 0, admin: 0 }
 
 /**
  * 插件的端口被其他程序占用时，插件会启动失败，但 DSH 仍然把它显示为 active，也不打印错误。
@@ -151,9 +154,12 @@ async function main() {
   let web
   try {
     // 关掉「第一次启动时自动打开浏览器」，其余配置用默认值
-    web = await startDshWeb({ withPlugin: true, pluginConfig: { ...DEFAULT_CONFIG, openAdminOnFirstRun: false } })
+    // 端口用临时找到的空闲端口，其余配置用默认值；关掉「第一次启动时自动打开浏览器」
+    ports.lan = await freePort()
+    ports.admin = await freePort()
+    web = await startDshWeb({ withPlugin: true, pluginConfig: { ...DEFAULT_CONFIG, lanPort: ports.lan, adminPort: ports.admin, openAdminOnFirstRun: false } })
     const loaded = await checkLoaded(web.launch)
-    const lan = loaded.ok ? await withPortHint(await checkLanInfo(web.dshHome), DEFAULT_CONFIG.lanPort, DEFAULT_CONFIG.lanBind) : { ok: false, detail: '插件未加载，跳过局域网检查' }
+    const lan = loaded.ok ? await withPortHint(await checkLanInfo(web.dshHome), ports.lan, DEFAULT_CONFIG.lanBind) : { ok: false, detail: '插件未加载，跳过局域网检查' }
     const admin = loaded.ok ? await checkAdminPage(web.dshHome) : { ok: false, detail: '插件未加载，跳过配对页检查' }
     const ok = loaded.ok && lan.ok && admin.ok
     console.log(JSON.stringify({ check: 'load', dshVersion: web.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin }))

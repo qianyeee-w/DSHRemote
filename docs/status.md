@@ -22,7 +22,7 @@ M2 开工前要知道：
   - `plugin/test/helpers/dsh-runtime.mjs`：安装并启动真实的 `dsh web`，可以装入插件；
   - `plugin/test/contract/fake-llm.mjs`：假模型服务，用关键词驱动 Agent，比如 ASK 触发提问、SHELL 触发审批、STREAM 慢速流式输出。
 
-  把这两个组合起来，就是一个给 App 开发用的「真实插件 + 假模型」服务器。建议作为 M2 的第一个任务，先把它做成命令，例如 `npm run dev-server`。
+  把这两个组合起来，就是一个给 App 开发用的「真实插件 + 假模型」服务器。建议作为 M2 的第一个任务，先把它做成命令，例如 `npm run dev-server`。**端口要能指定，默认不要用 3190 / 3191**：用户的开发服务器上，3190 已经被他自己的 `dsh web` 服务占用。测试代码一律用 `dsh-runtime.mjs` 的 `freePort()` 找空闲端口。
 - 插件对外的接口以 `docs/protocol.md` 为准，已经按实现定稿，没有待定项。App 只能使用其中列出的接口。
 - App 端的安全要求在根目录 `AGENTS.md` 的安全红线和 `android/AGENTS.md` 中，尤其是：证书指纹不匹配时直接拒绝，**不提供「仍然继续」**。
 

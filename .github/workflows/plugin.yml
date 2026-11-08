@@ -61,4 +61,13 @@ jobs:
           cache: npm
           cache-dependency-path: plugin/package-lock.json
       - run: npm ci
+      # npm 版的 dsh 安装插件时会调用 pnpm
+      - run: npm install -g pnpm@10
+      - name: Cache DSH install
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/dsh-install
+          key: dsh-${{ runner.os }}-node22-${{ hashFiles('plugin/src/dsh/versions.js') }}
       - run: npm run load-check
+        env:
+          DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install

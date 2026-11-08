@@ -6,12 +6,15 @@
  *   npm run load-check                     # 使用基线版本（src/dsh/versions.js）
  *   DSH_VERSION=0.2.3 npm run load-check   # 测试其他版本
  *   DSH_BIN=/path/to/dsh-entry.js npm run load-check   # 使用已安装的 DSH（指向 JS 入口文件）
+ *   DSH_INSTALL_DIR=/path/to/dir npm run load-check    # 把 DSH 装在这个目录并复用（CI 用它做缓存）
+ *
+ * 前置条件：PATH 上要有 pnpm。npm 版的 dsh 安装插件时会调用 pnpm。
  *
  * 输出一行 JSON 结果（stdout 最后一行），退出码 0 表示通过。
  * 跨平台：Windows 和 Linux 上都直接用 node 运行 DSH 的 JS 入口，不依赖 shell 和 .cmd 包装。
  */
 import { spawn, execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,19 +29,43 @@ const STARTUP_TIMEOUT_MS = 120_000
 /** @param {string} message */
 const log = (message) => console.error(`[load-check] ${message}`)
 
-/** 安装指定版本的 DSH，返回其 JS 入口文件路径。 */
+/** npm 版的 dsh 安装插件时会调用 pnpm；找不到就尽早给出明确的提示。 */
+function assertPnpm() {
+  try {
+    const version = execFileSync('pnpm', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' }).trim()
+    log(`pnpm ${version}`)
+  } catch {
+    throw new Error('PATH 上找不到 pnpm。npm 版的 dsh 安装插件时需要 pnpm，请先运行：npm install -g pnpm')
+  }
+}
+
+/** 读取已安装的 DSH 的版本和 JS 入口；没有安装时返回 undefined。 */
+function readInstalledDsh(/** @type {string} */ dir) {
+  const pkgPath = join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+  if (!existsSync(pkgPath)) return undefined
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+  const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.dsh
+  if (typeof bin !== 'string') throw new Error('找不到 @deepseek-ai/dsh 的 bin 入口')
+  return { entry: join(dirname(pkgPath), bin), version: String(pkg.version) }
+}
+
+/** 安装指定版本的 DSH（目录里已有同版本时直接复用），返回其 JS 入口文件路径。 */
 function installDsh(/** @type {string} */ dir) {
+  mkdirSync(dir, { recursive: true })
+  const existing = readInstalledDsh(dir)
+  if (existing?.version === DSH_VERSION) {
+    log(`复用已安装的 @deepseek-ai/dsh@${existing.version}（${dir}）`)
+    return existing
+  }
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'dsh-load-check', private: true }))
   log(`安装 @deepseek-ai/dsh@${DSH_VERSION} ...`)
   const npmCli = process.env.npm_execpath
   const args = ['install', '--no-audit', '--no-fund', '--loglevel=error', `@deepseek-ai/dsh@${DSH_VERSION}`]
   if (npmCli && npmCli.endsWith('.js')) execFileSync(process.execPath, [npmCli, ...args], { cwd: dir, stdio: 'inherit' })
   else execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { cwd: dir, stdio: 'inherit', shell: process.platform === 'win32' })
-  const pkgPath = join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
-  const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.dsh
-  if (typeof bin !== 'string') throw new Error('找不到 @deepseek-ai/dsh 的 bin 入口')
-  return { entry: join(dirname(pkgPath), bin), version: String(pkg.version) }
+  const installed = readInstalledDsh(dir)
+  if (!installed) throw new Error('安装 @deepseek-ai/dsh 后找不到它的 package.json')
+  return installed
 }
 
 /**
@@ -99,9 +126,10 @@ async function main() {
   /** @type {import('node:child_process').ChildProcess | undefined} */
   let child
   try {
+    assertPnpm()
     const dsh = process.env.DSH_BIN
       ? { entry: process.env.DSH_BIN, version: DSH_VERSION }
-      : installDsh(work)
+      : installDsh(process.env.DSH_INSTALL_DIR || join(work, 'dsh'))
     log(`DSH ${dsh.version}，把插件装进 web profile ...`)
     runDsh(dsh.entry, ['plugin', '--profile', 'web', 'add', '-w', PLUGIN_DIR], env, cwd)
 

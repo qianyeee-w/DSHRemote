@@ -13,7 +13,10 @@ npm test             # 单元测试：node --test test/unit
 npm run check        # 以上三项一起跑。提交前必须通过
 npm run load-check   # 把插件装进真实的 dsh web（基线版本），确认插件被加载且处于 active 状态
                      # DSH_VERSION=0.2.3 指定其他版本；DSH_BIN=<dsh 的 JS 入口> 复用已安装的 DSH
+                     # DSH_INSTALL_DIR=<目录> 把 DSH 装在固定目录并复用，避免每次重新安装
 ```
+
+`load-check` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
 
 以下命令在后续任务中加入：`npm run contract`（T6，DSH 接口契约测试）、`npm run e2e`（T9，端到端测试）。
 
@@ -51,7 +54,7 @@ plugin/
 ## 安装方式
 
 - **官方 Desktop**：先在插件目录下运行 `npm install --omit=dev`，再在 Desktop 中打开「插件 → 安装第三方插件」，填写插件目录的绝对路径。npm 版的 `dsh` 命令不允许管理 `desktop` profile。
-- **`dsh web`**：`dsh plugin --profile web add -w <插件目录的绝对路径>`
+- **`dsh web`**：`dsh plugin --profile web add -w <插件目录的绝对路径>`（需要 PATH 上有 pnpm）
 
 ## 可复用的参考实现
 

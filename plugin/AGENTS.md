@@ -11,7 +11,8 @@ cd plugin
 npm install
 npm test          # 单元测试：node --test
 npm run lint
-npm run e2e       # 端到端测试：用真实的 DSH 0.2.2-rc.1，tailscale 等外部命令用假程序代替
+npm run contract  # DSH 接口契约测试；DSH_VERSION=0.2.3 npm run contract 可测试其他版本
+npm run e2e       # 端到端测试：用真实的 DSH 0.2.2-rc.1
 ```
 
 ## 目录
@@ -25,14 +26,20 @@ plugin/
 │   ├── tls.js          # 证书生成、指纹计算
 │   ├── pairing.js      # 配对码、设备 token、设备存储
 │   ├── server.js       # 局域网 HTTPS / WSS 服务
-│   ├── dsh-session.js  # 持有 DSH 官方会话、转发请求
+│   ├── dsh/            # DSH 适配层：所有对 DSH 的调用只能写在这里
+│   │   ├── versions.js # 支持的 DSH 版本范围（唯一定义处）与启动时的版本检查
+│   │   └── ...         # 持有 DSH 官方会话、转发或封装 DSH 接口
 │   └── admin-page.js   # 本机配对页（只监听 127.0.0.1）
 └── test/
+    ├── unit/
+    └── contract/       # DSH 接口契约测试：DSH_VERSION 指定版本，输出 JSON 结果
 ```
 
 ## 约定
 
 - 使用的 DSH 服务只有 `webServer` 和 `connection`，写在 `inject` 里。不允许访问其他私有字段。
+- **所有对 DSH 的调用都必须放在 `src/dsh/` 适配层里**，其他模块只能调用适配层，不能直接访问 DSH。支持的 DSH 版本范围只在 `src/dsh/versions.js` 中定义一次。这是为以后的「DSH 新版本自动适配」预留的设计，见 `docs/roadmap.md`。
+- 契约测试（`test/contract/`）只测试插件实际用到的 DSH 接口。通过 `DSH_VERSION` 环境变量选择要测试的 DSH 版本，测试结果输出为机器可读的 JSON。
 - DSH 的端口每次启动都可能变化，**每个请求都要实时读取** `ctx.webServer.port`，不要缓存。
 - 插件的生命周期用 `ctx.effect()` 管理。插件加载时不要阻塞等待 DSH 启动，在后台轮询即可。
 - 安装方式：Desktop 用「插件 → 安装第三方插件」，填本地绝对路径。npm 版的 `dsh` 命令不允许管理 `desktop` profile。

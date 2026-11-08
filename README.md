@@ -22,6 +22,7 @@
 - [App ↔ 插件 接口约定](docs/protocol.md)
 - [安全模型](docs/security.md)
 - [架构决策](docs/decisions/README.md)
+- [后续优化方向](docs/roadmap.md)
 - [开发指南（给人和 agent）](AGENTS.md)
 
 ## 适配版本

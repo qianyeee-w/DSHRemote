@@ -25,6 +25,7 @@ Android App ──HTTPS / WSS（证书指纹固定 + 设备 token）──> 电�
 | `docs/protocol.md` | App ↔ 插件 的接口约定（单一事实来源） |
 | `docs/security.md` | 威胁模型与安全红线 |
 | `docs/decisions/` | 已确定的架构决策（ADR）；要推翻某条决策，先新写一条 ADR，不要直接改代码 |
+| `docs/roadmap.md` | 后续优化方向，以及 **v1 必须遵守的预留设计** |
 
 各子项目自己的命令和约定写在 `plugin/AGENTS.md` 和 `android/AGENTS.md` 里。
 

@@ -5,13 +5,18 @@
  */
 import { spawn } from 'node:child_process'
 
-/** @param {string} url */
+/**
+ * @param {string} url
+ * @returns {Promise<boolean>} 打开浏览器的进程是否成功启动（不保证浏览器真的显示了页面）
+ */
 export function openInBrowser(url) {
-  if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(url)) throw new Error('只允许打开本机配对页')
+  if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(url)) return Promise.reject(new Error('只允许打开本机配对页'))
   const [command, args] = process.platform === 'win32'
     ? ['rundll32.exe', ['url.dll,FileProtocolHandler', url]]
     : ['xdg-open', [url]]
-  const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true })
-  child.on('error', () => { /* 没有可用的浏览器时忽略 */ })
-  child.unref()
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true })
+    child.once('spawn', () => { child.unref(); resolve(true) })
+    child.once('error', () => resolve(false)) // 没有可用的浏览器（例如没有图形界面的服务器）
+  })
 }

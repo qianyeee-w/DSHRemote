@@ -122,8 +122,10 @@ export function apply(ctx, rawConfig) {
     if (config.openAdminOnFirstRun) {
       const state = /** @type {{ adminOpenedAt?: number } | undefined} */ (await storage.readJson(STATE_FILE))
       if (!state?.adminOpenedAt) {
-        await storage.writeJson(STATE_FILE, { ...state, adminOpenedAt: Date.now() })
-        try { openInBrowser(admin.url) } catch (error) { log('warn', `无法自动打开配对页：${String(error)}`) }
+        // 浏览器进程启动成功后才记下「已经打开过」，启动失败时下次加载还会再试
+        const opened = await openInBrowser(admin.url).catch(() => false)
+        if (opened) await storage.writeJson(STATE_FILE, { ...state, adminOpenedAt: Date.now() })
+        else log('warn', `无法自动打开配对页，请手动访问 ${admin.url}`)
       }
     }
 

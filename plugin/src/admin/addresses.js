@@ -3,9 +3,14 @@
  * 选出可以放进配对二维码的本机地址。
  *
  * 优先级：家用局域网常见网段（192.168/16 → 10/8 → 172.16/12）→ 100.64/10（Tailscale 等 CGNAT 网段）→ 其他 IPv4。
+ * 虚拟机、容器、WSL 等虚拟网卡（按网卡名识别）排在所有真实网卡之后：它们的地址手机访问不到，
+ * T10 实测 VMware 的 VMnet1（192.168.142.1）曾排在以太网前面。
  * 只列 IPv4：手机端手动输入和扫码时都更直观。
  */
 import { networkInterfaces } from 'node:os'
+
+/** 虚拟网卡的名字（Windows 和 Linux 上常见的） */
+const VIRTUAL_INTERFACE = /vmware|vmnet|virtualbox|vbox|hyper-v|vethernet|wsl|docker|podman|^br-|^veth|^virbr|^lxc|^lxd|^cni|^flannel|^tap|^utun|loopback|npcap/i
 
 /**
  * @param {string} ip
@@ -42,5 +47,7 @@ export function lanAddresses(lanBind, interfaces = networkInterfaces()) {
       if (!found.some((f) => f.address === entry.address)) found.push({ address: entry.address, interfaceName })
     }
   }
-  return found.sort((x, y) => rank(x.address) - rank(y.address) || x.address.localeCompare(y.address))
+  /** @param {LanAddress} a */
+  const score = (a) => (VIRTUAL_INTERFACE.test(a.interfaceName) ? 100 : 0) + rank(a.address)
+  return found.sort((x, y) => score(x) - score(y) || x.address.localeCompare(y.address))
 }

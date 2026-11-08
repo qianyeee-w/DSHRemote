@@ -23,7 +23,10 @@ const SECURITY_HEADERS = Object.freeze({
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   'x-frame-options': 'DENY',
   'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
+  // 不能用 no-referrer：按 Fetch 标准，页面的 Referrer-Policy 为 no-referrer 时，浏览器提交表单（POST）发出的
+  // Origin 是 "null"，会被下面的来源校验拒绝（T10 在 Edge 上实测）。same-origin 只对本页发送来源信息，
+  // 跳到其他网站时仍然不带 Referer，效果相同。
+  'referrer-policy': 'same-origin',
   'cross-origin-resource-policy': 'same-origin',
 })
 

@@ -19,6 +19,8 @@ npm run contract     # DSH 接口契约测试：假模型服务驱动真实 dsh 
                      # 环境变量同 load-check；stdout 最后一行是 JSON 结果，失败的项目就是适配层要改的地方
 npm run e2e          # 端到端测试：插件装进真实 dsh web，模拟手机走完配对 → 实时流 → 流式输出 → 任务完成通知
                      # → 提问和审批（含在 Desktop 上处理）→ DSH 重启后恢复 → 撤销设备。环境变量同 load-check
+npm run browser-check     # 用系统安装的 Chrome（BROWSER_CHANNEL=msedge 用 Edge）点一遍配对页上的按钮
+                     # 单元测试用 Node 客户端手动设置 Origin，测不出浏览器的行为；改配对页时必须跑
 node scripts/verify.mjs   # 真机验证：检查装在官方 Desktop（或 dsh web）里的插件，模拟手机走一遍对外接口
                      # 用法见 docs/plans/m1-windows-verification.md；输出的 JSON 不含 token 和配对码
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
@@ -27,7 +29,7 @@ npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数�
 
 `load-check`、`contract`、`e2e` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
 
-**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载时，还要跑通 `npm run load-check`；改动涉及 DSH 接口（`src/dsh/`）时，还要跑通 `npm run contract`；改动涉及实时流、配对或对外接口时，还要跑通 `npm run e2e`。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
+**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载时，还要跑通 `npm run load-check`；改动涉及 DSH 接口（`src/dsh/`）时，还要跑通 `npm run contract`；改动涉及实时流、配对或对外接口时，还要跑通 `npm run e2e`；改动涉及配对页时，还要跑通 `npm run browser-check`。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
 
 ## 目录
 
@@ -77,6 +79,7 @@ plugin/
     ├── fixtures/         # 从真实 DSH 录制的数据（npm run capture-fixtures），按 DSH 版本分目录
     ├── load/             # 加载检查：装进真实 dsh web，确认 active、连上 DSH，并按指纹访问 /v1/info
     ├── e2e/              # 端到端测试：模拟手机，只通过插件对外的接口和本机配对页操作
+    ├── browser/          # 真实浏览器操作配对页（playwright-core，使用系统安装的 Chrome / Edge）
     └── contract/         # 契约测试：fake-llm.mjs（假模型服务）+ contract.mjs；capture-fixtures.mjs（录制测试数据）
 ```
 

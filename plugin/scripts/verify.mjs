@@ -44,6 +44,9 @@ const HOST = args.host ?? '127.0.0.1'
 /** --keep 保存的临时设备。只在本机用户目录下，不在仓库里（安全红线 5） */
 const STATE_FILE = join(homedir(), '.dshremote-verify.json')
 
+const PORT_HINT = `可能是插件没有加载、端口改过（请加 --admin-port / --lan-port），或者端口被其他程序占用，例如 VS Code 的端口转发。`
+  + `在 PowerShell 中运行 Get-NetTCPConnection -LocalPort ${ADMIN_PORT},${LAN_PORT} -State Listen 查看占用端口的进程（OwningProcess），见验证文档的「端口被占用」一节`
+
 /** @type {{ name: string, ok: boolean, detail?: string }[]} */
 const results = []
 /** @type {Record<string, unknown>} */
@@ -120,9 +123,9 @@ async function main() {
     console.log('本机配对页')
     const pageOk = await check('配对页可以打开', async () => {
       const page = /** @type {{ status: number, body: string }} */ (await admin('/').catch((error) => {
-        throw new Error(`连不上 http://127.0.0.1:${ADMIN_PORT}（${error.message}）。插件可能没有加载，或者端口被改过`)
+        throw new Error(`连不上 http://127.0.0.1:${ADMIN_PORT}（${error.message}）。${PORT_HINT}`)
       }))
-      if (page.status !== 200) throw new Error(`返回 ${page.status}`)
+      if (page.status !== 200 || !page.body.includes('DSHRemote')) throw new Error(`返回的不是 DSHRemote 的配对页（HTTP ${page.status}）。${PORT_HINT}`)
       const fp = page.body.match(/<strong>([A-Za-z0-9_-]{8})<\/strong>([A-Za-z0-9_-]+)<br>/)
       if (!fp) throw new Error('页面上没有证书指纹')
       device.fingerprint = `${fp[1]}${fp[2]}`

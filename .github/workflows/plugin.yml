@@ -43,6 +43,12 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # 用 runner 上预装的浏览器点一遍配对页（Edge 只在 Windows 上测，T10 的问题是在 Edge 上发现的）
+      - run: npm run browser-check
+      - if: runner.os == 'Windows'
+        run: npm run browser-check
+        env:
+          BROWSER_CHANNEL: msedge
 
   load:
     name: load + contract + e2e in real dsh web (${{ matrix.os }})

@@ -93,7 +93,8 @@ test('页面：安全响应头齐全，没有脚本', async () => {
   assert.match(String(res.headers['content-security-policy']), /frame-ancestors 'none'/)
   assert.equal(res.headers['x-frame-options'], 'DENY')
   assert.equal(res.headers['cache-control'], 'no-store')
-  assert.equal(res.headers['referrer-policy'], 'no-referrer')
+  // 【回归】no-referrer 会让浏览器提交表单时发送 Origin: null，配对页就无法生成配对码（T10 在 Edge 上发现）
+  assert.equal(res.headers['referrer-policy'], 'same-origin')
   assert.doesNotMatch(res.body, /<script/i)
   assert.match(res.body, /AbCdEfGh/) // 指纹前 8 位
   assert.match(res.body, /0\.2\.2-rc\.1/) // DSH 版本
@@ -237,12 +238,29 @@ test('地址排序：家用局域网优先，跳过回环和 IPv6；指定监听
     eth0: [{ family: 'IPv4', address: '192.168.1.20', internal: false }, { family: 'IPv6', address: 'fe80::1', internal: false }],
     wlan0: [{ family: 'IPv4', address: '10.0.0.5', internal: false }],
   }
-  assert.deepEqual(lanAddresses('0.0.0.0', interfaces).map((a) => a.address), ['192.168.1.20', '10.0.0.5', '172.17.0.1', '100.101.2.3'])
+  // docker0 是虚拟网卡，排在 Tailscale 后面
+  assert.deepEqual(lanAddresses('0.0.0.0', interfaces).map((a) => a.address), ['192.168.1.20', '10.0.0.5', '100.101.2.3', '172.17.0.1'])
   assert.deepEqual(lanAddresses('10.0.0.5', interfaces).map((a) => a.address), ['10.0.0.5'])
 })
 
-test('只允许用浏览器打开本机配对页', () => {
-  assert.throws(() => openInBrowser('http://evil.example/'), /只允许/)
-  assert.throws(() => openInBrowser('file:///etc/passwd'), /只允许/)
-  assert.throws(() => openInBrowser('http://127.0.0.1:3191/x'), /只允许/)
+test('【回归】地址排序：Windows 上虚拟机、WSL 的虚拟网卡排在真实网卡后面（T10 中 VMnet1 曾排在以太网前面）', () => {
+  /** @type {any} */
+  const interfaces = {
+    'VMware Network Adapter VMnet1': [{ family: 'IPv4', address: '192.168.142.1', internal: false }],
+    'VMware Network Adapter VMnet8': [{ family: 'IPv4', address: '192.168.80.1', internal: false }],
+    'vEthernet (WSL (Hyper-V firewall))': [{ family: 'IPv4', address: '172.25.0.1', internal: false }],
+    'VirtualBox Host-Only Network': [{ family: 'IPv4', address: '192.168.56.1', internal: false }],
+    以太网: [{ family: 'IPv4', address: '192.168.3.25', internal: false }],
+    Tailscale: [{ family: 'IPv4', address: '100.88.1.2', internal: false }],
+    'Loopback Pseudo-Interface 1': [{ family: 'IPv4', address: '127.0.0.1', internal: true }],
+  }
+  const order = lanAddresses('0.0.0.0', interfaces).map((a) => a.interfaceName)
+  assert.deepEqual(order.slice(0, 2), ['以太网', 'Tailscale'])
+  assert.ok(order.slice(2).every((name) => /VMware|vEthernet|VirtualBox/.test(name)))
+})
+
+test('只允许用浏览器打开本机配对页', async () => {
+  await assert.rejects(openInBrowser('http://evil.example/'), /只允许/)
+  await assert.rejects(openInBrowser('file:///etc/passwd'), /只允许/)
+  await assert.rejects(openInBrowser('http://127.0.0.1:3191/x'), /只允许/)
 })

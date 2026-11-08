@@ -161,8 +161,8 @@ node scripts/verify.mjs --prompt
 
 ## 8. 停用插件
 
-1. 在 Desktop 的插件列表中**停用** `dshremote`。
-2. 在 PowerShell 中确认端口已经关闭：
+1. 在 Desktop 的插件列表中**停用** `dshremote`，等几秒钟。
+2. 在 PowerShell 中确认端口已经关闭（端口改过的话，换成实际的端口）：
 
    ```powershell
    Test-NetConnection 127.0.0.1 -Port 3190
@@ -170,6 +170,24 @@ node scripts/verify.mjs --prompt
 
    `TcpTestSucceeded` 应为 `False`。配对页 `http://127.0.0.1:3191` 也应该打不开。
 3. 重新启用插件。配对页应能再次打开，之前配对过的设备仍然有效。
+
+## 常见问题：端口被占用
+
+插件默认使用 3190（局域网 HTTPS）和 3191（配对页）。如果这两个端口已经被别的程序占用，插件会启动失败，配对页打不开，或者打开的是别的程序的页面。
+
+**最常见的原因是 VS Code 的端口转发。** 用 VS Code Remote-SSH 连着 Linux 服务器时，VS Code 会把服务器上监听的端口自动转发到 Windows 本机。如果服务器上运行过装了插件的 `dsh web`，Windows 上的 3190、3191 就会被 `Code.exe` 占用。
+
+查看占用端口的进程：
+
+```powershell
+Get-NetTCPConnection -LocalPort 3190,3191 -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess
+Get-Process -Id <OwningProcess>
+```
+
+解决办法任选其一：
+
+- 在 VS Code 的「端口」面板中停止转发这两个端口。也可以在设置中把 `remote.autoForwardPorts` 设为 `false`，关闭自动转发。
+- 在 Desktop 的插件配置中，把 `lanPort`、`adminPort` 改为其他端口。改了之后，运行验证脚本时要加上 `--lan-port`、`--admin-port`。
 
 ## 9. 发给开发者
 

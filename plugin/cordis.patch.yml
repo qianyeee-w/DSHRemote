@@ -1,0 +1,10 @@
+# DSHRemote 插件：一行 Host 侧插件。
+# 要覆盖配置，在 profile 自己的 cordis.patch.yml 中按 id 整行替换，并写全所有键：
+#   - id: dshremote
+#     name: dshremote
+#     config: { ... }
+- insert:
+    - id: dshremote
+      name: dshremote
+      config:
+        enabled: true

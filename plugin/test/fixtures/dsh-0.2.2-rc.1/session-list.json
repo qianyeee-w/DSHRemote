@@ -1,0 +1,116 @@
+{
+  "items": [
+    {
+      "sessionId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      "updatedAt": 1794122224105,
+      "agentAvailable": true,
+      "formatStatus": "current",
+      "running": false,
+      "blank": false,
+      "cwd": "/tmp/dshremote-rt-uTSOSR/workspace",
+      "projections": {
+        "kind": "sequenced",
+        "asOfSeq": 89,
+        "values": {
+          "userQuestions": {
+            "active": [],
+            "settled": []
+          },
+          "tokenUsage": {
+            "uncachedInputTokens": 80,
+            "outputTokens": 88,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "title": "你好，这是假模型的回复。",
+          "agentPreset": "standard",
+          "goal": null,
+          "modelSelection": {
+            "lastUsed": {
+              "provider": "deepseek-official",
+              "model": "deepseek-flash"
+            },
+            "next": {
+              "provider": "deepseek-official",
+              "model": "deepseek-flash"
+            }
+          },
+          "workingDirectory": "/tmp/dshremote-rt-uTSOSR/workspace",
+          "inbox": {
+            "next-turn": [],
+            "next-step": []
+          },
+          "permissions": {
+            "currentValue": "workspace-write"
+          },
+          "subagentCatalog": [],
+          "subagentTiming": {
+            "settledMs": 0
+          },
+          "subagent": null,
+          "plan": {
+            "active": false,
+            "pending": false
+          },
+          "sessionListMetadata": {
+            "blank": false,
+            "lastPromptAt": 1794122224105
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "session-86b67b72-af95-4915-b5bc-607dbb876642",
+      "updatedAt": 1794122222943,
+      "agentAvailable": true,
+      "formatStatus": "current",
+      "running": false,
+      "blank": true,
+      "cwd": "/tmp/dshremote-rt-uTSOSR/workspace",
+      "projections": {
+        "kind": "sequenced",
+        "asOfSeq": 2,
+        "values": {
+          "userQuestions": {
+            "active": [],
+            "settled": []
+          },
+          "tokenUsage": {
+            "uncachedInputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "title": null,
+          "agentPreset": "standard",
+          "goal": null,
+          "modelSelection": {
+            "lastUsed": null,
+            "next": null
+          },
+          "workingDirectory": "/tmp/dshremote-rt-uTSOSR/workspace",
+          "inbox": {
+            "next-turn": [],
+            "next-step": []
+          },
+          "permissions": {
+            "currentValue": "workspace-write"
+          },
+          "subagentCatalog": [],
+          "subagentTiming": {
+            "settledMs": 0
+          },
+          "subagent": null,
+          "plan": {
+            "active": false,
+            "pending": false
+          },
+          "sessionListMetadata": {
+            "blank": true,
+            "lastPromptAt": null
+          }
+        }
+      }
+    }
+  ]
+}

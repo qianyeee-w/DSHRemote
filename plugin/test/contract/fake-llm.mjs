@@ -7,6 +7,7 @@
  *   "ASK"   → 调用 ask_user_question
  *   "SHELL" → 调用 shell 工具（名称从请求的 tools 里自动找）
  *   "SLOW"  → 慢慢输出很长的文本，用来测试取消
+ *   "THINK" → 先输出一段思考（thinking），再回复文本
  *   其他     → 直接回复一段文本（包含 FAKE_REPLY）
  * 收到 tool_result 后回复一段文本结束本轮。
  */
@@ -41,6 +42,22 @@ function textReply(res, text, delayMs = 0) {
     ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }],
     ['message_stop', { type: 'message_stop' }],
   ], delayMs)
+}
+
+/** @param {http.ServerResponse} res @param {string} thinking @param {string} text */
+function thinkingReply(res, thinking, text) {
+  return sse(res, [
+    messageStart('msg_think'),
+    ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } }],
+    ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking } }],
+    ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } }],
+    ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+    ['content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }],
+    ['content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text } }],
+    ['content_block_stop', { type: 'content_block_stop', index: 1 }],
+    ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 8 } }],
+    ['message_stop', { type: 'message_stop' }],
+  ])
 }
 
 /** @param {http.ServerResponse} res @param {string} name @param {unknown} input */
@@ -104,6 +121,8 @@ export async function startFakeLlm() {
           sandbox_permissions: 'danger-full-access',
           justification: '验证审批流程',
         })
+      } else if (text.includes('THINK')) {
+        void thinkingReply(res, '用户想让我想一想。', '想好了。')
       } else if (text.includes('SLOW')) {
         void textReply(res, '慢'.repeat(600), 100)
       } else {

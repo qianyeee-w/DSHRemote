@@ -2,6 +2,7 @@
 /**
  * 通过真实的 TLS 服务、按指纹固定的客户端，走完配对与认证的整个流程。
  */
+import { unusedFacade } from '../helpers/stub-facade.js'
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
@@ -31,7 +32,7 @@ beforeEach(async () => {
   /** @type {{ event: string, detail?: Record<string, string> }[]} */
   const audit = []
   const router = createRouter({
-    dshStatus: () => ({ version: null, compatible: null }),
+    dshStatus: () => ({ version: null, compatible: null }), facade: unusedFacade,
     codes,
     devices,
     audit: (event, detail) => audit.push({ event, ...(detail ? { detail } : {}) }),

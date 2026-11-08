@@ -88,20 +88,28 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | POST | `/v1/pair` | 无需认证 | 见 2.4 |
 | GET | `/v1/me` | 需要 | 当前设备的信息：`{ deviceId, name, platform, createdAt }` |
 | DELETE | `/v1/me` | 需要 | 设备自行取消配对，成功返回 `204`，之后 token 立即失效 |
-| GET | `/v1/workspaces` | 需要 | 工作区列表 |
-| GET | `/v1/sessions` | 需要 | 会话列表，每项的结构见 5.1 |
+| GET | `/v1/workspaces` | 需要 | 工作区列表：`{ workspaces: [{ workspaceId, title, path }] }` |
+| GET | `/v1/sessions` | 需要 | 会话列表：`{ sessions: [...] }`，每项的结构见 5.1。已归档的会话不出现（和 Desktop 一致） |
 | POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
-| GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，返回 `{ messages, hasMore, cursor }`，消息结构见 5.2 |
+| GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor }`，消息结构见 5.2。见下方「历史分页」 |
 | POST | `/v1/sessions/{id}/prompt` | 需要 | `{ requestId, text, mode: "queue" \| "steer" }`。`requestId` 由 App 生成，用于防止重复提交 |
 | POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务 |
-| GET | `/v1/models` | 需要 | 可选的模型列表 |
+| GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description? }] }` |
 | POST | `/v1/sessions/{id}/model` | 需要 | 切换模型 `{ provider, model }` |
-| GET | `/v1/permission-presets` | 需要 | 权限模式列表 |
+| GET | `/v1/permission-presets` | 需要 | 权限模式列表：`{ default: string \| null, presets: [{ id, name }] }`，例如 `read-only`、`workspace-write`、`danger-full-access` |
 | POST | `/v1/sessions/{id}/permission-preset` | 需要 | 切换权限模式 **[待定]**：DSH 侧对应哪个接口还要在 M1 中确认 |
 | POST | `/v1/attention/{attentionId}/answer` | 需要 | 处理审批或回答提问，见 5.3 |
 | GET | `/v1/stream` | 需要 | WebSocket，所有实时数据都走这一条连接，见第 6 节 |
 
 设备的列表和撤销**只在本机配对页上提供**，不开放给局域网访问。
+
+路径中的 `{id}` 只能由字母、数字、`_`、`-` 组成（最长 128 个字符），否则返回 `404`。
+
+**历史分页**
+
+- `limit`：本页最多包含多少条 DSH 消息，默认 50，范围 1–200。插件会过滤掉 DSH 内部注入的消息，所以返回的 `messages` 可能少于 `limit`，甚至为空，这不代表已经翻到底。**是否还有更早的消息只看 `hasMore`**。
+- `cursor`：不透明的字符串，App 不要解析它。`hasMore` 为 `true` 时，把它作为下一次请求的 `before`，取更早的一页；`hasMore` 为 `false` 时为 `null`。
+- 不带 `before` 时返回最新的一页。同一个会话的各页按顺序拼起来，就是完整的历史，不会重复，也不会把一次工具调用拆到两页里。
 
 插件内部通过 DSH 官方的 Remote API 实现以上接口，转换逻辑都在 `plugin/src/dsh/` 中。具体对应关系见 [调研文档](research/dsh-session-api.md) 第 4 节。**App 永远拿不到 DSH 的 cookie 或启动 token。**
 
@@ -113,13 +121,15 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 {
   "sessionId": "session-…",
   "title": "修复登录页样式",
-  "workspaceId": "…",
+  "workspaceId": "… 或 null",
   "cwd": "/home/me/project",
   "status": "running | waiting | idle",
   "attention": [{ "attentionId": "…", "kind": "approval | question" }],
   "updatedAt": 1794107669094
 }
 ```
+
+`title` 在会话还没有标题时为 `null`（App 显示为「新会话」）；`workspaceId` 在会话没有归入任何工作区时为 `null`。
 
 `status` 为 `waiting` 表示有未处理的审批或提问（`attention` 不为空）。会话列表按「waiting → running → idle」排序，同一状态内按 `updatedAt` 倒序。
 
@@ -140,8 +150,12 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 }
 ```
 
+- 只包含用户亲自输入的消息和模型的回复。DSH 自动注入的消息（运行时上下文、时间上下文、系统提示等）不显示。
+- 用户消息中的图片和文件，v1 用占位文字表示（`[图片]`、`[文件：a.txt]`）。
 - `thinking` 和 `tool` 在 App 中默认折叠显示。
-- 工具的 `input` 和 `output` 可能很大，插件按上限截断，并标记 `truncated: true` **[待定：上限多少]**。
+- 工具的 `status`：`running` 还在执行；`done` 成功；`error` 失败，或者没执行完这一轮就结束了（例如被停止）；`rejected` 审批被拒绝。
+- 工具的 `summary` 是一行给人看的说明（例如「运行命令：npm test」「读取：src/a.js」），插件不认识的工具只显示工具名。
+- 工具的 `input` 和 `output` 可能很大，插件按上限截断，并标记 `truncated: true`：`input` 中每个字符串字段最多 2,000 个字符，`output` 最多 8,000 个字符，截断处以 `…` 结尾。
 - DSH 的内部事件和遥测事件（如 `request/header`、`session-log-*`）**不转发给 App**。
 
 ### 5.3 待处理事项（attention）
@@ -222,7 +236,8 @@ App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 | `PAIRING_LOCKED` | 429 | 输错次数过多，接口暂时锁定（带 `Retry-After`） |
 | `PAIRING_DEVICE_LIMIT` | 409 | 已配对设备达到上限（20 台） |
 | `ATTENTION_RESOLVED` | 409 | 这项审批或提问已经在别处处理掉了 |
-| `DSH_UNAVAILABLE` | 503 | DSH 还没启动完成 |
+| `DSH_UNAVAILABLE` | 503 | DSH 还没启动完成，或插件暂时连不上 DSH |
+| `DSH_ERROR` | 502 | DSH 拒绝了这个操作，或返回了插件无法处理的结果（`message` 中只带 DSH 的错误码，不带原始错误信息） |
 | `DSH_INCOMPATIBLE` | 503 | DSH 版本不兼容 |
 | `NOT_FOUND` | 404 | 接口不存在（也用于会话或待处理事项不存在） |
 | `METHOD_NOT_ALLOWED` | 405 | 不支持该请求方法，`Allow` 响应头列出支持的方法 |

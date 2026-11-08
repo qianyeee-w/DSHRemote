@@ -1,0 +1,21 @@
+{
+  "type": "waterfall",
+  "event": "approval/request",
+  "eventId": "36779935-9eb7-43d7-aafd-fad0724e2f86",
+  "agentId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+  "request": {
+    "toolName": "bash",
+    "callId": "toolu_1794122223660",
+    "reason": "escalate sandbox to danger-full-access: 验证审批流程",
+    "displayReason": {
+      "en": "Allow this operation with danger-full-access permissions: 验证审批流程",
+      "zh": "允许本次操作使用 danger-full-access 权限：验证审批流程",
+      "ja": "danger-full-access 権限でこの操作を許可します：验证审批流程",
+      "es": "Permitir esta operación con permisos danger-full-access: 验证审批流程",
+      "fr": "Autoriser cette opération avec les permissions danger-full-access : 验证审批流程",
+      "de": "Diesen Vorgang mit danger-full-access-Berechtigungen zulassen: 验证审批流程",
+      "ru": "Разрешить эту операцию с правами danger-full-access: 验证审批流程",
+      "pt": "Permitir esta operação com permissões danger-full-access: 验证审批流程"
+    }
+  }
+}

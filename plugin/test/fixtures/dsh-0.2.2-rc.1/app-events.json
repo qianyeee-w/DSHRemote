@@ -1,0 +1,448 @@
+[
+  {
+    "type": "emit",
+    "event": "api-session/added",
+    "args": [
+      {
+        "sessionId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+        "updatedAt": 1794122222911,
+        "agentAvailable": false,
+        "formatStatus": "current",
+        "running": false,
+        "blank": true,
+        "cwd": "/tmp/dshremote-rt-uTSOSR/workspace",
+        "projections": {
+          "kind": "sequenced",
+          "asOfSeq": -1,
+          "values": {
+            "userQuestions": {
+              "active": [],
+              "settled": []
+            },
+            "tokenUsage": {
+              "uncachedInputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "title": null,
+            "agentPreset": "standard",
+            "goal": null,
+            "modelSelection": {
+              "lastUsed": null,
+              "next": null
+            },
+            "workingDirectory": "/tmp/dshremote-rt-uTSOSR/workspace",
+            "inbox": {
+              "next-turn": [],
+              "next-step": []
+            },
+            "permissions": {
+              "currentValue": "workspace-write"
+            },
+            "subagentCatalog": [],
+            "subagentTiming": {
+              "settledMs": 0
+            },
+            "subagent": null,
+            "plan": {
+              "active": false,
+              "pending": false
+            },
+            "sessionListMetadata": {
+              "blank": true,
+              "lastPromptAt": null
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/added",
+    "args": [
+      {
+        "sessionId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+        "updatedAt": 1794122222911,
+        "agentAvailable": true,
+        "formatStatus": "current",
+        "running": false,
+        "blank": true,
+        "cwd": "/tmp/dshremote-rt-uTSOSR/workspace",
+        "projections": {
+          "kind": "sequenced",
+          "asOfSeq": 2,
+          "values": {
+            "userQuestions": {
+              "active": [],
+              "settled": []
+            },
+            "tokenUsage": {
+              "uncachedInputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "title": null,
+            "agentPreset": "standard",
+            "goal": null,
+            "modelSelection": {
+              "lastUsed": null,
+              "next": null
+            },
+            "workingDirectory": "/tmp/dshremote-rt-uTSOSR/workspace",
+            "inbox": {
+              "next-turn": [],
+              "next-step": []
+            },
+            "permissions": {
+              "currentValue": "workspace-write"
+            },
+            "subagentCatalog": [],
+            "subagentTiming": {
+              "settledMs": 0
+            },
+            "subagent": null,
+            "plan": {
+              "active": false,
+              "pending": false
+            },
+            "sessionListMetadata": {
+              "blank": true,
+              "lastPromptAt": null
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/added",
+    "args": [
+      {
+        "sessionId": "session-86b67b72-af95-4915-b5bc-607dbb876642",
+        "updatedAt": 1794122222943,
+        "agentAvailable": false,
+        "formatStatus": "current",
+        "running": false,
+        "blank": true,
+        "cwd": "/tmp/dshremote-rt-uTSOSR/workspace",
+        "projections": {
+          "kind": "sequenced",
+          "asOfSeq": -1,
+          "values": {
+            "userQuestions": {
+              "active": [],
+              "settled": []
+            },
+            "tokenUsage": {
+              "uncachedInputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "title": null,
+            "agentPreset": "standard",
+            "goal": null,
+            "modelSelection": {
+              "lastUsed": null,
+              "next": null
+            },
+            "workingDirectory": "/tmp/dshremote-rt-uTSOSR/workspace",
+            "inbox": {
+              "next-turn": [],
+              "next-step": []
+            },
+            "permissions": {
+              "currentValue": "workspace-write"
+            },
+            "subagentCatalog": [],
+            "subagentTiming": {
+              "settledMs": 0
+            },
+            "subagent": null,
+            "plan": {
+              "active": false,
+              "pending": false
+            },
+            "sessionListMetadata": {
+              "blank": true,
+              "lastPromptAt": null
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/added",
+    "args": [
+      {
+        "sessionId": "session-86b67b72-af95-4915-b5bc-607dbb876642",
+        "updatedAt": 1794122222943,
+        "agentAvailable": true,
+        "formatStatus": "current",
+        "running": false,
+        "blank": true,
+        "cwd": "/tmp/dshremote-rt-uTSOSR/workspace",
+        "projections": {
+          "kind": "sequenced",
+          "asOfSeq": 2,
+          "values": {
+            "userQuestions": {
+              "active": [],
+              "settled": []
+            },
+            "tokenUsage": {
+              "uncachedInputTokens": 0,
+              "outputTokens": 0,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "title": null,
+            "agentPreset": "standard",
+            "goal": null,
+            "modelSelection": {
+              "lastUsed": null,
+              "next": null
+            },
+            "workingDirectory": "/tmp/dshremote-rt-uTSOSR/workspace",
+            "inbox": {
+              "next-turn": [],
+              "next-step": []
+            },
+            "permissions": {
+              "currentValue": "workspace-write"
+            },
+            "subagentCatalog": [],
+            "subagentTiming": {
+              "settledMs": 0
+            },
+            "subagent": null,
+            "plan": {
+              "active": false,
+              "pending": false
+            },
+            "sessionListMetadata": {
+              "blank": true,
+              "lastPromptAt": null
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      true
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/activity",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      1794122223129
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      false
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      true
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/activity",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      1794122223311
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      false
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      true
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/activity",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      1794122223430
+    ]
+  },
+  {
+    "type": "waterfall",
+    "event": "user-questions/request",
+    "eventId": "5e1daef6-bf34-4651-ae97-8af1e780c90e",
+    "agentId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+    "request": {
+      "questions": [
+        {
+          "id": "q1",
+          "question": "用哪种方案？",
+          "header": "选择",
+          "options": [
+            {
+              "label": "方案A"
+            },
+            {
+              "label": "方案B"
+            }
+          ],
+          "multiSelect": false
+        }
+      ]
+    }
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      false
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      true
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/activity",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      1794122223651
+    ]
+  },
+  {
+    "type": "waterfall",
+    "event": "approval/request",
+    "eventId": "36779935-9eb7-43d7-aafd-fad0724e2f86",
+    "agentId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+    "request": {
+      "toolName": "bash",
+      "callId": "toolu_1794122223660",
+      "reason": "escalate sandbox to danger-full-access: 验证审批流程",
+      "displayReason": {
+        "en": "Allow this operation with danger-full-access permissions: 验证审批流程",
+        "zh": "允许本次操作使用 danger-full-access 权限：验证审批流程",
+        "ja": "danger-full-access 権限でこの操作を許可します：验证审批流程",
+        "es": "Permitir esta operación con permisos danger-full-access: 验证审批流程",
+        "fr": "Autoriser cette opération avec les permissions danger-full-access : 验证审批流程",
+        "de": "Diesen Vorgang mit danger-full-access-Berechtigungen zulassen: 验证审批流程",
+        "ru": "Разрешить эту операцию с правами danger-full-access: 验证审批流程",
+        "pt": "Permitir esta operação com permissões danger-full-access: 验证审批流程"
+      }
+    }
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      false
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      true
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/activity",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      1794122223881
+    ]
+  },
+  {
+    "type": "waterfall",
+    "event": "approval/request",
+    "eventId": "cf15704d-affc-4d17-a80a-42fa2409a202",
+    "agentId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+    "request": {
+      "toolName": "bash",
+      "callId": "toolu_1794122223889",
+      "reason": "escalate sandbox to danger-full-access: 验证审批流程",
+      "displayReason": {
+        "en": "Allow this operation with danger-full-access permissions: 验证审批流程",
+        "zh": "允许本次操作使用 danger-full-access 权限：验证审批流程",
+        "ja": "danger-full-access 権限でこの操作を許可します：验证审批流程",
+        "es": "Permitir esta operación con permisos danger-full-access: 验证审批流程",
+        "fr": "Autoriser cette opération avec les permissions danger-full-access : 验证审批流程",
+        "de": "Diesen Vorgang mit danger-full-access-Berechtigungen zulassen: 验证审批流程",
+        "ru": "Разрешить эту операцию с правами danger-full-access: 验证审批流程",
+        "pt": "Permitir esta operação com permissões danger-full-access: 验证审批流程"
+      }
+    }
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      false
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      true
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/activity",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      1794122224105
+    ]
+  },
+  {
+    "type": "emit",
+    "event": "api-session/status",
+    "args": [
+      "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+      false
+    ]
+  }
+]

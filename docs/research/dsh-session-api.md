@@ -105,6 +105,19 @@ DSH 的 `remote-access` 包和 Peer 身份机制（2026-10-12 实现）目前用
 
 0.2.1-rc.1（2026-10-16）到 0.2.2-rc.1（2026-11-04）之间，发布了 rc.1 到 rc.5，以及 0.2.2 的多个 alpha 版本。官方在 `docs/upgrade-guide/<版本号>/` 中为不兼容的改动写了迁移说明。
 
+### 5.6 T7 实现外观层只读接口时确认的细节
+
+- **工作区和会话的关系**：`session/list` 的结果里没有工作区信息。`workspace/follow` 首帧（baseline）中每个工作区带 `sessionIds`，还有 `archivedSessionIds`、`pinnedSessionIds`。插件读完首帧就关闭这条流。
+- **会话标题**在 `projections.values.title`，还没有标题时为 `null`。
+- **`session/page` 的切页规则**（`api/session-controller/src/history.ts` 的 `paginate`）：从 `beforeSeq`（不含）向前数，只把 `user/message` 和 `assistant/message` 计入 `maxMessages`，返回 `[切点, beforeSeq)` 之间的全部事件，`hasMore` 表示切点之前还有事件。会话日志的 seq 从 0 开始连续编号，所以下一页的 `beforeSeq` 就是这一页第一条记录的 seq。
+  - 切点可能落在一次工具调用中间：这一页开头是 `tool/call`、`tool/result`，它们所属的 `assistant/message` 在更早的一页。插件把开头这些事件去掉，把游标设在第一个 `turn/start`、`user/message` 或 `assistant/message` 上（`transcript.js` 的 `convertPage`），并用单元测试验证了「切在任何位置，两页拼起来都和整段转换一致」。
+- **DSH 注入的用户消息**：每轮开始时 DSH 会追加 `source.kind` 为 `runtime-context`、`time-context` 的 `user/message`，它们也计入 `maxMessages`。只有 `source.kind` 为 `user` 的才是用户输入。
+- **思考内容**是 `assistant/message` 中 `type: "reasoning"` 的块。工具调用是 `type: "tool-call"` 的块（`arguments` 是 JSON 字符串），结果在 `tool/result`（`message.toolCallId`、`isError`）。
+- **审批被拒绝**：`approval/asked { id, callId }` → `approval/decided { id, outcome: "rejected" }`，随后 `tool/result` 的 `isError` 为 `true`。
+- **被停止的一轮**：`turn/end` 的 `reason.kind` 为 `aborted`。
+- 不存在的会话：`session/page` 返回错误码 `session/not-found`。
+- Windows 上的命令工具叫 `pwsh`，参数和 `bash` 相同（`command`、`description`、`sandbox_permissions`、`justification`）。
+
 ## 6. 结论：透传还是外观层
 
 | 考量 | 透传（App 直接说 DSH 协议） | 外观层（插件提供精简接口） |

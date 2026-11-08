@@ -1,4 +1,5 @@
 // @ts-check
+import { unusedFacade } from '../helpers/stub-facade.js'
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -11,7 +12,7 @@ import { PairingCodes } from '../../src/pairing/codes.js'
 
 /** 不涉及设备的测试用的路由上下文：没有任何已配对设备 */
 const stubDevices = /** @type {any} */ ({ authenticate: () => undefined })
-const baseCtx = () => ({ dshStatus: () => ({ version: null, compatible: null }), codes: new PairingCodes(), devices: stubDevices })
+const baseCtx = () => ({ dshStatus: () => ({ version: null, compatible: null }), facade: unusedFacade, codes: new PairingCodes(), devices: stubDevices })
 
 const keyPem = generatePrivateKeyPem()
 const certPem = issueSelfSignedCertificate(keyPem)

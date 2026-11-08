@@ -1,0 +1,350 @@
+{
+  "cursor": 89,
+  "records": [
+    {
+      "type": "event",
+      "event": {
+        "type": "assistant/message",
+        "seq": 78,
+        "time": 1794122224000,
+        "data": {
+          "turn": 5,
+          "step": 2,
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "已完成，结果收到了。"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "deepseek-official",
+              "model": "deepseek-flash",
+              "replayState": {
+                "response": {
+                  "kind": "deepseek-messages",
+                  "version": 1,
+                  "model": "deepseek-flash"
+                },
+                "blocks": [
+                  {
+                    "type": "text"
+                  }
+                ]
+              }
+            },
+            "id": "332c8d46-da40-4c54-907e-676b3f91924c"
+          },
+          "usage": {
+            "inputTokens": 10,
+            "outputTokens": 5,
+            "totalTokens": 15
+          },
+          "stream": [
+            {
+              "type": "chunk",
+              "time": 1794122223999,
+              "chunk": {
+                "type": "block-start",
+                "index": 0,
+                "blockType": "text"
+              }
+            },
+            {
+              "type": "text-chunks",
+              "time0": 1794122223999,
+              "index": 0,
+              "dt": [
+                0
+              ],
+              "texts": [
+                "已完成，结果",
+                "收到了。"
+              ]
+            },
+            {
+              "type": "chunk",
+              "time": 1794122223999,
+              "chunk": {
+                "type": "block-end",
+                "index": 0,
+                "block": {
+                  "type": "text",
+                  "text": "已完成，结果收到了。"
+                }
+              }
+            },
+            {
+              "type": "chunk",
+              "time": 1794122224000,
+              "chunk": {
+                "type": "usage",
+                "usage": {
+                  "inputTokens": 10,
+                  "outputTokens": 5,
+                  "totalTokens": 15
+                }
+              }
+            },
+            {
+              "type": "chunk",
+              "time": 1794122224000,
+              "chunk": {
+                "type": "finish",
+                "reason": {
+                  "kind": "stop"
+                },
+                "replayState": {
+                  "response": {
+                    "kind": "deepseek-messages",
+                    "version": 1,
+                    "model": "deepseek-flash"
+                  },
+                  "blocks": [
+                    {
+                      "type": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "surfaceOp": "append"
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "step/end",
+        "seq": 79,
+        "time": 1794122224001,
+        "data": {
+          "turn": 5,
+          "step": 2
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "turn/end",
+        "seq": 80,
+        "time": 1794122224001,
+        "data": {
+          "turn": 5,
+          "reason": {
+            "kind": "completed"
+          }
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "agent/inbox/spliced",
+        "seq": 81,
+        "time": 1794122224080,
+        "data": {
+          "target": "next-turn",
+          "start": 0,
+          "inserted": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "SLOW"
+                }
+              ],
+              "source": {
+                "kind": "user",
+                "rpcId": "4c8be109-9af0-4813-be90-afbe9a32f667"
+              },
+              "role": "user",
+              "id": "eda3876f-6bb7-4358-ba5f-e5a573d80700"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "turn/start",
+        "seq": 82,
+        "time": 1794122224081,
+        "data": {
+          "turn": 6
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "agent/inbox/spliced",
+        "seq": 83,
+        "time": 1794122224082,
+        "data": {
+          "target": "next-turn",
+          "start": 0,
+          "removedCount": 1,
+          "inserted": []
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "step/start",
+        "seq": 84,
+        "time": 1794122224103,
+        "data": {
+          "turn": 6,
+          "step": 1
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "user/message",
+        "seq": 85,
+        "time": 1794122224105,
+        "data": {
+          "content": [
+            {
+              "type": "text",
+              "text": "SLOW"
+            }
+          ],
+          "source": {
+            "kind": "user",
+            "rpcId": "4c8be109-9af0-4813-be90-afbe9a32f667"
+          },
+          "role": "user",
+          "id": "eda3876f-6bb7-4358-ba5f-e5a573d80700"
+        },
+        "surfaceOp": "append"
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "session-log-deepseek/delivery-accepted",
+        "seq": 86,
+        "time": 1794122224116,
+        "data": {
+          "sessionId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+          "sessionFormatVersion": 4,
+          "throughSeq": 85
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "assistant/message",
+        "seq": 87,
+        "time": 1794122225602,
+        "data": {
+          "turn": 6,
+          "step": 1,
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢慢"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "deepseek-official",
+              "model": "deepseek-flash"
+            },
+            "id": "ce517a31-9b5e-4b2f-9462-1b2bd39d28df"
+          },
+          "interrupted": true,
+          "stream": [
+            {
+              "type": "chunk",
+              "time": 1794122224216,
+              "chunk": {
+                "type": "block-start",
+                "index": 0,
+                "blockType": "text"
+              }
+            },
+            {
+              "type": "text-chunks",
+              "time0": 1794122224317,
+              "index": 0,
+              "dt": [
+                101,
+                100,
+                100,
+                100,
+                100,
+                101,
+                101,
+                102,
+                100,
+                100,
+                100,
+                101
+              ],
+              "texts": [
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢",
+                "慢慢慢慢慢慢"
+              ]
+            }
+          ]
+        },
+        "surfaceOp": "append"
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "step/end",
+        "seq": 88,
+        "time": 1794122225604,
+        "data": {
+          "turn": 6,
+          "step": 1
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "turn/end",
+        "seq": 89,
+        "time": 1794122225604,
+        "data": {
+          "turn": 6,
+          "reason": {
+            "kind": "aborted",
+            "reason": {
+              "kind": "user"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "hasMore": true
+}

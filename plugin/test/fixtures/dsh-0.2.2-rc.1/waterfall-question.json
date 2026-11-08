@@ -1,0 +1,24 @@
+{
+  "type": "waterfall",
+  "event": "user-questions/request",
+  "eventId": "5e1daef6-bf34-4651-ae97-8af1e780c90e",
+  "agentId": "session-33a6dbc9-4253-4321-950c-ced7e04284ae",
+  "request": {
+    "questions": [
+      {
+        "id": "q1",
+        "question": "用哪种方案？",
+        "header": "选择",
+        "options": [
+          {
+            "label": "方案A"
+          },
+          {
+            "label": "方案B"
+          }
+        ],
+        "multiSelect": false
+      }
+    ]
+  }
+}

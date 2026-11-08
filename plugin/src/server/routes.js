@@ -10,6 +10,8 @@ import { hostname } from 'node:os'
 import { DSH_BASELINE_VERSION } from '../dsh/versions.js'
 import { readJsonBody, requireString, BodyError } from './body.js'
 import { DeviceLimitError } from '../pairing/devices.js'
+import { DshUnavailableError } from '../dsh/connection.js'
+import { FacadeError } from '../dsh/facade.js'
 
 export const PROTOCOL_VERSION = 1
 
@@ -52,18 +54,26 @@ export function sendError(res, status, code, message, headers = {}) {
  * @property {() => { version: string | null, compatible: boolean | null }} dshStatus 当前 DSH 的版本信息
  * @property {import('../pairing/codes.js').PairingCodes} codes
  * @property {import('../pairing/devices.js').DeviceRegistry} devices
+ * @property {FacadeApi} facade 外观层（src/dsh/facade.js），路由只通过它访问 DSH
  * @property {(event: string, detail?: Record<string, string>) => void} [audit] 记录安全相关事件（不含任何秘密）
+ */
+
+/**
+ * 路由用到的外观层操作。第一个参数都是调用方的 deviceId。
+ * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages'>} FacadeApi
  */
 
 /**
  * @typedef {object} RequestAuth
  * @property {import('../pairing/devices.js').DeviceInfo} [device] 已认证的设备（仅 auth: true 的接口有）
+ * @property {Record<string, string>} params 路径参数，例如 /v1/sessions/{id}/messages 中的 id
+ * @property {URLSearchParams} query
  */
 
 /**
  * @typedef {object} Route
  * @property {string} method
- * @property {string} path
+ * @property {string} path 可以包含 `{name}` 形式的路径参数，只匹配一个路径段（字母、数字、_、-）
  * @property {boolean} auth 是否需要设备 token。只有 protocol.md 中标注「无需认证」的接口才能为 false
  * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, ctx: RouteContext, auth: RequestAuth) => void | Promise<void>} handle
  */
@@ -151,7 +161,73 @@ export const ROUTES = Object.freeze([
       res.end()
     },
   },
+  {
+    method: 'GET',
+    path: '/v1/workspaces',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.workspaces(deviceIdOf(auth)))
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/sessions',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.sessions(deviceIdOf(auth)))
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/sessions/{id}/messages',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      const before = auth.query.get('before') ?? undefined
+      const limitText = auth.query.get('limit')
+      if (limitText !== null && !/^[1-9][0-9]{0,3}$/.test(limitText)) {
+        sendError(res, 400, 'BAD_REQUEST', 'limit 必须是正整数')
+        return
+      }
+      const limit = limitText === null ? undefined : Number(limitText)
+      sendJson(res, 200, await ctx.facade.messages(deviceIdOf(auth), auth.params.id ?? '', { before, limit }))
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/models',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.models(deviceIdOf(auth)))
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/permission-presets',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.permissionPresets(deviceIdOf(auth)))
+    },
+  },
 ])
+
+/** @param {RequestAuth} auth */
+const deviceIdOf = (auth) => /** @type {import('../pairing/devices.js').DeviceInfo} */ (auth.device).deviceId
+
+/**
+ * 把路由路径编译成正则，路径参数只匹配一个路径段。
+ * @param {string} path
+ * @returns {{ regex: RegExp, names: string[] }}
+ */
+function compilePath(path) {
+  /** @type {string[]} */
+  const names = []
+  const pattern = path.split('/').map((segment) => {
+    const param = /^\{([a-zA-Z]+)\}$/.exec(segment)
+    if (param) { names.push(/** @type {string} */ (param[1])); return '([A-Za-z0-9_-]{1,128})' }
+    return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }).join('/')
+  return { regex: new RegExp(`^${pattern}$`), names }
+}
 
 /**
  * 从 Authorization 头取出 Bearer token。格式不对时返回 undefined。
@@ -171,27 +247,32 @@ export function bearerToken(req) {
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
 export function createRouter(ctx, options = {}) {
-  const routes = options.routes ?? ROUTES
+  const routes = (options.routes ?? ROUTES).map((route) => ({ route, ...compilePath(route.path) }))
   return (req, res) => {
-    let path
+    let url
     try {
-      path = new URL(req.url ?? '/', 'https://dshremote.invalid').pathname
+      url = new URL(req.url ?? '/', 'https://dshremote.invalid')
     } catch {
       sendError(res, 400, 'BAD_REQUEST', '请求路径无效')
       return
     }
-    const candidates = routes.filter((route) => route.path === path)
+    const matched = routes.filter((entry) => entry.regex.test(url.pathname))
+    const candidates = matched.map((entry) => entry.route)
     if (candidates.length === 0) {
       sendError(res, 404, 'NOT_FOUND', '接口不存在')
       return
     }
-    const route = candidates.find((r) => r.method === req.method)
-    if (!route) {
+    const entry = matched.find((e) => e.route.method === req.method)
+    if (!entry) {
       sendError(res, 405, 'METHOD_NOT_ALLOWED', '不支持该请求方法', { allow: candidates.map((r) => r.method).join(', ') })
       return
     }
+    const route = entry.route
+    const values = entry.regex.exec(url.pathname) ?? []
+    /** @type {Record<string, string>} */
+    const params = Object.fromEntries(entry.names.map((name, i) => [name, values[i + 1] ?? '']))
     /** @type {RequestAuth} */
-    const auth = {}
+    const auth = { params, query: url.searchParams }
     if (route.auth) {
       const device = ctx.devices.authenticate(bearerToken(req))
       if (!device) {
@@ -205,8 +286,12 @@ export function createRouter(ctx, options = {}) {
       .then(() => route.handle(req, res, ctx, auth))
       .catch((error) => {
         if (res.headersSent) { res.destroy(); return }
-        if (error instanceof BodyError) {
+        if (error instanceof BodyError || error instanceof FacadeError) {
           sendError(res, error.status, error.code, error.message)
+          return
+        }
+        if (error instanceof DshUnavailableError) {
+          sendError(res, 503, 'DSH_UNAVAILABLE', 'DSH 暂时不可用，请确认电脑上的 DeepSeek Harness 正在运行')
           return
         }
         options.onError?.(error)

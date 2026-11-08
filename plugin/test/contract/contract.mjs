@@ -16,6 +16,7 @@ import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
+import { Facade, FacadeError } from '../../src/dsh/facade.js'
 import { startDshWeb, DSH_VERSION, log } from '../helpers/dsh-runtime.mjs'
 import { startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE } from './fake-llm.mjs'
 
@@ -220,6 +221,57 @@ async function main() {
       valueOf(await conn.call('session/cancel', { request: { sessionId: sid } }, { actor: ACTOR }))
       // 假模型要 10 秒才能输出完，5 秒内停下来说明取消生效
       await until(() => !running(stateFrames.at(-1)), '取消后停止运行', 5000)
+    })
+
+    // ---- 外观层（只读）：通过 Facade 读取，检查转换结果
+    const facade = new Facade(conn)
+    await step('外观层：工作区与会话列表', async () => {
+      const workspace = valueOf(await conn.call('workspace/create', { request: { path: web?.workspace } }, { actor: ACTOR })).workspace
+      const inWorkspace = valueOf(await conn.call('session/create', { request: { workspaceId: workspace.workspaceId } }, { actor: ACTOR })).sessionId
+      const { workspaces } = await facade.workspaces(ACTOR)
+      if (!workspaces.some((w) => w.workspaceId === workspace.workspaceId)) throw new Error(`工作区列表中没有新建的工作区：${short(workspaces)}`)
+      const { sessions } = await facade.sessions(ACTOR)
+      const main = sessions.find((x) => x.sessionId === sid)
+      const member = sessions.find((x) => x.sessionId === inWorkspace)
+      if (!main || main.status !== 'idle' || typeof main.title !== 'string') throw new Error(`会话摘要不对：${short(main)}`)
+      if (member?.workspaceId !== workspace.workspaceId) throw new Error(`会话没有归入工作区：${short(member)}`)
+      return `sessions=${sessions.length}`
+    })
+    await step('外观层：模型列表与权限模式', async () => {
+      const models = await facade.models(ACTOR)
+      const presets = await facade.permissionPresets(ACTOR)
+      if (models.models.length === 0 || !models.default) throw new Error(`模型列表为空：${short(models)}`)
+      if (!presets.presets.some((x) => x.id === 'workspace-write')) throw new Error(`权限模式不对：${short(presets)}`)
+      return `models=${models.models.length} presets=${presets.presets.map((x) => x.id).join(',')}`
+    })
+    await step('外观层：历史消息，小页翻到底与一次取完的结果一致', async () => {
+      const all = await facade.messages(ACTOR, sid, { limit: 200 })
+      if (all.hasMore) throw new Error('200 条以内应当一次取完')
+      const kinds = all.messages.flatMap((m) => m.parts.map((x) => (x.type === 'tool' ? `tool:${x.status}` : x.type)))
+      for (const expected of ['text', 'tool:done', 'tool:rejected']) {
+        if (!kinds.includes(expected)) throw new Error(`历史中缺少 ${expected}：${kinds.join(',')}`)
+      }
+      /** @type {import('../../src/dsh/transcript.js').Message[]} */
+      let paged = []
+      /** @type {string | undefined} */
+      let before
+      for (let i = 0; i < 100; i++) {
+        const page = await facade.messages(ACTOR, sid, { limit: 2, before })
+        paged = [...page.messages, ...paged]
+        if (!page.hasMore || page.cursor === null) break
+        before = page.cursor
+      }
+      if (JSON.stringify(paged) !== JSON.stringify(all.messages)) throw new Error(`分页结果不一致：${paged.length} vs ${all.messages.length}`)
+      return `messages=${all.messages.length}`
+    })
+    await step('【反向】外观层：不存在的会话返回 404', async () => {
+      try {
+        await facade.messages(ACTOR, 'session-00000000-0000-0000-0000-000000000000')
+      } catch (error) {
+        if (error instanceof FacadeError && error.status === 404) return
+        throw error
+      }
+      throw new Error('应当返回 404')
     })
 
     // ---- cookie 失效后自动重新登录：换一个 DshConnection 模拟插件重启（启动 token 应可重复使用）

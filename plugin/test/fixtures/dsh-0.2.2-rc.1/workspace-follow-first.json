@@ -1,0 +1,19 @@
+{
+  "type": "baseline",
+  "value": {
+    "items": [
+      {
+        "workspaceId": "715d045a-bad1-4abd-ad78-509c584b1235",
+        "path": "/tmp/dshremote-rt-uTSOSR/workspace",
+        "title": "workspace",
+        "sessionIds": [
+          "session-33a6dbc9-4253-4321-950c-ced7e04284ae"
+        ],
+        "createdAt": "2026-11-08T07:17:02.894Z",
+        "updatedAt": "2026-11-08T07:17:02.930Z"
+      }
+    ],
+    "archivedSessionIds": [],
+    "pinnedSessionIds": []
+  }
+}

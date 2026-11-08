@@ -17,6 +17,8 @@ npm run load-check   # 把插件装进真实的 dsh web（基线版本），确�
                      # 同时检查插件已通过适配层连上 DSH（配对页显示「已连接」，/v1/info 报告正确的 DSH 版本）
 npm run contract     # DSH 接口契约测试：假模型服务驱动真实 dsh web，通过适配层逐项验证插件依赖的接口
                      # 环境变量同 load-check；stdout 最后一行是 JSON 结果，失败的项目就是适配层要改的地方
+npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
+                     # 转换器（transcript.js、facade.js）的单元测试只用录制的数据，不手写 DSH 的格式
 ```
 
 `load-check`、`contract` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
@@ -55,14 +57,18 @@ plugin/
 │   │   └── routes.js     # /v1/* 路由表：外观层操作的白名单 + Bearer token 认证
 │   └── dsh/              # DSH 适配层：插件访问 DSH 的唯一入口
 │       ├── versions.js   # 支持的 DSH 版本范围（唯一定义处）、从入口路径读取 DSH 版本
-│       └── connection.js # 登录（启动 token 换 cookie）、一元调用、mux 流、$events 订阅与回答、断线重连
+│       ├── connection.js # 登录（启动 token 换 cookie）、一元调用、mux 流、$events 订阅与回答、断线重连
+│       ├── facade.js     # 外观层：protocol.md 的操作 → DSH 接口调用 → protocol.md 的数据结构；DSH 错误 → FacadeError
+│       └── transcript.js # DSH 会话日志 → 消息结构（protocol.md 5.2），以及分页切点的修正
 └── test/
     ├── unit/             # 单元测试（*.test.js）
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）
     │                     #   fake-dsh.js（模拟 DSH 的 HTTP + mux，单元测试用）
     │                     #   dsh-runtime.mjs（安装并启动真实 dsh web，load-check 和 contract 共用）
+    │                     #   stub-facade.js（不涉及 DSH 的路由测试用）
+    ├── fixtures/         # 从真实 DSH 录制的数据（npm run capture-fixtures），按 DSH 版本分目录
     ├── load/             # 加载检查：装进真实 dsh web，确认 active、连上 DSH，并按指纹访问 /v1/info
-    └── contract/         # 契约测试：fake-llm.mjs（假模型服务）+ contract.mjs
+    └── contract/         # 契约测试：fake-llm.mjs（假模型服务）+ contract.mjs；capture-fixtures.mjs（录制测试数据）
 ```
 
 ## 约定
@@ -77,6 +83,7 @@ plugin/
 - 插件的生命周期用 `ctx.effect()` 管理。加载时不要阻塞等待 DSH 启动，在后台轮询即可。
 - **日志**：使用 `ctx.logger`，并且带上 `[dshremote]` 前缀。`dsh web` 默认不输出插件的 info 日志，所以排查问题时不能指望日志；需要让用户看到的状态，要显示在本机配对页上。
 - 状态文件一律通过 `src/storage.js` 读写，不要直接用 `fs` 写状态目录。设备 token 只存哈希。
+- 路由不直接调用 `DshConnection`，只调用 `src/dsh/facade.js`。外观层抛出的 `FacadeError` 由路由原样转成错误响应，`DshUnavailableError` 转成 503；`FacadeError` 的 message 里不放 DSH 的原始错误信息。
 - **新增 `/v1/*` 接口只能通过 `src/server/routes.js` 的路由表**，并且必须先写进 `docs/protocol.md`。`auth: false` 只能用于 protocol.md 中标注「无需认证」的接口。
 - 错误响应统一用 `sendError()`，`message` 中不得出现 token、配对码、文件路径或原始异常信息。
 - 新增配置项时，同时修改 `src/config.js` 的 `DEFAULT_CONFIG` 和 `cordis.patch.yml`（单元测试会检查两者一致）。

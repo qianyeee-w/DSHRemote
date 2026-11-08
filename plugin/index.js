@@ -15,6 +15,7 @@ import { DeviceRegistry } from './src/pairing/devices.js'
 import { startAdminServer } from './src/admin/server.js'
 import { openInBrowser } from './src/admin/open-browser.js'
 import { DshConnection } from './src/dsh/connection.js'
+import { Facade } from './src/dsh/facade.js'
 import { dshVersionStatus } from './src/dsh/versions.js'
 import { readFileSync } from 'node:fs'
 
@@ -67,6 +68,7 @@ export function apply(ctx, rawConfig) {
     const router = createRouter(
       {
         dshStatus: () => dshVersion,
+        facade: new Facade(dsh),
         codes,
         devices,
         // 审计信息只记录事件和设备标识，不包含 token 或配对码

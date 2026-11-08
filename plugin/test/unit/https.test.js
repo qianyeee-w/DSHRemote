@@ -7,6 +7,11 @@ import { generatePrivateKeyPem, issueSelfSignedCertificate, spkiFingerprint } fr
 import { startLanServer } from '../../src/server/https.js'
 import { createRouter, PROTOCOL_VERSION } from '../../src/server/routes.js'
 import { pinnedRequest, connectPinned, PinMismatchError } from '../helpers/pinned-client.js'
+import { PairingCodes } from '../../src/pairing/codes.js'
+
+/** 不涉及设备的测试用的路由上下文：没有任何已配对设备 */
+const stubDevices = /** @type {any} */ ({ authenticate: () => undefined })
+const baseCtx = () => ({ dshStatus: () => ({ version: null, compatible: null }), codes: new PairingCodes(), devices: stubDevices })
 
 const keyPem = generatePrivateKeyPem()
 const certPem = issueSelfSignedCertificate(keyPem)
@@ -14,7 +19,7 @@ const fingerprint = spkiFingerprint(certPem)
 const wrongFingerprint = spkiFingerprint(issueSelfSignedCertificate(generatePrivateKeyPem()))
 
 let handled = 0
-const router = createRouter({ dshStatus: () => ({ version: null, compatible: null }) })
+const router = createRouter(baseCtx())
 /** @type {import('../../src/server/https.js').LanServer} */
 let lan
 const HOST = '127.0.0.1'
@@ -104,8 +109,8 @@ test('【反向】DSH 的接口路径不会被转发（安全红线第 8 条）'
   }
 })
 
-test('【反向】需要认证的接口在实现 token 校验之前一律拒绝（fail closed）', async () => {
-  const strict = createRouter({ dshStatus: () => ({ version: null, compatible: null }) }, {
+test('【反向】需要认证的接口：没有有效 token 时一律拒绝，处理函数不会执行', async () => {
+  const strict = createRouter(baseCtx(), {
     routes: [{ method: 'GET', path: '/v1/me', auth: true, handle: () => assert.fail('不应执行') }],
   })
   const server = await startLanServer({ identity: { keyPem, certPem }, host: HOST, port: 0, handler: strict })
@@ -121,7 +126,7 @@ test('【反向】需要认证的接口在实现 token 校验之前一律拒绝�
 test('处理函数抛错时返回 500，且不泄露错误细节', async () => {
   /** @type {unknown[]} */
   const errors = []
-  const failing = createRouter({ dshStatus: () => ({ version: null, compatible: null }) }, {
+  const failing = createRouter(baseCtx(), {
     routes: [{ method: 'GET', path: '/v1/boom', auth: false, handle: () => { throw new Error('secret-detail /home/me/.dsh') } }],
     onError: (error) => errors.push(error),
   })

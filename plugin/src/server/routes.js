@@ -2,10 +2,14 @@
 /**
  * /v1/* 路由表：外观层操作的白名单（安全红线第 8 条）。
  *
- * 不在表中的路径一律 404，不在表中的方法一律 405。后续任务在这里逐个加入 protocol.md 中定义的接口。
+ * 不在表中的路径一律 404，不在表中的方法一律 405。
+ * `auth: true` 的接口必须带有效的设备 token（protocol.md 第 3 节），否则 401。
  */
 import { readFileSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { DSH_BASELINE_VERSION } from '../dsh/versions.js'
+import { readJsonBody, requireString, BodyError } from './body.js'
+import { DeviceLimitError } from '../pairing/devices.js'
 
 export const PROTOCOL_VERSION = 1
 
@@ -45,7 +49,15 @@ export function sendError(res, status, code, message, headers = {}) {
 
 /**
  * @typedef {object} RouteContext
- * @property {() => { version: string | null, compatible: boolean | null }} dshStatus 当前 DSH 的版本信息（T6 之前未知）
+ * @property {() => { version: string | null, compatible: boolean | null }} dshStatus 当前 DSH 的版本信息
+ * @property {import('../pairing/codes.js').PairingCodes} codes
+ * @property {import('../pairing/devices.js').DeviceRegistry} devices
+ * @property {(event: string, detail?: Record<string, string>) => void} [audit] 记录安全相关事件（不含任何秘密）
+ */
+
+/**
+ * @typedef {object} RequestAuth
+ * @property {import('../pairing/devices.js').DeviceInfo} [device] 已认证的设备（仅 auth: true 的接口有）
  */
 
 /**
@@ -53,8 +65,15 @@ export function sendError(res, status, code, message, headers = {}) {
  * @property {string} method
  * @property {string} path
  * @property {boolean} auth 是否需要设备 token。只有 protocol.md 中标注「无需认证」的接口才能为 false
- * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, ctx: RouteContext) => void | Promise<void>} handle
+ * @property {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, ctx: RouteContext, auth: RequestAuth) => void | Promise<void>} handle
  */
+
+const PAIR_BODY_LIMIT = 4 * 1024
+
+/** @param {import('node:http').ServerResponse} res @param {import('../pairing/devices.js').DeviceInfo} device */
+const sendDevice = (res, device) => sendJson(res, 200, {
+  deviceId: device.deviceId, name: device.name, platform: device.platform, createdAt: device.createdAt,
+})
 
 /** @type {readonly Route[]} */
 export const ROUTES = Object.freeze([
@@ -71,7 +90,79 @@ export const ROUTES = Object.freeze([
       })
     },
   },
+  {
+    method: 'POST',
+    path: '/v1/pair',
+    auth: false,
+    async handle(req, res, ctx) {
+      const body = await readJsonBody(req, { limit: PAIR_BODY_LIMIT })
+      // 先校验所有字段，格式不对的请求不消耗配对码的尝试次数
+      const code = requireString(body, 'code', { max: 32 })
+      const name = requireString(body, 'deviceName', { max: 64 })
+      const platform = requireString(body, 'platform', { max: 16, pattern: /^[a-z][a-z0-9-]*$/ })
+      const appVersion = requireString(body, 'appVersion', { max: 32, pattern: /^[0-9A-Za-z.+-]+$/ })
+
+      const result = ctx.codes.verify(code)
+      if (!result.ok) {
+        ctx.audit?.('pair.rejected', { reason: result.reason })
+        if (result.reason === 'locked') {
+          const seconds = String(Math.max(1, Math.ceil((result.retryAfterMs ?? 0) / 1000)))
+          sendError(res, 429, 'PAIRING_LOCKED', '输错次数过多，配对暂时锁定，请稍后在电脑上重新生成配对码', { 'retry-after': seconds })
+        } else {
+          sendError(res, 400, 'PAIRING_CODE_INVALID', '配对码错误或已过期')
+        }
+        return
+      }
+      let registered
+      try {
+        registered = await ctx.devices.register({ name, platform, appVersion })
+      } catch (error) {
+        if (error instanceof DeviceLimitError) {
+          sendError(res, 409, 'PAIRING_DEVICE_LIMIT', error.message)
+          return
+        }
+        throw error
+      }
+      ctx.audit?.('pair.accepted', { deviceId: registered.device.deviceId, name })
+      sendJson(res, 200, {
+        deviceId: registered.device.deviceId,
+        token: registered.token,
+        host: { name: hostname(), pluginVersion: PLUGIN_VERSION },
+      })
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/me',
+    auth: true,
+    handle(_req, res, _ctx, auth) {
+      sendDevice(res, /** @type {import('../pairing/devices.js').DeviceInfo} */ (auth.device))
+    },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/me',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      const device = /** @type {import('../pairing/devices.js').DeviceInfo} */ (auth.device)
+      await ctx.devices.revoke(device.deviceId)
+      ctx.audit?.('device.self-revoked', { deviceId: device.deviceId })
+      res.writeHead(204, { 'cache-control': 'no-store' })
+      res.end()
+    },
+  },
 ])
+
+/**
+ * 从 Authorization 头取出 Bearer token。格式不对时返回 undefined。
+ * @param {import('node:http').IncomingMessage} req
+ */
+export function bearerToken(req) {
+  const header = req.headers.authorization
+  if (typeof header !== 'string') return undefined
+  const match = /^Bearer ([A-Za-z0-9_-]+)$/.exec(header)
+  return match?.[1]
+}
 
 /**
  * 根据路由表创建请求处理函数。
@@ -99,17 +190,27 @@ export function createRouter(ctx, options = {}) {
       sendError(res, 405, 'METHOD_NOT_ALLOWED', '不支持该请求方法', { allow: candidates.map((r) => r.method).join(', ') })
       return
     }
+    /** @type {RequestAuth} */
+    const auth = {}
     if (route.auth) {
-      // 设备 token 校验在 T4 实现。在此之前，需要认证的接口一律拒绝（fail closed）
-      sendError(res, 401, 'TOKEN_INVALID', '需要设备 token')
-      return
+      const device = ctx.devices.authenticate(bearerToken(req))
+      if (!device) {
+        req.resume()
+        sendError(res, 401, 'TOKEN_INVALID', '设备 token 无效或已被撤销，请重新配对', { 'www-authenticate': 'Bearer' })
+        return
+      }
+      auth.device = device
     }
     Promise.resolve()
-      .then(() => route.handle(req, res, ctx))
+      .then(() => route.handle(req, res, ctx, auth))
       .catch((error) => {
+        if (res.headersSent) { res.destroy(); return }
+        if (error instanceof BodyError) {
+          sendError(res, error.status, error.code, error.message)
+          return
+        }
         options.onError?.(error)
-        if (!res.headersSent) sendError(res, 500, 'INTERNAL', '插件内部错误')
-        else res.destroy()
+        sendError(res, 500, 'INTERNAL', '插件内部错误')
       })
   }
 }

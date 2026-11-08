@@ -36,9 +36,11 @@ dshremote://pair?v=1&h=<地址>&p=<端口>&fp=<指纹>&c=<配对码>&n=<电脑�
 
 ### 2.2 配对码规则
 
-- 由用户在本机配对页手动生成，5 分钟内有效，**用一次就作废**。
+- 由用户在本机配对页手动生成，5 分钟内有效，**用一次就作废**。只保存在内存中，DSH 重启后不存在有效的配对码。
 - 同一时间只有一个有效的配对码；生成新码时旧码立刻失效。
-- 连续输错 5 次后，配对码作废，配对接口锁定 1 分钟。
+- 连续输错 5 次后，配对码作废，配对接口锁定 1 分钟（不区分来源，全局锁定）。在本机重新生成配对码会立即解除锁定。
+- 输入时忽略大小写、空格和连字符。
+- 格式不对的请求（缺字段等）不计入错误次数。
 
 ### 2.3 手动输入时如何校验指纹
 
@@ -60,12 +62,15 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 
 - token 只在这个响应里出现一次。插件端只保存它的 SHA-256 哈希。
 - App 把 token 和指纹保存在 Android Keystore 加密的存储里。
+- 字段要求：`code` 为字符串；`deviceName` 1–64 个字符，不能包含控制字符；`platform` 为小写字母开头的 `[a-z0-9-]`，最长 16 个字符（目前只有 `android`）；`appVersion` 为 `[0-9A-Za-z.+-]`，最长 32 个字符。请求体最大 4 KB，`Content-Type` 必须是 `application/json`。
+- 错误：配对码错误、已过期或不存在时返回 `400 PAIRING_CODE_INVALID`（不区分这几种情况）；锁定期间返回 `429 PAIRING_LOCKED`，并带上 `Retry-After`（秒）；已配对设备达到上限（20 台）时返回 `409 PAIRING_DEVICE_LIMIT`。
 
 ## 3. 认证
 
 - 除了明确标注「无需认证」的接口，所有请求都必须带上 `Authorization: Bearer <token>`。
 - WebSocket 也在握手请求头里带这个 header（OkHttp 支持在 WebSocket 握手时设置请求头）。
-- token 无效或已被撤销时返回 `401`，错误码是 `TOKEN_INVALID`。App 收到后停止重连，提示用户重新配对。
+- token 无效或已被撤销时返回 `401`，错误码是 `TOKEN_INVALID`，并带上 `WWW-Authenticate: Bearer`。App 收到后停止重连，提示用户重新配对。
+- 只接受 `Bearer` 加 43 个 base64url 字符这一种格式，大小写敏感。
 
 ## 4. 接口总览
 
@@ -75,8 +80,8 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 |---|---|---|---|
 | GET | `/v1/info` | 无需认证 | `{ protocol: 1, pluginVersion, dsh: { baseline, version, compatible } }`，用于显示在线状态和检查版本。插件读不到 DSH 版本时，`version` 和 `compatible` 为 `null` |
 | POST | `/v1/pair` | 无需认证 | 见 2.4 |
-| GET | `/v1/me` | 需要 | 当前设备的信息 |
-| DELETE | `/v1/me` | 需要 | 设备自行取消配对 |
+| GET | `/v1/me` | 需要 | 当前设备的信息：`{ deviceId, name, platform, createdAt }` |
+| DELETE | `/v1/me` | 需要 | 设备自行取消配对，成功返回 `204`，之后 token 立即失效 |
 | GET | `/v1/workspaces` | 需要 | 工作区列表 |
 | GET | `/v1/sessions` | 需要 | 会话列表，每项的结构见 5.1 |
 | POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
@@ -208,13 +213,16 @@ App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 |---|---|---|
 | `TOKEN_INVALID` | 401 | token 无效或已被撤销 |
 | `PAIRING_CODE_INVALID` | 400 | 配对码错误或已过期 |
-| `PAIRING_LOCKED` | 429 | 输错次数过多，接口暂时锁定 |
+| `PAIRING_LOCKED` | 429 | 输错次数过多，接口暂时锁定（带 `Retry-After`） |
+| `PAIRING_DEVICE_LIMIT` | 409 | 已配对设备达到上限（20 台） |
 | `ATTENTION_RESOLVED` | 409 | 这项审批或提问已经在别处处理掉了 |
 | `DSH_UNAVAILABLE` | 503 | DSH 还没启动完成 |
 | `DSH_INCOMPATIBLE` | 503 | DSH 版本不兼容 |
 | `NOT_FOUND` | 404 | 接口不存在（也用于会话或待处理事项不存在） |
 | `METHOD_NOT_ALLOWED` | 405 | 不支持该请求方法，`Allow` 响应头列出支持的方法 |
-| `BAD_REQUEST` | 400 | 请求格式错误 |
+| `BAD_REQUEST` | 400 | 请求格式错误，包括缺少字段、字段格式不对、不是合法的 JSON |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | `Content-Type` 不是 `application/json` |
+| `PAYLOAD_TOO_LARGE` | 413 | 请求体过大 |
 | `INTERNAL` | 500 | 插件内部错误（不附带细节） |
 
 `message` 里不得包含 token、配对码或任何路径之类的敏感信息。

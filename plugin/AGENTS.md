@@ -37,9 +37,13 @@ plugin/
 │   │   ├── der.js        # 最小 DER 编码器（只够生成一种证书）
 │   │   ├── certificate.js# 自签名证书签发、续期判断、SPKI 指纹
 │   │   └── identity.js   # 加载或创建 TLS 身份；续期时沿用原私钥，指纹不变
+│   ├── pairing/
+│   │   ├── codes.js      # 一次性配对码：5 分钟、用一次作废、输错 5 次锁定 1 分钟（只在内存中）
+│   │   └── devices.js    # 设备登记：token 只存 SHA-256、恒定时间比较、撤销、上限 20 台
 │   ├── server/
 │   │   ├── https.js      # 局域网 HTTPS 服务（只提供 TLS 1.2+）
-│   │   └── routes.js     # /v1/* 路由表：外观层操作的白名单
+│   │   ├── body.js       # JSON 请求体读取与字段校验（大小、Content-Type、控制字符）
+│   │   └── routes.js     # /v1/* 路由表：外观层操作的白名单 + Bearer token 认证
 │   └── dsh/
 │       └── versions.js   # 支持的 DSH 版本范围（唯一定义处）
 └── test/

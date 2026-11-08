@@ -10,6 +10,8 @@ import { openStorage } from './src/storage.js'
 import { loadOrCreateIdentity } from './src/tls/identity.js'
 import { startLanServer } from './src/server/https.js'
 import { createRouter } from './src/server/routes.js'
+import { PairingCodes } from './src/pairing/codes.js'
+import { DeviceRegistry } from './src/pairing/devices.js'
 
 export const name = 'dshremote'
 export const inject = ['webServer', 'connection']
@@ -38,9 +40,17 @@ export function apply(ctx, rawConfig) {
     if (identity.status === 'created') log('warn', '已生成新的 TLS 身份。之前配对过的手机需要重新配对')
     if (identity.status === 'renewed') log('info', `证书已用原私钥重新签发（${identity.renewReason}），指纹不变`)
 
+    const codes = new PairingCodes()
+    const devices = await DeviceRegistry.open(storage)
     const router = createRouter(
-      // DSH 版本检查在 T6 实现
-      { dshStatus: () => ({ version: null, compatible: null }) },
+      {
+        // DSH 版本检查在 T6 实现
+        dshStatus: () => ({ version: null, compatible: null }),
+        codes,
+        devices,
+        // 审计信息只记录事件和设备标识，不包含 token 或配对码
+        audit: (event, detail) => log('info', `${event}${detail ? ` ${JSON.stringify(detail)}` : ''}`),
+      },
       { onError: (error) => log('error', `处理请求出错：${error instanceof Error ? error.message : String(error)}`) },
     )
     let lan
@@ -56,6 +66,7 @@ export function apply(ctx, rawConfig) {
 
     return async () => {
       await lan.close()
+      await devices.flush()
       log('info', '已卸载')
     }
   }, 'dshremote lifecycle')

@@ -7,7 +7,9 @@
 ## 1. 传输
 
 - 插件在局域网端口（默认 `3190`）上**只提供 TLS**（HTTPS / WSS），不提供明文 HTTP。
-- 证书：插件首次运行时生成 ECDSA P-256 密钥和自签名证书，保存在 `<DSH_HOME>/dshremote/tls/`。
+- 证书：插件首次运行时生成 ECDSA P-256 密钥和自签名证书，保存为 `<DSH_HOME>/dshremote/tls-key.pem` 和 `tls-cert.pem`。
+  - 证书有效期 10 年，到期前 30 天内自动用**同一把私钥**重新签发；证书损坏或与私钥不匹配时也会重新签发。这几种情况下指纹都不变。
+  - TLS 版本：只接受 TLS 1.2 及以上。
 - **指纹**：证书公钥（SubjectPublicKeyInfo，DER 编码）的 SHA-256，用 base64url 编码，不加填充。
   - 固定的是公钥而不是整张证书，所以证书到期后用同一个密钥重新签发，指纹不变，手机不需要重新配对。
   - 只有重新生成密钥时指纹才会变，这时所有手机都要重新配对。
@@ -71,7 +73,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 
 | 方法 | 路径 | 认证 | 说明 |
 |---|---|---|---|
-| GET | `/v1/info` | 无需认证 | `{ protocol: 1, pluginVersion, dsh: { version, compatible } }`，用于显示在线状态和检查版本 |
+| GET | `/v1/info` | 无需认证 | `{ protocol: 1, pluginVersion, dsh: { baseline, version, compatible } }`，用于显示在线状态和检查版本。插件读不到 DSH 版本时，`version` 和 `compatible` 为 `null` |
 | POST | `/v1/pair` | 无需认证 | 见 2.4 |
 | GET | `/v1/me` | 需要 | 当前设备的信息 |
 | DELETE | `/v1/me` | 需要 | 设备自行取消配对 |
@@ -208,9 +210,12 @@ App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 | `PAIRING_CODE_INVALID` | 400 | 配对码错误或已过期 |
 | `PAIRING_LOCKED` | 429 | 输错次数过多，接口暂时锁定 |
 | `ATTENTION_RESOLVED` | 409 | 这项审批或提问已经在别处处理掉了 |
-| `NOT_FOUND` | 404 | 会话或待处理事项不存在 |
 | `DSH_UNAVAILABLE` | 503 | DSH 还没启动完成 |
 | `DSH_INCOMPATIBLE` | 503 | DSH 版本不兼容 |
+| `NOT_FOUND` | 404 | 接口不存在（也用于会话或待处理事项不存在） |
+| `METHOD_NOT_ALLOWED` | 405 | 不支持该请求方法，`Allow` 响应头列出支持的方法 |
+| `BAD_REQUEST` | 400 | 请求格式错误 |
+| `INTERNAL` | 500 | 插件内部错误（不附带细节） |
 
 `message` 里不得包含 token、配对码或任何路径之类的敏感信息。
 

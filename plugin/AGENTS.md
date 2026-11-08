@@ -33,11 +33,19 @@ plugin/
 ├── src/
 │   ├── config.js         # 配置校验：非法值、未知键直接报错，不静默回退
 │   ├── storage.js        # <DSH_HOME>/dshremote/ 下的状态文件：原子写入、POSIX 0700/0600、损坏时报错
+│   ├── tls/
+│   │   ├── der.js        # 最小 DER 编码器（只够生成一种证书）
+│   │   ├── certificate.js# 自签名证书签发、续期判断、SPKI 指纹
+│   │   └── identity.js   # 加载或创建 TLS 身份；续期时沿用原私钥，指纹不变
+│   ├── server/
+│   │   ├── https.js      # 局域网 HTTPS 服务（只提供 TLS 1.2+）
+│   │   └── routes.js     # /v1/* 路由表：外观层操作的白名单
 │   └── dsh/
 │       └── versions.js   # 支持的 DSH 版本范围（唯一定义处）
 └── test/
     ├── unit/             # 单元测试（*.test.js）
-    └── load/             # 加载检查脚本
+    ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）
+    └── load/             # 加载检查：装进真实 dsh web，确认 active，并按指纹访问 /v1/info
 ```
 
 ## 约定
@@ -51,6 +59,8 @@ plugin/
 - 插件的生命周期用 `ctx.effect()` 管理。加载时不要阻塞等待 DSH 启动，在后台轮询即可。
 - **日志**：使用 `ctx.logger`，并且带上 `[dshremote]` 前缀。`dsh web` 默认不输出插件的 info 日志，所以排查问题时不能指望日志；需要让用户看到的状态，要显示在本机配对页上。
 - 状态文件一律通过 `src/storage.js` 读写，不要直接用 `fs` 写状态目录。设备 token 只存哈希。
+- **新增 `/v1/*` 接口只能通过 `src/server/routes.js` 的路由表**，并且必须先写进 `docs/protocol.md`。`auth: false` 只能用于 protocol.md 中标注「无需认证」的接口。
+- 错误响应统一用 `sendError()`，`message` 中不得出现 token、配对码、文件路径或原始异常信息。
 - 新增配置项时，同时修改 `src/config.js` 的 `DEFAULT_CONFIG` 和 `cordis.patch.yml`（单元测试会检查两者一致）。
 - 插件代码要能同时在 Windows 和 Linux 上运行：路径一律用 `path.join` 拼接；启动子进程时，用 `process.execPath` 运行 JS 入口，不要依赖 shell 或 `.cmd` 包装。
 

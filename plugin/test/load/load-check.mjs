@@ -1,6 +1,7 @@
 // @ts-check
 /**
- * 加载检查：把插件装进真实的 `dsh web`，确认 DSH 加载了它并且处于运行状态。
+ * 加载检查：把插件装进真实的 `dsh web`，确认 DSH 加载了它并且处于运行状态，
+ * 并且局域网 HTTPS 端口能按证书指纹访问 /v1/info。
  *
  * 用法：
  *   npm run load-check                     # 使用基线版本（src/dsh/versions.js）
@@ -21,6 +22,10 @@ import { fileURLToPath } from 'node:url'
 import http from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { DSH_BASELINE_VERSION } from '../../src/dsh/versions.js'
+import { DEFAULT_CONFIG } from '../../src/config.js'
+import { spkiFingerprint } from '../../src/tls/certificate.js'
+import { CERT_FILE } from '../../src/tls/identity.js'
+import { pinnedRequest } from '../helpers/pinned-client.js'
 
 const PLUGIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const DSH_VERSION = process.env.DSH_VERSION || DSH_BASELINE_VERSION
@@ -117,6 +122,29 @@ async function checkLoaded(/** @type {URL} */ launch) {
   return { ok, phase: entry.fiberPhase, detail: ok ? '已加载并处于 active 状态' : `插件状态异常：enabled=${entry.enabled} fiberPhase=${entry.fiberPhase}` }
 }
 
+/**
+ * 读取插件生成的证书，按指纹访问局域网端口上的 /v1/info。
+ * @param {string} dshHome
+ * @returns {Promise<{ ok: boolean, detail: string }>}
+ */
+async function checkLanInfo(dshHome) {
+  const certPath = join(dshHome, 'dshremote', CERT_FILE)
+  // 插件在后台启动服务，稍等片刻
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const fingerprint = spkiFingerprint(readFileSync(certPath, 'utf8'))
+      const res = await pinnedRequest({ host: '127.0.0.1', port: DEFAULT_CONFIG.lanPort, fingerprint, path: '/v1/info' })
+      const body = res.json()
+      if (res.status === 200 && body.protocol === 1) return { ok: true, detail: `/v1/info 正常（plugin ${body.pluginVersion}）` }
+      return { ok: false, detail: `/v1/info 返回 ${res.status}` }
+    } catch (error) {
+      if (attempt === 29) return { ok: false, detail: `无法访问局域网端口：${error instanceof Error ? error.message : String(error)}` }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+  }
+  return { ok: false, detail: '无法访问局域网端口' }
+}
+
 async function main() {
   const work = mkdtempSync(join(tmpdir(), 'dshremote-load-'))
   const dshHome = join(work, 'home')
@@ -148,9 +176,11 @@ async function main() {
       child?.stderr?.on('data', onData)
       child?.on('exit', (code) => { clearTimeout(timer); reject(new Error(`dsh web 提前退出（code=${code}），输出：\n${output.slice(-2000)}`)) })
     })
-    const result = await checkLoaded(launch)
-    console.log(JSON.stringify({ check: 'load', dshVersion: dsh.version, platform: process.platform, ...result }))
-    process.exitCode = result.ok ? 0 : 1
+    const loaded = await checkLoaded(launch)
+    const lan = loaded.ok ? await checkLanInfo(dshHome) : { ok: false, detail: '插件未加载，跳过局域网检查' }
+    const ok = loaded.ok && lan.ok
+    console.log(JSON.stringify({ check: 'load', dshVersion: dsh.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan }))
+    process.exitCode = ok ? 0 : 1
   } catch (error) {
     console.log(JSON.stringify({ check: 'load', dshVersion: DSH_VERSION, platform: process.platform, ok: false, detail: String(error instanceof Error ? error.message : error) }))
     process.exitCode = 1

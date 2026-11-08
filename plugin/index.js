@@ -7,6 +7,9 @@
  */
 import { parseConfig } from './src/config.js'
 import { openStorage } from './src/storage.js'
+import { loadOrCreateIdentity } from './src/tls/identity.js'
+import { startLanServer } from './src/server/https.js'
+import { createRouter } from './src/server/routes.js'
 
 export const name = 'dshremote'
 export const inject = ['webServer', 'connection']
@@ -30,10 +33,29 @@ export function apply(ctx, rawConfig) {
   }
 
   ctx.effect(async () => {
-    // 加载时不阻塞：后续任务在这里启动各项服务
     const storage = await openStorage()
-    log('info', `已加载，状态目录：${storage.dir}`)
-    return () => {
+    const identity = await loadOrCreateIdentity(storage)
+    if (identity.status === 'created') log('warn', '已生成新的 TLS 身份。之前配对过的手机需要重新配对')
+    if (identity.status === 'renewed') log('info', `证书已用原私钥重新签发（${identity.renewReason}），指纹不变`)
+
+    const router = createRouter(
+      // DSH 版本检查在 T6 实现
+      { dshStatus: () => ({ version: null, compatible: null }) },
+      { onError: (error) => log('error', `处理请求出错：${error instanceof Error ? error.message : String(error)}`) },
+    )
+    let lan
+    try {
+      lan = await startLanServer({ identity, host: config.lanBind, port: config.lanPort, handler: router })
+    } catch (error) {
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code
+      const hint = code === 'EADDRINUSE' ? `端口 ${config.lanPort} 已被占用，请在配置中修改 lanPort` : String(error)
+      log('error', `局域网服务启动失败：${hint}`)
+      throw error
+    }
+    log('info', `已加载。局域网 HTTPS：${config.lanBind}:${lan.port()}，证书指纹：${identity.fingerprint}`)
+
+    return async () => {
+      await lan.close()
       log('info', '已卸载')
     }
   }, 'dshremote lifecycle')

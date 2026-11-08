@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  禁止任何明文流量（ADR 0003、安全红线第 4 条）。
+  这里不配置信任锚：App 不使用系统证书链，而是由 data/net/ 按证书指纹校验（security.md「App 端的证书校验」）。
+  不要在这里加 domain-config 或 debug-overrides 放开明文。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

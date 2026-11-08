@@ -2,7 +2,7 @@
 
 Kotlin + Jetpack Compose。先读根目录的 `AGENTS.md`，M2 的实施方案见 `docs/plans/m2-android.md`。
 
-> 状态：骨架还没建立（M2 的 T2）。下面的命令和目录是计划中的约定，建立骨架时按此执行；如有调整，同步更新本文件。
+> 状态：骨架已建立（M2 T2）。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
 
 ## 基线（ADR 0004、0011）
 
@@ -15,9 +15,14 @@ cd android
 ./gradlew test                     # JVM 单元测试（CI 也跑）
 ./gradlew lint ktlintCheck         # lint（CI 也跑）
 ./gradlew assembleDebug            # 构建 debug APK（CI 也跑）
-./gradlew connectedDebugAndroidTest  # 在已连接的真机上跑界面和 Keystore 测试（只在本地跑）
-./gradlew devServerTest            # 对插件的 dev-server 跑集成测试（只在本地跑，见下文）
+./gradlew connectedDebugAndroidTest  # 在已连接的真机上跑界面和 Keystore 测试（只在本地跑；T4 起有测试）
+./gradlew devServerTest            # 对插件的 dev-server 跑集成测试（只在本地跑；T5 起加入）
 ```
+
+构建需要 JDK 21 和 Android SDK 的 `platforms;android-37.0`（`sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"`），`ANDROID_HOME` 指向 SDK 目录。CI 见 `.github/workflows/android.yml`。
+
+- lint 把警告也当成错误（`warningsAsErrors`）。关掉的检查写在 `app/build.gradle.kts` 和 `app/lint.xml` 中，每一项都注明了原因；不要为了让构建通过而随手关闭检查。
+- ktlint 的规则在 `android/.editorconfig`（`ktlint_official` 风格，Compose 函数允许大写开头）。
 
 **提交前**：`test`、`lint ktlintCheck`、`assembleDebug` 必须通过；改了界面、Keystore 或前台服务时，还要在真机上跑 `connectedDebugAndroidTest`。
 

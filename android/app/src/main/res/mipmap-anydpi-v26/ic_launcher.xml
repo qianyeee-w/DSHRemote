@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 放在 -v26 而不是 anydpi：monochrome 层是 API 33 的元素，放在 anydpi 时 aapt2 会把整个文件归到 v33，导致 Android 8–12 上找不到图标。见 lint.xml -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

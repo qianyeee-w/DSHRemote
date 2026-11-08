@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSHRemote</string>
+    <string name="skeleton_title">DSHRemote</string>
+    <string name="skeleton_body">用手机安全地操控电脑上的 DeepSeek Harness。\n\n这是工程骨架（M2 T2），配对等功能将在后续任务中加入。</string>
+    <string name="skeleton_version">版本 %1$s</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      启动图标必须放在 mipmap-anydpi-v26：图标带有 API 33 的 monochrome 层（lint 的 MonochromeLauncherIcon 要求），
+      放在不带版本的 mipmap-anydpi 时，aapt2 会把文件自动归到 v33，Android 8–12 上就没有图标，构建直接失败。
+      所以只对这个目录忽略「minSdk 已经是 26，-v26 多余」的提示。
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

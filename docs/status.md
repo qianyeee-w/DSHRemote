@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-08（M1 完成，M2 尚未开始）
+最后更新：2026-11-09（M1 完成，M2 方案已确认）
 
 ## 1. 进度
 
@@ -11,9 +11,9 @@
 | 需求与设计（spec、protocol、security、ADR 0001–0008） | 完成 | `docs/` |
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
-| **M2 Android App** | **未开始** | 先写 `docs/plans/m2-android.md` |
+| **M2 Android App** | **进行中**（方案已确认，T1 开始） | `docs/plans/m2-android.md` |
 
-**下一步**：写 M2 的实施方案 `docs/plans/m2-android.md`，格式参考 `m1-plugin.md`：目标、目录、任务拆分（T1、T2…，每个任务都有验收标准）、测试方法、验收清单。**方案经用户确认后才开始写代码。**
+**下一步**：按 `docs/plans/m2-android.md` 第 5 节的顺序做 T1–T12，每完成一项汇报一次。
 
 M2 开工前要知道：
 

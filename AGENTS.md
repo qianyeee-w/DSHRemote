@@ -4,6 +4,8 @@
 
 这份文件是所有 coding agent（Claude Code、DSH、Codex 等）的入口。动手之前先读完它，再按需阅读 `docs/` 中的文档。
 
+**接手项目时，读完这份文件后先读 [`docs/status.md`](docs/status.md)**：当前进度、下一步、协作方式和开发中学到的经验都在里面。
+
 ## 架构
 
 ```
@@ -21,6 +23,7 @@ Android App ──HTTPS / WSS（证书指纹固定 + 设备 token）──> 电�
 
 | 文档 | 内容 |
 |---|---|
+| `docs/status.md` | **项目现状与交接**：做到了哪里、下一步、协作方式、踩过的坑 |
 | `docs/spec-v1.md` | 第一版功能范围，**超出范围的功能不要做** |
 | `docs/protocol.md` | App ↔ 插件 的接口约定（单一事实来源） |
 | `docs/security.md` | 威胁模型与安全红线 |

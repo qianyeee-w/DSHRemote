@@ -60,7 +60,8 @@ export function sendError(res, status, code, message, headers = {}) {
 
 /**
  * 路由用到的外观层操作。第一个参数都是调用方的 deviceId。
- * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages'>} FacadeApi
+ * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages'
+ *   | 'createSession' | 'prompt' | 'cancel' | 'selectModel' | 'setPermissionPreset' | 'answerAttention'>} FacadeApi
  */
 
 /**
@@ -79,6 +80,8 @@ export function sendError(res, status, code, message, headers = {}) {
  */
 
 const PAIR_BODY_LIMIT = 4 * 1024
+/** 发消息的请求体上限：100,000 个字符的文本按 UTF-8 最多约 400 KB */
+const PROMPT_BODY_LIMIT = 512 * 1024
 
 /** @param {import('node:http').ServerResponse} res @param {import('../pairing/devices.js').DeviceInfo} device */
 const sendDevice = (res, device) => sendJson(res, 200, {
@@ -175,6 +178,63 @@ export const ROUTES = Object.freeze([
     auth: true,
     async handle(_req, res, ctx, auth) {
       sendJson(res, 200, await ctx.facade.sessions(deviceIdOf(auth)))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      const body = await readJsonBody(req)
+      sendJson(res, 200, await ctx.facade.createSession(deviceIdOf(auth), body))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/{id}/prompt',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      const body = await readJsonBody(req, { limit: PROMPT_BODY_LIMIT })
+      sendJson(res, 200, await ctx.facade.prompt(deviceIdOf(auth), auth.params.id ?? '', body))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/{id}/cancel',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      req.resume() // 不需要请求体
+      sendJson(res, 200, await ctx.facade.cancel(deviceIdOf(auth), auth.params.id ?? ''))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/{id}/model',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      const body = await readJsonBody(req)
+      sendJson(res, 200, await ctx.facade.selectModel(deviceIdOf(auth), auth.params.id ?? '', body))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/{id}/permission-preset',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      const body = await readJsonBody(req)
+      sendJson(res, 200, await ctx.facade.setPermissionPreset(deviceIdOf(auth), auth.params.id ?? '', body))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/attention/{id}/answer',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      const body = await readJsonBody(req)
+      const device = /** @type {import('../pairing/devices.js').DeviceInfo} */ (auth.device)
+      const result = await ctx.facade.answerAttention(device.deviceId, auth.params.id ?? '', body)
+      ctx.audit?.('attention.answered', { deviceId: device.deviceId, attentionId: result.attentionId })
+      sendJson(res, 200, result)
     },
   },
   {

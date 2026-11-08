@@ -68,7 +68,7 @@ const firstLine = (text) => text.split(/\r?\n/, 1)[0] ?? ''
  * @param {unknown} raw
  * @returns {{ input: Record<string, unknown>, truncated: boolean }}
  */
-function parseToolInput(raw) {
+export function parseToolInput(raw) {
   /** @type {unknown} */
   let parsed
   try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw } catch { parsed = undefined }

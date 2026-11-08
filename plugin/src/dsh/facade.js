@@ -47,6 +47,8 @@ const stringOrNull = (value) => (typeof value === 'string' ? value : null)
  * @property {string | null} cwd
  * @property {'running' | 'waiting' | 'idle'} status
  * @property {AttentionSummary[]} attention
+ * @property {{ provider: string, model: string } | null} model 下一条消息会使用的模型
+ * @property {string | null} permissionPreset 当前的权限模式
  * @property {number} updatedAt
  */
 
@@ -73,6 +75,20 @@ export function parseWorkspaceBaseline(frame) {
     }))
   const archived = new Set((Array.isArray(value.archivedSessionIds) ? value.archivedSessionIds : []).filter((id) => typeof id === 'string'))
   return { items, archived }
+}
+
+/**
+ * projections.values.modelSelection → 下一条消息会使用的模型（next 优先，其次 lastUsed）。
+ * @param {unknown} selection
+ */
+function modelOf(selection) {
+  const s = isObject(selection) ? selection : {}
+  for (const candidate of [s.next, s.lastUsed]) {
+    if (isObject(candidate) && typeof candidate.provider === 'string' && typeof candidate.model === 'string') {
+      return { provider: candidate.provider, model: candidate.model }
+    }
+  }
+  return null
 }
 
 /** @type {Record<SessionSummary['status'], number>} */
@@ -107,6 +123,8 @@ export function convertSessionList(list, workspaces, attentionOf) {
       cwd: stringOrNull(item.cwd) ?? stringOrNull(values.workingDirectory),
       status: attention.length > 0 ? 'waiting' : item.running === true ? 'running' : 'idle',
       attention,
+      model: modelOf(values.modelSelection),
+      permissionPreset: isObject(values.permissions) ? stringOrNull(values.permissions.currentValue) : null,
       updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : 0,
     })
   }
@@ -155,30 +173,66 @@ export function convertPermissionPresets(catalog) {
 }
 
 /**
- * @param {import('./connection.js').RemoteResult} result
- * @param {{ notFound?: string }} [map] DSH 的哪个错误码对应 404
+ * DSH 的业务错误码 → 外观层错误。没有列出的错误码一律 502 DSH_ERROR。
+ * @type {Record<string, [number, string, string]>}
  */
-function unwrap(result, map = {}) {
+const DSH_ERRORS = {
+  'session/not-found': [404, 'NOT_FOUND', '会话不存在'],
+  'workspace/not-found': [404, 'NOT_FOUND', '工作区不存在'],
+  'session/model-unavailable': [400, 'BAD_REQUEST', '这个模型当前不可用'],
+  'gateway/bad-request': [400, 'BAD_REQUEST', 'DSH 拒绝了这个请求，请检查内容'],
+}
+
+/**
+ * @param {import('./connection.js').RemoteResult} result
+ */
+function unwrap(result) {
   if (result.ok) return result.value
-  if (map.notFound && result.error.code === map.notFound) throw new FacadeError(404, 'NOT_FOUND', '会话不存在')
+  const mapped = DSH_ERRORS[result.error.code]
+  if (mapped) throw new FacadeError(mapped[0], mapped[1], mapped[2])
   // DSH 的原始错误信息可能包含路径等细节，不转发给 App
   throw new FacadeError(502, 'DSH_ERROR', `DSH 无法完成这个操作（${result.error.code}）`)
 }
 
 /** DSH 会话 id 的格式（只用来拦截明显非法的输入，不代表 DSH 的全部约束） */
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
+/** 工作区 id、请求 id 的格式 */
+const OPAQUE_ID = /^[A-Za-z0-9_-]{1,128}$/
+/** 单条消息的长度上限（字符） */
+export const PROMPT_TEXT_LIMIT = 100_000
+/** 记住最近发出的消息的 requestId，用来去重：最多多少条、保留多久 */
+const PROMPT_DEDUPE_MAX = 1_000
+const PROMPT_DEDUPE_TTL_MS = 10 * 60_000
+
+/** @param {string} sessionId */
+function assertSessionId(sessionId) {
+  if (!SESSION_ID.test(sessionId)) throw new FacadeError(404, 'NOT_FOUND', '会话不存在')
+}
+/** @param {string} message */
+const badRequest = (message) => new FacadeError(400, 'BAD_REQUEST', message)
 
 export class Facade {
   #dsh
   #attentionOf
 
+  #attention
+  #now
+  /** @type {Map<string, { at: number, done: Promise<unknown> }>} sessionId + requestId → 发送结果 */
+  #recentPrompts = new Map()
+
   /**
    * @param {import('./connection.js').DshConnection} dsh
-   * @param {{ attentionOf?: (sessionId: string) => AttentionSummary[] }} [options] 待处理事项的来源（T8 接入）
+   * @param {{ attention?: import('./attention.js').AttentionTracker, now?: () => number }} [options] attention：待处理事项的跟踪器
    */
   constructor(dsh, options = {}) {
     this.#dsh = dsh
-    this.#attentionOf = options.attentionOf ?? (() => [])
+    this.#now = options.now ?? Date.now
+    this.#attention = options.attention
+    const tracker = options.attention
+    /** @type {(sessionId: string) => AttentionSummary[]} */
+    this.#attentionOf = tracker
+      ? (sessionId) => tracker.list(sessionId).map(({ attentionId, kind }) => ({ attentionId, kind }))
+      : () => []
   }
 
   /**
@@ -242,7 +296,7 @@ export class Facade {
    * @param {{ before?: string | undefined, limit?: number | undefined }} [options] before 是上一页返回的 cursor
    */
   async messages(actor, sessionId, options = {}) {
-    if (!SESSION_ID.test(sessionId)) throw new FacadeError(404, 'NOT_FOUND', '会话不存在')
+    assertSessionId(sessionId)
     const limit = options.limit ?? MESSAGES_DEFAULT_LIMIT
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MESSAGES_MAX_LIMIT) {
       throw new FacadeError(400, 'BAD_REQUEST', `limit 必须是 1 到 ${MESSAGES_MAX_LIMIT} 之间的整数`)
@@ -253,7 +307,124 @@ export class Facade {
       if (!/^(0|[1-9][0-9]{0,15})$/.test(options.before)) throw new FacadeError(400, 'BAD_REQUEST', 'cursor 格式不对')
       request.beforeSeq = Number(options.before)
     }
-    const page = unwrap(await this.#dsh.call('session/page', { request }, { actor }), { notFound: 'session/not-found' })
+    const page = unwrap(await this.#dsh.call('session/page', { request }, { actor }))
     return convertPage(isObject(page) ? page : {})
+  }
+
+  // ---------------------------------------------------------------- 写操作（T8）
+
+  /**
+   * 新建会话。
+   * @param {string} actor @param {unknown} body `{ workspaceId? }`
+   */
+  async createSession(actor, body) {
+    const b = isObject(body) ? body : {}
+    /** @type {Record<string, unknown>} */
+    const request = {}
+    if (b.workspaceId !== undefined) {
+      if (typeof b.workspaceId !== 'string' || !OPAQUE_ID.test(b.workspaceId)) throw badRequest('workspaceId 格式不对')
+      request.workspaceId = b.workspaceId
+    }
+    const value = unwrap(await this.#dsh.call('session/create', { request }, { actor }))
+    if (!isObject(value) || typeof value.sessionId !== 'string') throw new FacadeError(502, 'DSH_ERROR', 'DSH 没有返回会话 id')
+    return { sessionId: value.sessionId }
+  }
+
+  /**
+   * 发送消息。requestId 由 App 生成，插件按它去重：App 因为网络问题重试时，同一条消息只发出一次。
+   * DSH 0.2.2-rc.1 实测并不按 requestId 去重（docs/research/dsh-session-api.md 5.7），所以由插件来做。
+   * 去重记录只在内存中，保留 10 分钟；DSH 返回错误时删掉记录，允许重试。
+   * @param {string} actor @param {string} sessionId @param {unknown} body `{ requestId, text, mode }`
+   */
+  async prompt(actor, sessionId, body) {
+    assertSessionId(sessionId)
+    const b = isObject(body) ? body : {}
+    if (typeof b.requestId !== 'string' || !OPAQUE_ID.test(b.requestId)) throw badRequest('requestId 格式不对')
+    if (typeof b.text !== 'string' || b.text.trim() === '') throw badRequest('text 不能为空')
+    if (b.text.length > PROMPT_TEXT_LIMIT) throw badRequest(`text 不能超过 ${PROMPT_TEXT_LIMIT} 个字符`)
+    const mode = b.mode ?? 'queue'
+    if (mode !== 'queue' && mode !== 'steer') throw badRequest('mode 必须是 queue 或 steer')
+    const key = `${sessionId}\n${b.requestId}`
+    const now = this.#now()
+    for (const [k, entry] of this.#recentPrompts) {
+      if (now - entry.at <= PROMPT_DEDUPE_TTL_MS && this.#recentPrompts.size <= PROMPT_DEDUPE_MAX) break
+      this.#recentPrompts.delete(k) // Map 按插入顺序，最早的在前
+    }
+    const existing = this.#recentPrompts.get(key)
+    if (existing) {
+      await existing.done
+      return { accepted: true }
+    }
+    const done = this.#dsh.call('session/prompt', {
+      request: { requestId: b.requestId, sessionId, mode, content: [{ type: 'text', text: b.text }] },
+    }, { actor }).then(unwrap)
+    const entry = { at: now, done }
+    this.#recentPrompts.set(key, entry)
+    try {
+      await done
+    } catch (error) {
+      if (this.#recentPrompts.get(key) === entry) this.#recentPrompts.delete(key)
+      throw error
+    }
+    return { accepted: true }
+  }
+
+  /**
+   * 停止当前任务。会话空闲时也返回成功。
+   * @param {string} actor @param {string} sessionId
+   */
+  async cancel(actor, sessionId) {
+    assertSessionId(sessionId)
+    unwrap(await this.#dsh.call('session/cancel', { request: { sessionId } }, { actor }))
+    return { accepted: true }
+  }
+
+  /**
+   * 切换模型。
+   * @param {string} actor @param {string} sessionId @param {unknown} body `{ provider, model }`
+   */
+  async selectModel(actor, sessionId, body) {
+    assertSessionId(sessionId)
+    const b = isObject(body) ? body : {}
+    if (typeof b.provider !== 'string' || !OPAQUE_ID.test(b.provider)) throw badRequest('provider 格式不对')
+    if (typeof b.model !== 'string' || !/^[A-Za-z0-9_.:/-]{1,128}$/.test(b.model)) throw badRequest('model 格式不对')
+    const value = unwrap(await this.#dsh.call('session/selectModel', { request: { sessionId, provider: b.provider, model: b.model } }, { actor }))
+    const selected = isObject(value) ? value.selected : undefined
+    return { model: modelOf({ next: selected }) }
+  }
+
+  /**
+   * 切换权限模式。DSH 没有单独的接口，Web 界面是执行 `/permission <preset>` 命令（ui-permission-presets）。
+   * 这里只拼出这一条命令，preset 必须在 DSH 给出的列表中，**不提供执行任意命令的能力**（安全红线第 8 条）。
+   * @param {string} actor @param {string} sessionId @param {unknown} body `{ preset }`
+   */
+  async setPermissionPreset(actor, sessionId, body) {
+    assertSessionId(sessionId)
+    const b = isObject(body) ? body : {}
+    if (typeof b.preset !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(b.preset)) throw badRequest('preset 格式不对')
+    const { presets } = await this.permissionPresets(actor)
+    if (!presets.some((p) => p.id === b.preset)) throw badRequest('没有这个权限模式')
+    const value = unwrap(await this.#dsh.call('commands/execute', {
+      agentId: sessionId, line: `/permission ${b.preset}`, submittedAttachments: [],
+    }, { actor }))
+    const result = isObject(value) && isObject(value.result) ? value.result : undefined
+    if (!result) throw new FacadeError(502, 'DSH_ERROR', 'DSH 没有提供切换权限模式的命令')
+    if (result.kind !== 'success') throw new FacadeError(502, 'DSH_ERROR', 'DSH 没有切换权限模式')
+    return { permissionPreset: b.preset }
+  }
+
+  /**
+   * 处理审批或回答提问（protocol.md 5.3）。
+   * @param {string} actor @param {string} attentionId @param {unknown} body
+   */
+  async answerAttention(actor, attentionId, body) {
+    if (!this.#attention) throw new DshUnavailableError('待处理事项跟踪器没有启动')
+    if (!OPAQUE_ID.test(attentionId)) throw new FacadeError(404, 'NOT_FOUND', '待处理事项不存在')
+    return this.#attention.answer(actor, attentionId, body)
+  }
+
+  /** 当前所有待处理事项（T9 的 hello 使用）。 */
+  attention() {
+    return this.#attention?.list() ?? []
   }
 }

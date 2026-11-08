@@ -3,4 +3,7 @@
 const fail = async () => { throw new Error('这个测试不应当访问 DSH') }
 
 /** @type {import('../../src/server/routes.js').FacadeApi} */
-export const unusedFacade = { workspaces: fail, sessions: fail, models: fail, permissionPresets: fail, messages: fail }
+export const unusedFacade = {
+  workspaces: fail, sessions: fail, models: fail, permissionPresets: fail, messages: fail,
+  createSession: fail, prompt: fail, cancel: fail, selectModel: fail, setPermissionPreset: fail, answerAttention: fail,
+}

@@ -118,6 +118,20 @@ DSH 的 `remote-access` 包和 Peer 身份机制（2026-10-12 实现）目前用
 - 不存在的会话：`session/page` 返回错误码 `session/not-found`。
 - Windows 上的命令工具叫 `pwsh`，参数和 `bash` 相同（`command`、`description`、`sandbox_permissions`、`justification`）。
 
+### 5.7 T8 实现写操作时确认的细节
+
+- **多客户端与 waterfall**（`api/gateway/src/index.ts`）：
+  - 新订阅 `$events` 的 owner 客户端，会在 `ready` 帧之后立即收到所有还没处理的 waterfall（重放）。所以插件断线重连后能恢复待处理事项。
+  - 任一客户端回答后，DSH 从其他客户端撤回这个事件，并向它们发送 `cancel` 帧；回答的客户端自己**不会**收到 cancel。任务被停止时，所有客户端都收到 cancel。两种情况无法区分。
+  - **已经被处理掉的事件，再用 `$events/result` 回答，DSH 静默忽略并返回成功**（源码注释：idempotent no-op）。所以「别处已处理」只能通过 cancel 帧判断。插件的做法：回答成功后再等约 0.3 秒，期间收到 cancel 就返回 409。契约测试中用另一个客户端模拟 Desktop，验证了「Desktop 先处理 → 手机 409」「手机先处理 → 手机 200」两种情况，结果和工具的实际状态一致。
+  - 用不存在的 `clientId` 回答，返回 `gateway/internal`。
+- **`requestId` 去重**：源码中 `hasPromptRequest` 会检查 inbox 和会话历史，但在 0.2.2-rc.1 上实测，同一个 `requestId` 连续发两次，两条都会写进会话。所以去重由插件来做。
+- **切换权限模式**：没有单独的接口。Web 界面（`client/ui-permission-presets`）执行 `/permission <preset>` 命令，对应一元接口 `commands/execute`，`args` 为 `{ agentId: <sessionId>, line, submittedAttachments: [] }`（注意是 `agentId`，不是源码参数名 `agent`）。成功时返回 `{ commandId, result: { kind: "success", text } }`；模式名不对时同样返回 `ok`，但 `result.kind` 为 `error`。会话的当前模式在 `projections.values.permissions.currentValue`。
+- **切换模型**：`session/selectModel { request: { sessionId, provider, model } }` → `{ selected: { provider, model } }`。模型不存在时错误码为 `session/model-unavailable`。会话的模型在 `projections.values.modelSelection`（`next`、`lastUsed`）。
+- **错误码**：不存在的会话 `session/not-found`（prompt、cancel、selectModel、commands/execute 都是）；不存在的工作区 `workspace/not-found`；空消息 `gateway/bad-request`；停止一个空闲的会话返回成功。
+- 审批请求中只有 `toolName`、`callId`、`reason`、`displayReason`（8 种语言），**没有要执行的命令**。插件用 `callId` 在会话日志末尾找到 `tool/call`，补上命令。
+- `session/page` 在源码中已标为 `@deprecated`，建议改用 `events`。0.2.2-rc.1 上仍然可用，以后的版本适配时留意。
+
 ## 6. 结论：透传还是外观层
 
 | 考量 | 透传（App 直接说 DSH 协议） | 外观层（插件提供精简接口） |

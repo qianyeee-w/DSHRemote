@@ -92,13 +92,13 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | GET | `/v1/sessions` | 需要 | 会话列表：`{ sessions: [...] }`，每项的结构见 5.1。已归档的会话不出现（和 Desktop 一致） |
 | POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
 | GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor }`，消息结构见 5.2。见下方「历史分页」 |
-| POST | `/v1/sessions/{id}/prompt` | 需要 | `{ requestId, text, mode: "queue" \| "steer" }`。`requestId` 由 App 生成，用于防止重复提交 |
-| POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务 |
+| POST | `/v1/sessions/{id}/prompt` | 需要 | 发消息 `{ requestId, text, mode?: "queue" \| "steer" }`，返回 `{ accepted: true }`。见下方「发消息」 |
+| POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务，不需要请求体，返回 `{ accepted: true }`。会话空闲时也返回成功 |
 | GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description? }] }` |
-| POST | `/v1/sessions/{id}/model` | 需要 | 切换模型 `{ provider, model }` |
+| POST | `/v1/sessions/{id}/model` | 需要 | 切换模型 `{ provider, model }`（取值来自 `/v1/models`），返回 `{ model: { provider, model } }`。模型不可用时 `400` |
 | GET | `/v1/permission-presets` | 需要 | 权限模式列表：`{ default: string \| null, presets: [{ id, name }] }`，例如 `read-only`、`workspace-write`、`danger-full-access` |
-| POST | `/v1/sessions/{id}/permission-preset` | 需要 | 切换权限模式 **[待定]**：DSH 侧对应哪个接口还要在 M1 中确认 |
-| POST | `/v1/attention/{attentionId}/answer` | 需要 | 处理审批或回答提问，见 5.3 |
+| POST | `/v1/sessions/{id}/permission-preset` | 需要 | 切换权限模式 `{ preset }`（取值来自 `/v1/permission-presets`），返回 `{ permissionPreset }`。不在列表中的值 `400` |
+| POST | `/v1/attention/{attentionId}/answer` | 需要 | 处理审批或回答提问，见 5.3，返回 `{ attentionId }` |
 | GET | `/v1/stream` | 需要 | WebSocket，所有实时数据都走这一条连接，见第 6 节 |
 
 设备的列表和撤销**只在本机配对页上提供**，不开放给局域网访问。
@@ -110,6 +110,13 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - `limit`：本页最多包含多少条 DSH 消息，默认 50，范围 1–200。插件会过滤掉 DSH 内部注入的消息，所以返回的 `messages` 可能少于 `limit`，甚至为空，这不代表已经翻到底。**是否还有更早的消息只看 `hasMore`**。
 - `cursor`：不透明的字符串，App 不要解析它。`hasMore` 为 `true` 时，把它作为下一次请求的 `before`，取更早的一页；`hasMore` 为 `false` 时为 `null`。
 - 不带 `before` 时返回最新的一页。同一个会话的各页按顺序拼起来，就是完整的历史，不会重复，也不会把一次工具调用拆到两页里。
+
+**发消息**
+
+- `requestId`：App 为每条消息生成一个新的 id（建议 UUID，只能由字母、数字、`_`、`-` 组成，最长 128 个字符）。因为网络问题重试同一条消息时，**必须沿用原来的 `requestId`**：插件在 10 分钟内只会把它发出一次，重复的请求直接返回成功。插件重启后这个记录会清空。
+- `text`：不能为空，最多 100,000 个字符。
+- `mode`：`queue`（默认）在当前任务结束后再处理；`steer` 插话，在当前任务的下一步就让模型看到。
+- 会话不存在时返回 `404`。
 
 插件内部通过 DSH 官方的 Remote API 实现以上接口，转换逻辑都在 `plugin/src/dsh/` 中。具体对应关系见 [调研文档](research/dsh-session-api.md) 第 4 节。**App 永远拿不到 DSH 的 cookie 或启动 token。**
 
@@ -125,11 +132,13 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
   "cwd": "/home/me/project",
   "status": "running | waiting | idle",
   "attention": [{ "attentionId": "…", "kind": "approval | question" }],
+  "model": { "provider": "deepseek-official", "model": "deepseek-flash" },
+  "permissionPreset": "workspace-write",
   "updatedAt": 1794107669094
 }
 ```
 
-`title` 在会话还没有标题时为 `null`（App 显示为「新会话」）；`workspaceId` 在会话没有归入任何工作区时为 `null`。
+`title` 在会话还没有标题时为 `null`（App 显示为「新会话」）；`workspaceId` 在会话没有归入任何工作区时为 `null`。`model` 是下一条消息会使用的模型，`permissionPreset` 是当前的权限模式，读不到时都为 `null`。
 
 `status` 为 `waiting` 表示有未处理的审批或提问（`attention` 不为空）。会话列表按「waiting → running → idle」排序，同一状态内按 `updatedAt` 倒序。
 
@@ -167,7 +176,12 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
   "attentionId": "…",
   "sessionId": "…",
   "kind": "approval",
-  "approval": { "toolName": "bash", "reason": "允许本次操作使用 danger-full-access 权限：…" },
+  "approval": {
+    "toolName": "bash",
+    "reason": "允许本次操作使用 danger-full-access 权限：…",
+    "summary": "运行命令：npm install",
+    "input": { "command": "npm install", "description": "…" }
+  },
   "createdAt": 1794107669094
 }
 ```
@@ -184,12 +198,20 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 }
 ```
 
+- 审批的 `reason` 优先使用中文。DSH 的审批请求里看不到要执行的命令，插件会从会话日志中找到对应的工具调用，补上 `summary` 和 `input`（截断规则同 5.2）；找不到时这两个字段不出现，App 只显示 `toolName` 和 `reason`。
+- `sessionId` 对子代理（subagent）发起的事项可能是子代理的 id，不在会话列表中。v1 的 App 照样显示和处理即可。
+
 回答（`POST /v1/attention/{attentionId}/answer`）：
 
 - 审批：`{ "decision": "allow" | "reject" }`。DSH 的审批**只对当前这一个请求有效**，没有「以后都允许」这个选项。想减少审批次数，要去切换权限模式。
-- 提问：`{ "answers": [{ "id": "q1", "selected": ["方案A"], "custom": "可选的自由文本" }] }`
+- 提问：`{ "answers": [{ "id": "q1", "selected": ["方案A"], "custom": "可选的自由文本" }] }`。`id` 必须属于这个提问，`selected` 只能是选项中的 `label`，单选题最多选一项；每个问题至少选一项或填写 `custom`（最多 4,000 个字符）。不需要回答全部问题。
+- 格式不对时返回 `400`，事项保持待处理。
 
-如果这项事项已经在别处被处理了（例如在 Desktop 上点了批准），返回 `409`，错误码 `ATTENTION_RESOLVED`。
+如果这项事项已经在别处被处理了（例如在 Desktop 上点了批准），或者任务已经被停止，返回 `409`，错误码 `ATTENTION_RESOLVED`。从来没有出现过的 `attentionId` 返回 `404`。
+
+两边同时处理时，只有一边生效：插件保证手机收到 `200` 时，生效的一定是手机的回答。为此插件在 DSH 接受回答后会多等约 0.3 秒，确认没有被别处抢先，所以回答接口的响应会比其他接口稍慢。
+
+> 安装插件后，插件一直以 owner 身份连着 DSH，DSH 会认为「有人能回答审批」。没有任何窗口和手机在线时，审批会一直等待，而不是像以前那样直接失败。这正是远程处理审批需要的行为，`security.md` 中有说明。
 
 ## 6. 实时流 `/v1/stream`
 
@@ -203,7 +225,7 @@ App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 | `session.updated` | 会话摘要发生变化（状态、标题等），附带新的会话摘要 |
 | `session.removed` | 会话被删除 |
 | `attention.requested` | 出现新的待处理事项，附带完整的事项内容 |
-| `attention.resolved` | 某个事项已经处理完：`{ attentionId, by: "this-device" \| "other" \| "cancelled" }`。App 收到后收起对应的界面和通知 |
+| `attention.resolved` | 某个事项已经处理完：`{ attentionId, by: "this-device" \| "other" }`。`other` 表示在别处处理掉了，或者任务被停止（DSH 0.2.2 不区分这两种情况）。App 收到后收起对应的界面和通知 |
 | `session.idle` | 会话从运行变为空闲，并持续 8 秒（用于发出「任务完成」通知；8 秒内又开始运行就不发） |
 | `message.upsert` | **只对已订阅的会话发送**：新增或更新一条消息（结构见 5.2）。流式输出时，同一条消息会多次发送，并带上递增的 `rev` |
 | `error` | 出错，附带错误码 |

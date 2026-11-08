@@ -36,7 +36,7 @@ test('会话列表：标题、所属工作区、状态；没有归入工作区�
   assert.equal(blank?.title, null)
   assert.equal(typeof blank?.cwd, 'string')
   // 只输出协议规定的字段，DSH 的 projections 等内部数据不出现
-  assert.deepEqual(Object.keys(sessions[0] ?? {}).sort(), ['attention', 'cwd', 'sessionId', 'status', 'title', 'updatedAt', 'workspaceId'])
+  assert.deepEqual(Object.keys(sessions[0] ?? {}).sort(), ['attention', 'cwd', 'model', 'permissionPreset', 'sessionId', 'status', 'title', 'updatedAt', 'workspaceId'])
 })
 
 test('会话列表：waiting → running → idle 排序，同一状态内按 updatedAt 倒序；已归档的会话不出现', () => {
@@ -146,4 +146,128 @@ test('Facade：工作区流出错时，断线视为 DSH 不可用，其他错误
   await assert.rejects(lost.workspaces(ACTOR), DshUnavailableError)
   const failed = new Facade(fakeConnection({}, { streamError: { code: 'gateway/internal', message: '' } }).connection)
   await rejectsWith(failed.workspaces(ACTOR), 502, 'DSH_ERROR')
+})
+
+// ---------------------------------------------------------------- 写操作
+
+test('会话摘要：带上当前模型和权限模式', () => {
+  const workspaces = parseWorkspaceBaseline(fixture('workspace-follow-first.json'))
+  const sessions = convertSessionList(fixture('session-list.json'), workspaces, () => [])
+  const main = sessions.find((s) => s.title !== null)
+  assert.deepEqual(main?.model, { provider: 'deepseek-official', model: 'deepseek-flash' })
+  assert.equal(main?.permissionPreset, 'workspace-write')
+})
+
+test('写操作：参数映射到 DSH 的接口', async () => {
+  const fake = fakeConnection({
+    'session/create': { ok: true, value: { sessionId: 'session-new' } },
+    'session/prompt': { ok: true, value: { accepted: true } },
+    'session/cancel': { ok: true, value: { accepted: true } },
+    'session/selectModel': { ok: true, value: { selected: { provider: 'p', model: 'm' } } },
+    'permissionPresets/catalog': { ok: true, value: fixture('permission-presets.json') },
+    'commands/execute': { ok: true, value: { commandId: 'c', result: { kind: 'success', text: 'preset read-only' } } },
+  })
+  const facade = new Facade(fake.connection)
+  assert.deepEqual(await facade.createSession(ACTOR, {}), { sessionId: 'session-new' })
+  assert.deepEqual(await facade.createSession(ACTOR, { workspaceId: 'w1' }), { sessionId: 'session-new' })
+  assert.deepEqual(await facade.prompt(ACTOR, 's1', { requestId: 'r1', text: '你好', mode: 'steer' }), { accepted: true })
+  assert.deepEqual(await facade.prompt(ACTOR, 's1', { requestId: 'r2', text: '默认排队' }), { accepted: true })
+  assert.deepEqual(await facade.cancel(ACTOR, 's1'), { accepted: true })
+  assert.deepEqual(await facade.selectModel(ACTOR, 's1', { provider: 'p', model: 'm' }), { model: { provider: 'p', model: 'm' } })
+  assert.deepEqual(await facade.setPermissionPreset(ACTOR, 's1', { preset: 'read-only' }), { permissionPreset: 'read-only' })
+  assert.deepEqual(fake.calls.map((c) => [c.endpoint, c.args]), [
+    ['session/create', { request: {} }],
+    ['session/create', { request: { workspaceId: 'w1' } }],
+    ['session/prompt', { request: { requestId: 'r1', sessionId: 's1', mode: 'steer', content: [{ type: 'text', text: '你好' }] } }],
+    ['session/prompt', { request: { requestId: 'r2', sessionId: 's1', mode: 'queue', content: [{ type: 'text', text: '默认排队' }] } }],
+    ['session/cancel', { request: { sessionId: 's1' } }],
+    ['session/selectModel', { request: { sessionId: 's1', provider: 'p', model: 'm' } }],
+    ['permissionPresets/catalog', {}],
+    ['commands/execute', { agentId: 's1', line: '/permission read-only', submittedAttachments: [] }],
+  ])
+  assert.ok(fake.calls.every((c) => c.actor === ACTOR))
+})
+
+test('【反向】写操作：格式不对的参数不会发给 DSH', async () => {
+  const fake = fakeConnection({})
+  const facade = new Facade(fake.connection)
+  const cases = [
+    () => facade.createSession(ACTOR, { workspaceId: '../x' }),
+    () => facade.prompt(ACTOR, 's1', { text: 'hi' }), // 缺少 requestId
+    () => facade.prompt(ACTOR, 's1', { requestId: 'r', text: '   ' }),
+    () => facade.prompt(ACTOR, 's1', { requestId: 'r', text: 'x'.repeat(100_001) }),
+    () => facade.prompt(ACTOR, 's1', { requestId: 'r', text: 'hi', mode: 'now' }),
+    () => facade.prompt(ACTOR, 's1', { requestId: 'r w', text: 'hi' }),
+    () => facade.selectModel(ACTOR, 's1', { provider: 'p' }),
+    () => facade.selectModel(ACTOR, 's1', { provider: 'p', model: 'm m' }),
+    () => facade.setPermissionPreset(ACTOR, 's1', {}),
+  ]
+  for (const run of cases) await assert.rejects(run(), (e) => e instanceof FacadeError && e.status === 400)
+  await assert.rejects(facade.prompt(ACTOR, 'bad/id', { requestId: 'r', text: 'hi' }), (e) => e instanceof FacadeError && e.status === 404)
+  assert.equal(fake.calls.length, 0)
+})
+
+test('【反向】权限模式：只能切换到 DSH 列出的模式，不能借机执行其他命令（安全红线 8）', async () => {
+  const fake = fakeConnection({
+    'permissionPresets/catalog': { ok: true, value: fixture('permission-presets.json') },
+    'commands/execute': { ok: true, value: { commandId: 'c', result: { kind: 'success', text: '' } } },
+  })
+  const facade = new Facade(fake.connection)
+  for (const preset of ['read-only; /plugin add x', 'read-only\n/clear', '../x', 'not-in-catalog', 'READ-ONLY']) {
+    await assert.rejects(facade.setPermissionPreset(ACTOR, 's1', { preset }), (e) => e instanceof FacadeError && e.status === 400, preset)
+  }
+  assert.equal(fake.calls.filter((c) => c.endpoint === 'commands/execute').length, 0)
+})
+
+test('写操作：DSH 的错误码映射', async () => {
+  const facade = new Facade(fakeConnection({
+    'session/prompt': { ok: false, error: { code: 'session/not-found', message: 'x' } },
+    'session/create': { ok: false, error: { code: 'workspace/not-found', message: 'x' } },
+    'session/selectModel': { ok: false, error: { code: 'session/model-unavailable', message: 'x' } },
+    'session/cancel': { ok: false, error: { code: 'something/new', message: '/path/leak' } },
+    'permissionPresets/catalog': { ok: true, value: fixture('permission-presets.json') },
+    'commands/execute': { ok: true, value: { commandId: 'c', result: { kind: 'error', text: 'unknown preset' } } },
+  }).connection)
+  /** @param {Promise<unknown>} p @param {number} status */
+  const expectStatus = (p, status) => assert.rejects(p, (e) => e instanceof FacadeError && e.status === status && !e.message.includes('/path'))
+  await expectStatus(facade.prompt(ACTOR, 's1', { requestId: 'r', text: 'hi' }), 404)
+  await expectStatus(facade.createSession(ACTOR, { workspaceId: 'w' }), 404)
+  await expectStatus(facade.selectModel(ACTOR, 's1', { provider: 'p', model: 'm' }), 400)
+  await expectStatus(facade.cancel(ACTOR, 's1'), 502)
+  await expectStatus(facade.setPermissionPreset(ACTOR, 's1', { preset: 'read-only' }), 502)
+})
+
+test('发消息按 requestId 去重：重试和并发的重复提交只发出一次；失败后可以重试；过期后不再去重', async () => {
+  let now = 0
+  let fail = true
+  /** @type {(() => void) | undefined} */
+  let release
+  const calls = []
+  const connection = /** @type {any} */ ({
+    async call(/** @type {string} */ endpoint) {
+      calls.push(endpoint)
+      if (fail) return { ok: false, error: { code: 'something/new', message: '' } }
+      await new Promise((r) => { release = () => r(undefined) })
+      return { ok: true, value: { accepted: true } }
+    },
+  })
+  const facade = new Facade(connection, { now: () => now })
+  const body = { requestId: 'r1', text: 'hi' }
+  await assert.rejects(facade.prompt(ACTOR, 's1', body), FacadeError)
+  fail = false
+  const first = facade.prompt(ACTOR, 's1', body)
+  const second = facade.prompt(ACTOR, 's1', body) // 并发的重复提交
+  await new Promise((r) => setImmediate(r))
+  release?.()
+  assert.deepEqual(await Promise.all([first, second]), [{ accepted: true }, { accepted: true }])
+  assert.deepEqual(await facade.prompt(ACTOR, 's1', body), { accepted: true }) // 之后的重试
+  assert.equal(calls.length, 2) // 失败的一次 + 成功的一次
+  // 不同会话的同一个 requestId 不算重复
+  const other = facade.prompt(ACTOR, 's2', body)
+  await new Promise((r) => setImmediate(r)); release?.(); await other
+  assert.equal(calls.length, 3)
+  now = 11 * 60_000
+  const late = facade.prompt(ACTOR, 's1', body)
+  await new Promise((r) => setImmediate(r)); release?.(); await late
+  assert.equal(calls.length, 4)
 })

@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { Facade, FacadeError } from '../../src/dsh/facade.js'
+import { AttentionTracker } from '../../src/dsh/attention.js'
 import { startDshWeb, DSH_VERSION, log } from '../helpers/dsh-runtime.mjs'
 import { startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE } from './fake-llm.mjs'
 
@@ -51,6 +52,21 @@ async function until(fn, label, ms = STEP_TIMEOUT_MS) {
 
 /** @type {(() => unknown) | undefined} */
 let diagnostics
+
+/**
+ * @template T
+ * @param {() => Promise<T | undefined | false>} fn @param {string} label @param {number} [ms]
+ * @returns {Promise<T>}
+ */
+async function untilAsync(fn, label, ms = STEP_TIMEOUT_MS) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    const value = await fn()
+    if (value) return value
+    await wait(200)
+  }
+  throw new Error(`等待超时：${label}`)
+}
 
 /**
  * 跑一个检查项；抛出异常记为失败，后续项目继续执行。
@@ -273,6 +289,127 @@ async function main() {
       }
       throw new Error('应当返回 404')
     })
+
+    // ---- 外观层（写）：新建会话、发消息、审批和提问、切换模型和权限模式
+    const tracker = new AttentionTracker(conn)
+    const writer = new Facade(conn, { attention: tracker })
+    /** @type {string | undefined} */
+    let wsid
+    /** @param {string} id */
+    const userTexts = async (id) => (await writer.messages(ACTOR, id, { limit: 200 })).messages
+      .filter((m) => m.role === 'user').map((m) => m.parts.map((x) => (x.type === 'text' ? x.text : '')).join(''))
+    /** @param {string} id */
+    const toolDone = async (id) => (await writer.messages(ACTOR, id, { limit: 200 })).messages.filter((m) => JSON.stringify(m).includes(TOOL_DONE_REPLY)).length
+    await step('外观层：新建会话，重复提交同一个 requestId 只发出一条消息', async () => {
+      wsid = (await writer.createSession(ACTOR, {})).sessionId
+      const requestId = randomUUID()
+      await writer.prompt(ACTOR, wsid, { requestId, text: '你好' })
+      await writer.prompt(ACTOR, wsid, { requestId, text: '你好' })
+      await wait(1500)
+      const texts = await userTexts(wsid)
+      if (texts.filter((t) => t === '你好').length !== 1) throw new Error(`用户消息不对：${short(texts)}`)
+    })
+    if (!wsid) throw new Error('无法新建会话，后续检查跳过')
+    const ws = wsid
+
+    await step('外观层：提问出现在会话列表中（waiting），回答后消失；重复回答 409', async () => {
+      const before = await toolDone(ws)
+      await writer.prompt(ACTOR, ws, { requestId: randomUUID(), text: '请 ASK 我一个问题' })
+      const question = await until(() => tracker.list(ws).find((a) => a.kind === 'question'), '提问出现')
+      const { sessions } = await writer.sessions(ACTOR)
+      const summary = sessions.find((x) => x.sessionId === ws)
+      if (summary?.status !== 'waiting' || summary.attention[0]?.attentionId !== question.attentionId) throw new Error(`会话摘要不对：${short(summary)}`)
+      await writer.answerAttention(ACTOR, question.attentionId, { answers: [{ id: 'q1', selected: ['方案B'] }] })
+      try {
+        await writer.answerAttention(ACTOR, question.attentionId, { answers: [{ id: 'q1', selected: ['方案A'] }] })
+        throw new Error('重复回答应当返回 409')
+      } catch (error) {
+        if (!(error instanceof FacadeError && error.status === 409)) throw error
+      }
+      await untilAsync(async () => (await toolDone(ws)) > before, '回答后模型继续')
+      const history = JSON.stringify((await writer.messages(ACTOR, ws, { limit: 200 })).messages)
+      if (!history.includes('方案B')) throw new Error('模型收到的回答不对')
+    })
+
+    await step('外观层：审批带上要执行的命令；另一个客户端（模拟 Desktop）先批准后，手机再处理返回 409', async () => {
+      const desktop = new DshConnection({ getPort: () => Number(launch.port), authenticatedUrl: (base) => { const u = new URL(base); u.searchParams.set('token', token); return u.href } })
+      try {
+        /** @type {import('../../src/dsh/connection.js').DshAppEvent[]} */
+        const desktopEvents = []
+        desktop.onEvent((e) => desktopEvents.push(e))
+        await until(() => desktop.status().state === 'ready', 'desktop ready')
+        const before = await toolDone(ws)
+        await writer.prompt(ACTOR, ws, { requestId: randomUUID(), text: '请执行 SHELL 命令' })
+        const approval = await until(() => tracker.list(ws).find((a) => a.kind === 'approval' && a.approval?.summary), '审批出现')
+        if (!approval.approval?.summary?.startsWith('运行命令：echo dshremote-contract')) throw new Error(`审批摘要不对：${short(approval.approval)}`)
+        const seen = await until(() => desktopEvents.find((e) => e.type === 'waterfall' && e.eventId === approval.attentionId), 'desktop 收到同一个审批')
+        if (seen.type !== 'waterfall') throw new Error('unreachable')
+        valueOf(await desktop.answerEvent(seen.eventId, { kind: 'result', value: 'allowed-once' }, { actor: PLUGIN_ACTOR }))
+        await until(() => !tracker.get(approval.attentionId), '手机端收到 cancel')
+        try {
+          await writer.answerAttention(ACTOR, approval.attentionId, { decision: 'reject' })
+          throw new Error('应当返回 409')
+        } catch (error) {
+          if (!(error instanceof FacadeError && error.status === 409)) throw error
+        }
+        await untilAsync(async () => (await toolDone(ws)) > before, '命令执行完')
+      } finally { desktop.close() }
+    })
+
+    await step('外观层：两边几乎同时处理，只有一边成功', async () => {
+      const desktop = new DshConnection({ getPort: () => Number(launch.port), authenticatedUrl: (base) => { const u = new URL(base); u.searchParams.set('token', token); return u.href } })
+      try {
+        /** @type {import('../../src/dsh/connection.js').DshAppEvent[]} */
+        const desktopEvents = []
+        desktop.onEvent((e) => desktopEvents.push(e))
+        await until(() => desktop.status().state === 'ready', 'desktop ready')
+        const before = await toolDone(ws)
+        await writer.prompt(ACTOR, ws, { requestId: randomUUID(), text: '请再执行一次 SHELL 命令' })
+        const approval = await until(() => tracker.list(ws).find((a) => a.kind === 'approval'), '审批出现')
+        await until(() => desktopEvents.find((e) => e.type === 'waterfall' && e.eventId === approval.attentionId), 'desktop 收到审批')
+        // Desktop 先发出回答，手机紧跟着回答：手机的回答通常在 DSH 已经处理完、但 cancel 帧还没到达插件时发出，
+        // DSH 对它静默返回成功，插件要靠随后到达的 cancel 帧判断出 409
+        const pcAnswer = desktop.answerEvent(approval.attentionId, { kind: 'result', value: 'allowed-once' }, { actor: PLUGIN_ACTOR })
+        const [phone, pc] = await Promise.allSettled([
+          writer.answerAttention(ACTOR, approval.attentionId, { decision: 'reject' }),
+          pcAnswer,
+        ])
+        if (pc.status !== 'fulfilled' || !pc.value.ok) throw new Error('desktop 的回答调用失败')
+        await untilAsync(async () => (await toolDone(ws)) > before, '这一轮结束')
+        const history = (await writer.messages(ACTOR, ws, { limit: 200 })).messages
+        const last = history.flatMap((m) => m.parts).filter((x) => x.type === 'tool').at(-1)
+        const outcome = last?.type === 'tool' ? last.status : 'none'
+        // 手机返回成功 ⇔ 拒绝生效；手机返回 409 ⇔ Desktop 的批准生效
+        const phoneWon = phone.status === 'fulfilled'
+        if (phoneWon && outcome !== 'rejected') throw new Error(`手机返回成功，但工具状态是 ${outcome}`)
+        if (!phoneWon && !(phone.reason instanceof FacadeError && phone.reason.status === 409)) throw phone.reason
+        if (!phoneWon && outcome !== 'done') throw new Error(`手机返回 409，但工具状态是 ${outcome}`)
+        return phoneWon ? '手机先处理' : 'Desktop 先处理'
+      } finally { desktop.close() }
+    })
+
+    await step('外观层：切换模型和权限模式，会话列表随之更新', async () => {
+      await writer.selectModel(ACTOR, ws, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+      await writer.setPermissionPreset(ACTOR, ws, { preset: 'read-only' })
+      const summary = await untilAsync(async () => {
+        const s = (await writer.sessions(ACTOR)).sessions.find((x) => x.sessionId === ws)
+        return s?.permissionPreset === 'read-only' && s.model?.model === 'deepseek-v4-pro' ? s : undefined
+      }, '会话摘要更新')
+      return `model=${summary.model?.model} preset=${summary.permissionPreset}`
+    })
+
+    await step('【反向】外观层：不存在的模型 400，不存在的会话 404', async () => {
+      const expect = async (/** @type {Promise<unknown>} */ p, /** @type {number} */ status) => {
+        try { await p } catch (error) { if (error instanceof FacadeError && error.status === status) return; throw error }
+        throw new Error(`应当返回 ${status}`)
+      }
+      const ghost = 'session-00000000-0000-0000-0000-000000000000'
+      await expect(writer.selectModel(ACTOR, ws, { provider: 'deepseek-official', model: 'no-such-model' }), 400)
+      await expect(writer.prompt(ACTOR, ghost, { requestId: randomUUID(), text: 'hi' }), 404)
+      await expect(writer.cancel(ACTOR, ghost), 404)
+      await expect(writer.setPermissionPreset(ACTOR, ghost, { preset: 'read-only' }), 404)
+    })
+    tracker.close()
 
     // ---- cookie 失效后自动重新登录：换一个 DshConnection 模拟插件重启（启动 token 应可重复使用）
     await step('启动 token 可以重复登录', async () => {

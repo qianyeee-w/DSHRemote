@@ -16,6 +16,7 @@ import { startAdminServer } from './src/admin/server.js'
 import { openInBrowser } from './src/admin/open-browser.js'
 import { DshConnection } from './src/dsh/connection.js'
 import { Facade } from './src/dsh/facade.js'
+import { AttentionTracker } from './src/dsh/attention.js'
 import { dshVersionStatus } from './src/dsh/versions.js'
 import { readFileSync } from 'node:fs'
 
@@ -58,8 +59,9 @@ export function apply(ctx, rawConfig) {
       authenticatedUrl: (baseUrl) => ctx.connection.authenticatedUrl(baseUrl),
       log,
     })
-    // 订阅 DSH 的应用事件，保持连接；审批和提问的处理在 T8 接入
-    dsh.onEvent(() => {})
+    // 跟踪审批和提问；它订阅 DSH 的应用事件，也让插件和 DSH 一直保持连接
+    const attention = new AttentionTracker(dsh)
+    const facade = new Facade(dsh, { attention })
 
     const codes = new PairingCodes()
     const devices = await DeviceRegistry.open(storage)
@@ -68,7 +70,7 @@ export function apply(ctx, rawConfig) {
     const router = createRouter(
       {
         dshStatus: () => dshVersion,
-        facade: new Facade(dsh),
+        facade,
         codes,
         devices,
         // 审计信息只记录事件和设备标识，不包含 token 或配对码
@@ -121,6 +123,7 @@ export function apply(ctx, rawConfig) {
 
     const adminServer = admin
     return async () => {
+      attention.close()
       dsh.close()
       await adminServer.close()
       await lan.close()

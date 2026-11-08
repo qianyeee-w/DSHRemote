@@ -37,6 +37,12 @@ plugin/
 │   │   ├── der.js        # 最小 DER 编码器（只够生成一种证书）
 │   │   ├── certificate.js# 自签名证书签发、续期判断、SPKI 指纹
 │   │   └── identity.js   # 加载或创建 TLS 身份；续期时沿用原私钥，指纹不变
+│   ├── admin/
+│   │   ├── server.js     # 本机配对页服务：只监听 127.0.0.1；Host 校验 + Origin / Content-Type / CSRF token 三重校验
+│   │   ├── page.js       # 配对页 HTML（服务端渲染、无脚本、全部转义）与配对二维码内容
+│   │   ├── addresses.js  # 选出放进二维码的本机地址
+│   │   └── open-browser.js # 第一次启动时打开配对页（不经过 shell）
+│   ├── vendor/           # 原样复制的第三方代码，见 vendor/README.md
 │   ├── pairing/
 │   │   ├── codes.js      # 一次性配对码：5 分钟、用一次作废、输错 5 次锁定 1 分钟（只在内存中）
 │   │   └── devices.js    # 设备登记：token 只存 SHA-256、恒定时间比较、撤销、上限 20 台

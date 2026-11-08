@@ -12,12 +12,18 @@ import { startLanServer } from './src/server/https.js'
 import { createRouter } from './src/server/routes.js'
 import { PairingCodes } from './src/pairing/codes.js'
 import { DeviceRegistry } from './src/pairing/devices.js'
+import { startAdminServer } from './src/admin/server.js'
+import { openInBrowser } from './src/admin/open-browser.js'
+import { readFileSync } from 'node:fs'
 
 export const name = 'dshremote'
 export const inject = ['webServer', 'connection']
 
 /** 日志前缀，便于在 DSH 的输出中筛选。 */
 const LOG_PREFIX = '[dshremote]'
+const PLUGIN_VERSION = String(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version)
+/** 记录「是否已经自动打开过配对页」等不敏感的状态 */
+const STATE_FILE = 'state.json'
 
 /**
  * @param {any} ctx Cordis 插件上下文
@@ -42,6 +48,8 @@ export function apply(ctx, rawConfig) {
 
     const codes = new PairingCodes()
     const devices = await DeviceRegistry.open(storage)
+    /** @param {string} event @param {Record<string, string>} [detail] */
+    const audit = (event, detail) => log('info', `${event}${detail ? ` ${JSON.stringify(detail)}` : ''}`)
     const router = createRouter(
       {
         // DSH 版本检查在 T6 实现
@@ -49,7 +57,7 @@ export function apply(ctx, rawConfig) {
         codes,
         devices,
         // 审计信息只记录事件和设备标识，不包含 token 或配对码
-        audit: (event, detail) => log('info', `${event}${detail ? ` ${JSON.stringify(detail)}` : ''}`),
+        audit,
       },
       { onError: (error) => log('error', `处理请求出错：${error instanceof Error ? error.message : String(error)}`) },
     )
@@ -62,9 +70,35 @@ export function apply(ctx, rawConfig) {
       log('error', `局域网服务启动失败：${hint}`)
       throw error
     }
-    log('info', `已加载。局域网 HTTPS：${config.lanBind}:${lan.port()}，证书指纹：${identity.fingerprint}`)
+    let admin
+    try {
+      admin = await startAdminServer({
+        port: config.adminPort,
+        codes,
+        devices,
+        audit,
+        info: () => ({ fingerprint: identity.fingerprint, lanPort: lan.port(), lanBind: config.lanBind, pluginVersion: PLUGIN_VERSION }),
+      })
+    } catch (error) {
+      await lan.close()
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code
+      const hint = code === 'EADDRINUSE' ? `端口 ${config.adminPort} 已被占用，请在配置中修改 adminPort` : String(error)
+      log('error', `配对页启动失败：${hint}`)
+      throw error
+    }
+    log('info', `已加载。局域网 HTTPS：${config.lanBind}:${lan.port()}，证书指纹：${identity.fingerprint}，配对页：${admin.url}`)
 
+    if (config.openAdminOnFirstRun) {
+      const state = /** @type {{ adminOpenedAt?: number } | undefined} */ (await storage.readJson(STATE_FILE))
+      if (!state?.adminOpenedAt) {
+        await storage.writeJson(STATE_FILE, { ...state, adminOpenedAt: Date.now() })
+        try { openInBrowser(admin.url) } catch (error) { log('warn', `无法自动打开配对页：${String(error)}`) }
+      }
+    }
+
+    const adminServer = admin
     return async () => {
+      await adminServer.close()
       await lan.close()
       await devices.flush()
       log('info', '已卸载')

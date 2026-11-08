@@ -48,7 +48,7 @@ test('默认启用：注册一个生命周期，打开状态目录，卸载函�
     }
     // 端口用 0 之外的随机高位端口，避免和本机已有服务冲突
     const lanPort = 20000 + Math.floor(Math.random() * 20000)
-    plugin.apply(ctx, { enabled: true, lanBind: '127.0.0.1', lanPort, adminPort: lanPort + 1 })
+    plugin.apply(ctx, { enabled: true, lanBind: '127.0.0.1', lanPort, adminPort: lanPort + 1, openAdminOnFirstRun: false })
     assert.ok(pending, '应当注册生命周期')
     const dispose = await pending
     assert.ok((await stat(join(home, 'dshremote'))).isDirectory())

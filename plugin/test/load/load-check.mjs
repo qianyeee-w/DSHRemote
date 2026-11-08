@@ -145,6 +145,26 @@ async function checkLanInfo(dshHome) {
   return { ok: false, detail: '无法访问局域网端口' }
 }
 
+/**
+ * 配对页能打开，显示的指纹与证书一致；非本机 Host 被拒绝。
+ * @param {string} dshHome
+ * @returns {Promise<{ ok: boolean, detail: string }>}
+ */
+async function checkAdminPage(dshHome) {
+  const fingerprint = spkiFingerprint(readFileSync(join(dshHome, 'dshremote', CERT_FILE), 'utf8'))
+  const base = new URL(`http://127.0.0.1:${DEFAULT_CONFIG.adminPort}/?token=x`)
+  try {
+    const page = /** @type {{ status: number, body: string }} */ (await request(base, '/'))
+    if (page.status !== 200) return { ok: false, detail: `配对页返回 ${page.status}` }
+    if (!page.body.includes(fingerprint.slice(8))) return { ok: false, detail: '配对页上的指纹与证书不一致' }
+    const rebinding = /** @type {{ status: number }} */ (await request(base, '/', { headers: { host: 'evil.example' } }))
+    if (rebinding.status !== 403) return { ok: false, detail: `非本机 Host 没有被拒绝（${rebinding.status}）` }
+    return { ok: true, detail: '配对页正常，指纹一致，非本机 Host 被拒绝' }
+  } catch (error) {
+    return { ok: false, detail: `无法访问配对页：${error instanceof Error ? error.message : String(error)}` }
+  }
+}
+
 async function main() {
   const work = mkdtempSync(join(tmpdir(), 'dshremote-load-'))
   const dshHome = join(work, 'home')
@@ -160,6 +180,10 @@ async function main() {
       : installDsh(process.env.DSH_INSTALL_DIR || join(work, 'dsh'))
     log(`DSH ${dsh.version}，把插件装进 web profile ...`)
     runDsh(dsh.entry, ['plugin', '--profile', 'web', 'add', '-w', PLUGIN_DIR], env, cwd)
+    // 关掉「第一次启动时自动打开浏览器」，其余配置用默认值（DSH 会整行替换 config，所以要写全）
+    const override = { ...DEFAULT_CONFIG, openAdminOnFirstRun: false }
+    const yaml = ['- id: dshremote', '  name: dshremote', '  config:', ...Object.entries(override).map(([k, v]) => `    ${k}: ${v}`)].join('\n')
+    writeFileSync(join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), `${yaml}\n`)
 
     log('启动 dsh web --port 0 ...')
     child = spawn(process.execPath, [dsh.entry, 'web', '--no-open', '--port', '0'], { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -178,8 +202,9 @@ async function main() {
     })
     const loaded = await checkLoaded(launch)
     const lan = loaded.ok ? await checkLanInfo(dshHome) : { ok: false, detail: '插件未加载，跳过局域网检查' }
-    const ok = loaded.ok && lan.ok
-    console.log(JSON.stringify({ check: 'load', dshVersion: dsh.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan }))
+    const admin = loaded.ok ? await checkAdminPage(dshHome) : { ok: false, detail: '插件未加载，跳过配对页检查' }
+    const ok = loaded.ok && lan.ok && admin.ok
+    console.log(JSON.stringify({ check: 'load', dshVersion: dsh.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin }))
     process.exitCode = ok ? 0 : 1
   } catch (error) {
     console.log(JSON.stringify({ check: 'load', dshVersion: DSH_VERSION, platform: process.platform, ok: false, detail: String(error instanceof Error ? error.message : error) }))

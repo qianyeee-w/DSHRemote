@@ -1,6 +1,6 @@
 # 0010 Android 构建基线：targetSdk 35，applicationId `io.github.qianyeeew.dshremote`
 
-- 状态：已接受
+- 状态：已被 [0011](0011-android-compile-sdk-37.md) 取代
 - 日期：2026-11-09
 
 ## 背景

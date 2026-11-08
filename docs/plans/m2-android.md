@@ -7,11 +7,11 @@
 
 ## 1. 技术选型
 
-见 `android/AGENTS.md`「技术选型」和 ADR 0004、0009、0010。要点：
+见 `android/AGENTS.md`「技术选型」和 ADR 0004、0009、0011。要点：
 
 | 项目 | 选择 |
 |---|---|
-| 基线 | applicationId `io.github.qianyeeew.dshremote`，minSdk 26，compileSdk / targetSdk 35 |
+| 基线 | applicationId `io.github.qianyeeew.dshremote`，minSdk 26，compileSdk 37，targetSdk 35（ADR 0011） |
 | 界面 | Compose + Material 3，单 Activity，MVVM |
 | 网络 | OkHttp，**每台主机一个客户端，全部由 `data/net/` 的工厂创建** |
 | 敏感数据 | DataStore + Keystore 中的 AES-GCM 密钥 |

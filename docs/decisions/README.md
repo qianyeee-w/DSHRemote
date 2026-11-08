@@ -16,4 +16,5 @@
 | [0007](0007-plugin-facade-api.md) | 插件对 App 提供外观层接口，不透传 DSH 协议 | 已接受 |
 | [0008](0008-owner-principal-for-v1.md) | v1 插件以 owner 身份访问 DSH | 已接受 |
 | [0009](0009-android-fgs-special-use.md) | 前台服务使用 `specialUse` 类型，不用 `dataSync` | 已接受 |
-| [0010](0010-android-build-baseline.md) | Android 构建基线：targetSdk 35，applicationId `io.github.qianyeeew.dshremote` | 已接受 |
+| [0010](0010-android-build-baseline.md) | Android 构建基线：targetSdk 35，applicationId `io.github.qianyeeew.dshremote` | 已被 0011 取代 |
+| [0011](0011-android-compile-sdk-37.md) | Android 构建基线：compileSdk 37，targetSdk 仍为 35 | 已接受 |

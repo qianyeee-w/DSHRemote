@@ -4,9 +4,9 @@ Kotlin + Jetpack Compose。先读根目录的 `AGENTS.md`，M2 的实施方案�
 
 > 状态：骨架还没建立（M2 的 T2）。下面的命令和目录是计划中的约定，建立骨架时按此执行；如有调整，同步更新本文件。
 
-## 基线（ADR 0004、0010）
+## 基线（ADR 0004、0011）
 
-applicationId `io.github.qianyeeew.dshremote`；minSdk 26；compileSdk / targetSdk 35；用 JDK 21 构建，编译目标 Java 17。依赖版本全部固定在 `gradle/libs.versions.toml`。
+applicationId `io.github.qianyeeew.dshremote`；minSdk 26；compileSdk 37（SDK 包 `platforms;android-37.0`）；targetSdk 35；用 JDK 21 构建，编译目标 Java 17。依赖版本全部固定在 `gradle/libs.versions.toml`。
 
 ## 命令
 

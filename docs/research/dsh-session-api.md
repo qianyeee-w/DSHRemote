@@ -129,7 +129,7 @@ DSH 的 `remote-access` 包和 Peer 身份机制（2026-10-12 实现）目前用
 - `session/selectModel` 和 `mode:"steer"` 的实测。
 - `assistant-stream` 增量块的完整语义：revision、index、block-start / delta / block-end，以及重连后如何续接。插件的事件转换器依赖这一点。
 - 图片附件（v2）：`session/prompt` 的 image 内容块和 `session/attachment`。
-- 插件是通过本机 HTTP 加 mux 调用 DSH，还是在进程内通过 `connection.createPeer()` 直接调用。两种都是公开接口，M1 中再比较。
+- ~~插件是通过本机 HTTP 加 mux 调用 DSH，还是在进程内通过 `connection.createPeer()` 直接调用。~~ **已确定（T6）：本机 HTTP + mux。** 这和浏览器、Desktop 窗口走的是同一条路径，调研时已经逐项实测过；进程内调用要依赖 Peer 的内部类型，DSH 升级时更容易受影响。实现见 `plugin/src/dsh/connection.js`。
 
 ## 8. 复现
 
@@ -146,4 +146,4 @@ dsh web --no-open --port 0          # 记下输出的带 token 的链接
 PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.mjs '<带 token 的链接>'
 ```
 
-这些脚本就是将来 `plugin/test/contract/` 契约测试的雏形，见 [roadmap](../roadmap.md)。
+这些脚本已经改写成 `plugin/test/contract/` 的契约测试（`npm run contract`），通过插件的适配层逐项验证上面的接口，并额外验证了：拒绝审批（`rejected`）后命令不执行、`session/cancel` 能停下正在输出的回复、同一个启动 token 可以重复登录。以后验证新版本 DSH 时直接运行契约测试即可，见 [roadmap](../roadmap.md)。

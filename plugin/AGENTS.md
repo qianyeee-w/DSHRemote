@@ -14,13 +14,16 @@ npm run check        # 以上三项一起跑。提交前必须通过
 npm run load-check   # 把插件装进真实的 dsh web（基线版本），确认插件被加载且处于 active 状态
                      # DSH_VERSION=0.2.3 指定其他版本；DSH_BIN=<dsh 的 JS 入口> 复用已安装的 DSH
                      # DSH_INSTALL_DIR=<目录> 把 DSH 装在固定目录并复用，避免每次重新安装
+                     # 同时检查插件已通过适配层连上 DSH（配对页显示「已连接」，/v1/info 报告正确的 DSH 版本）
+npm run contract     # DSH 接口契约测试：假模型服务驱动真实 dsh web，通过适配层逐项验证插件依赖的接口
+                     # 环境变量同 load-check；stdout 最后一行是 JSON 结果，失败的项目就是适配层要改的地方
 ```
 
-`load-check` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
+`load-check`、`contract` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
 
-以下命令在后续任务中加入：`npm run contract`（T6，DSH 接口契约测试）、`npm run e2e`（T9，端到端测试）。
+以下命令在后续任务中加入：`npm run e2e`（T9，端到端测试）。
 
-**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载或 DSH 接口时，还要跑通 `npm run load-check`。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
+**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载时，还要跑通 `npm run load-check`；改动涉及 DSH 接口（`src/dsh/`）时，还要跑通 `npm run contract`。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
 
 ## 目录
 
@@ -50,22 +53,27 @@ plugin/
 │   │   ├── https.js      # 局域网 HTTPS 服务（只提供 TLS 1.2+）
 │   │   ├── body.js       # JSON 请求体读取与字段校验（大小、Content-Type、控制字符）
 │   │   └── routes.js     # /v1/* 路由表：外观层操作的白名单 + Bearer token 认证
-│   └── dsh/
-│       └── versions.js   # 支持的 DSH 版本范围（唯一定义处）
+│   └── dsh/              # DSH 适配层：插件访问 DSH 的唯一入口
+│       ├── versions.js   # 支持的 DSH 版本范围（唯一定义处）、从入口路径读取 DSH 版本
+│       └── connection.js # 登录（启动 token 换 cookie）、一元调用、mux 流、$events 订阅与回答、断线重连
 └── test/
     ├── unit/             # 单元测试（*.test.js）
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）
-    └── load/             # 加载检查：装进真实 dsh web，确认 active，并按指纹访问 /v1/info
+    │                     #   fake-dsh.js（模拟 DSH 的 HTTP + mux，单元测试用）
+    │                     #   dsh-runtime.mjs（安装并启动真实 dsh web，load-check 和 contract 共用）
+    ├── load/             # 加载检查：装进真实 dsh web，确认 active、连上 DSH，并按指纹访问 /v1/info
+    └── contract/         # 契约测试：fake-llm.mjs（假模型服务）+ contract.mjs
 ```
 
 ## 约定
 
 - 每个 JS 文件第一行写 `// @ts-check`，用 JSDoc 标注类型。类型检查不通过，不能提交。
-- 运行时依赖只允许 `ws`（从 T6 起引入）。其他库要么放进 `src/vendor/` 并保留原许可证声明，要么先写 ADR。开发依赖不受此限制。
+- 运行时依赖只允许 `ws`。其他库要么放进 `src/vendor/` 并保留原许可证声明，要么先写 ADR。开发依赖不受此限制。
 - 使用的 DSH 服务只有 `webServer` 和 `connection`，写在 `inject` 里（单元测试会检查）。不允许访问其他私有字段。
 - **所有对 DSH 的调用都必须放在 `src/dsh/` 适配层里**，其他模块只能调用适配层，不能直接访问 DSH。支持的 DSH 版本范围只在 `src/dsh/versions.js` 中定义，`package.json` 的 `engines.dsh` 必须和它一致（单元测试会检查）。这是为以后的「DSH 新版本自动适配」预留的设计，见 `docs/roadmap.md`。
 - 测试代码（`test/` 下）可以直接调用 DSH 的接口，用来做验证；插件代码不可以。
-- DSH 的端口每次启动都可能变化，**每个请求都要实时读取** `ctx.webServer.port`，不要缓存。
+- DSH 的端口每次启动都可能变化，**每个请求都要实时读取** `ctx.webServer.port`，不要缓存（`DshConnection` 已经这样做）。DSH 自己开启 TLS（`ctx.webServer.protocol` 为 `https:`）时，v1 视为 DSH 不可用。
+- `DshConnection` 的每次调用都要传 `actor`：替哪台设备调用就传它的 `deviceId`，插件自身的调用传 `PLUGIN_ACTOR`。现在都以 owner 身份访问 DSH，这个参数是为以后的受限身份预留的（`docs/roadmap.md` 第 2 条）。
 - 插件的生命周期用 `ctx.effect()` 管理。加载时不要阻塞等待 DSH 启动，在后台轮询即可。
 - **日志**：使用 `ctx.logger`，并且带上 `[dshremote]` 前缀。`dsh web` 默认不输出插件的 info 日志，所以排查问题时不能指望日志；需要让用户看到的状态，要显示在本机配对页上。
 - 状态文件一律通过 `src/storage.js` 读写，不要直接用 `fs` 写状态目录。设备 token 只存哈希。

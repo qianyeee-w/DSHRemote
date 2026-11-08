@@ -45,7 +45,7 @@ jobs:
       - run: npm test
 
   load:
-    name: load in real dsh web (${{ matrix.os }})
+    name: load + contract in real dsh web (${{ matrix.os }})
     needs: check
     strategy:
       fail-fast: false
@@ -69,5 +69,9 @@ jobs:
           path: ${{ runner.temp }}/dsh-install
           key: dsh-${{ runner.os }}-node22-${{ hashFiles('plugin/src/dsh/versions.js') }}
       - run: npm run load-check
+        env:
+          DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
+      # DSH 接口契约测试：假模型驱动真实 dsh web，逐项验证适配层依赖的接口
+      - run: npm run contract
         env:
           DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install

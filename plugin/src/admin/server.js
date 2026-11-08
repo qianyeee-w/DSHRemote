@@ -62,7 +62,7 @@ async function readForm(req) {
  * @property {number} port
  * @property {import('../pairing/codes.js').PairingCodes} codes
  * @property {import('../pairing/devices.js').DeviceRegistry} devices
- * @property {() => { fingerprint: string, lanPort: number, lanBind: string, pluginVersion: string }} info
+ * @property {() => { fingerprint: string, lanPort: number, lanBind: string, pluginVersion: string, dsh: import('./page.js').DshView }} info
  * @property {(event: string, detail?: Record<string, string>) => void} [audit]
  * @property {() => import('./addresses.js').LanAddress[]} [addresses] 测试时注入
  * @property {string} [host] 监听地址，只用于测试；默认且只应为 127.0.0.1
@@ -140,6 +140,7 @@ export async function startAdminServer(options) {
       const html = renderAdminPage({
         csrfToken,
         pluginVersion: info.pluginVersion,
+        dsh: info.dsh,
         hostName: hostname(),
         fingerprint: info.fingerprint,
         lanPort: info.lanPort,

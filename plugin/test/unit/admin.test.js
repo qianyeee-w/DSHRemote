@@ -33,7 +33,7 @@ beforeEach(async () => {
     port: 0,
     codes,
     devices,
-    info: () => ({ fingerprint: FINGERPRINT, lanPort: 3190, lanBind: '0.0.0.0', pluginVersion: '0.1.0' }),
+    info: () => ({ fingerprint: FINGERPRINT, lanPort: 3190, lanBind: '0.0.0.0', pluginVersion: '0.1.0', dsh: { version: '0.2.2-rc.1', compatible: true, state: 'ready' } }),
     addresses: () => [{ address: '192.168.1.20', interfaceName: 'eth0' }, { address: '100.100.1.2', interfaceName: 'tailscale0' }],
     audit: (event) => audit.push(event),
   })
@@ -96,6 +96,8 @@ test('页面：安全响应头齐全，没有脚本', async () => {
   assert.equal(res.headers['referrer-policy'], 'no-referrer')
   assert.doesNotMatch(res.body, /<script/i)
   assert.match(res.body, /AbCdEfGh/) // 指纹前 8 位
+  assert.match(res.body, /0\.2\.2-rc\.1/) // DSH 版本
+  assert.match(res.body, /data-state="ready">已连接</) // 插件到 DSH 的连接状态
 })
 
 test('生成配对码 → 页面显示二维码和配对码；取消后消失', async () => {

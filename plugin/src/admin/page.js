@@ -36,9 +36,26 @@ const groupFingerprint = (/** @type {string} */ fp) => fp.replace(/(.{4})/g, '$1
 const formatTime = (ms) => (ms === undefined ? '—' : new Date(ms).toLocaleString('zh-CN', { hour12: false }))
 
 /**
+ * @typedef {object} DshView
+ * @property {string | null} version
+ * @property {boolean | null} compatible
+ * @property {'connecting' | 'ready' | 'unavailable' | 'closed'} state 插件到 DSH 的连接状态
+ */
+
+/** @type {Record<DshView['state'], string>} */
+const DSH_STATE_TEXT = { connecting: '正在连接…', ready: '已连接', unavailable: '无法连接', closed: '已断开' }
+
+/** @param {DshView} dsh */
+function dshVersionText(dsh) {
+  if (dsh.version === null) return '未知版本'
+  return dsh.compatible ? dsh.version : `${dsh.version}（不在支持的版本范围内）`
+}
+
+/**
  * @typedef {object} AdminView
  * @property {string} csrfToken
  * @property {string} pluginVersion
+ * @property {DshView} dsh
  * @property {string} hostName
  * @property {string} fingerprint
  * @property {number} lanPort
@@ -132,6 +149,7 @@ ${pairingSection}
   <tr><th>局域网服务</th><td class="mono">${escapeHtml(v.lanBind)}:${escapeHtml(v.lanPort)}（HTTPS）</td></tr>
   <tr><th>证书指纹</th><td class="mono fp"><strong>${escapeHtml(v.fingerprint.slice(0, 8))}</strong>${escapeHtml(v.fingerprint.slice(8))}<br><span class="muted">${escapeHtml(groupFingerprint(v.fingerprint))}</span></td></tr>
   <tr><th>插件版本</th><td>${escapeHtml(v.pluginVersion)}</td></tr>
+  <tr><th>DeepSeek Harness</th><td>${escapeHtml(dshVersionText(v.dsh))} · <span id="dsh-state" data-state="${escapeHtml(v.dsh.state)}">${escapeHtml(DSH_STATE_TEXT[v.dsh.state])}</span></td></tr>
 </table>
 <p class="muted">手动输入地址配对时，App 会显示电脑证书指纹的前 8 位，请和上面加粗的 8 位核对一致后再继续。<br>
 这个页面只能在本机打开。</p>

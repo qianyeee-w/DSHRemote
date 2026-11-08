@@ -14,6 +14,8 @@ import { PairingCodes } from './src/pairing/codes.js'
 import { DeviceRegistry } from './src/pairing/devices.js'
 import { startAdminServer } from './src/admin/server.js'
 import { openInBrowser } from './src/admin/open-browser.js'
+import { DshConnection } from './src/dsh/connection.js'
+import { dshVersionStatus } from './src/dsh/versions.js'
 import { readFileSync } from 'node:fs'
 
 export const name = 'dshremote'
@@ -46,14 +48,25 @@ export function apply(ctx, rawConfig) {
     if (identity.status === 'created') log('warn', '已生成新的 TLS 身份。之前配对过的手机需要重新配对')
     if (identity.status === 'renewed') log('info', `证书已用原私钥重新签发（${identity.renewReason}），指纹不变`)
 
+    const dshVersion = dshVersionStatus()
+    if (dshVersion.version === null) log('warn', '读不到 DSH 的版本，无法确认兼容性')
+    else if (!dshVersion.compatible) log('warn', `DSH ${dshVersion.version} 不在插件支持的版本范围内，部分功能可能无法使用`)
+    // DSH 的端口每次启动都可能变化，每次请求都实时读取。连接层只支持 http，DSH 自己开了 TLS 时视为不可用
+    const dsh = new DshConnection({
+      getPort: () => (ctx.webServer.protocol === 'http:' ? ctx.webServer.port : undefined),
+      authenticatedUrl: (baseUrl) => ctx.connection.authenticatedUrl(baseUrl),
+      log,
+    })
+    // 订阅 DSH 的应用事件，保持连接；审批和提问的处理在 T8 接入
+    dsh.onEvent(() => {})
+
     const codes = new PairingCodes()
     const devices = await DeviceRegistry.open(storage)
     /** @param {string} event @param {Record<string, string>} [detail] */
     const audit = (event, detail) => log('info', `${event}${detail ? ` ${JSON.stringify(detail)}` : ''}`)
     const router = createRouter(
       {
-        // DSH 版本检查在 T6 实现
-        dshStatus: () => ({ version: null, compatible: null }),
+        dshStatus: () => dshVersion,
         codes,
         devices,
         // 审计信息只记录事件和设备标识，不包含 token 或配对码
@@ -68,6 +81,7 @@ export function apply(ctx, rawConfig) {
       const code = /** @type {NodeJS.ErrnoException} */ (error).code
       const hint = code === 'EADDRINUSE' ? `端口 ${config.lanPort} 已被占用，请在配置中修改 lanPort` : String(error)
       log('error', `局域网服务启动失败：${hint}`)
+      dsh.close()
       throw error
     }
     let admin
@@ -77,10 +91,17 @@ export function apply(ctx, rawConfig) {
         codes,
         devices,
         audit,
-        info: () => ({ fingerprint: identity.fingerprint, lanPort: lan.port(), lanBind: config.lanBind, pluginVersion: PLUGIN_VERSION }),
+        info: () => ({
+          fingerprint: identity.fingerprint,
+          lanPort: lan.port(),
+          lanBind: config.lanBind,
+          pluginVersion: PLUGIN_VERSION,
+          dsh: { ...dshVersion, state: dsh.status().state },
+        }),
       })
     } catch (error) {
       await lan.close()
+      dsh.close()
       const code = /** @type {NodeJS.ErrnoException} */ (error).code
       const hint = code === 'EADDRINUSE' ? `端口 ${config.adminPort} 已被占用，请在配置中修改 adminPort` : String(error)
       log('error', `配对页启动失败：${hint}`)
@@ -98,6 +119,7 @@ export function apply(ctx, rawConfig) {
 
     const adminServer = admin
     return async () => {
+      dsh.close()
       await adminServer.close()
       await lan.close()
       await devices.flush()

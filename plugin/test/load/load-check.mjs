@@ -17,6 +17,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import http from 'node:http'
+import net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_CONFIG } from '../../src/config.js'
 import { spkiFingerprint } from '../../src/tls/certificate.js'
@@ -119,6 +120,32 @@ async function checkAdminPage(dshHome) {
   }
 }
 
+/**
+ * 插件的端口被其他程序占用时，插件会启动失败，但 DSH 仍然把它显示为 active，也不打印错误。
+ * 检查失败时试着绑定一下端口，把「被占用」直接告诉用户。
+ * @param {number} port @param {string} host
+ * @returns {Promise<string>} 空字符串表示端口空闲
+ */
+function portBusyHint(port, host) {
+  return new Promise((resolve) => {
+    const probe = net.createServer()
+    probe.once('error', (error) => {
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code
+      resolve(code === 'EADDRINUSE'
+        ? `端口 ${port} 已被其他程序占用，插件因此没能启动。Linux 上用 ss -ltnp 'sport = :${port}' 查看是哪个程序（Windows 上用 Get-NetTCPConnection -LocalPort ${port}）`
+        : `绑定端口 ${port} 失败（${code}）`)
+    })
+    probe.listen(port, host, () => probe.close(() => resolve('')))
+  })
+}
+
+/** @param {{ ok: boolean, detail?: string }} result @param {number} port @param {string} host */
+async function withPortHint(result, port, host) {
+  if (result.ok) return result
+  const hint = await portBusyHint(port, host)
+  return hint ? { ...result, detail: `${result.detail}。${hint}` } : result
+}
+
 async function main() {
   /** @type {import('../helpers/dsh-runtime.mjs').DshWeb | undefined} */
   let web
@@ -126,7 +153,7 @@ async function main() {
     // 关掉「第一次启动时自动打开浏览器」，其余配置用默认值
     web = await startDshWeb({ withPlugin: true, pluginConfig: { ...DEFAULT_CONFIG, openAdminOnFirstRun: false } })
     const loaded = await checkLoaded(web.launch)
-    const lan = loaded.ok ? await checkLanInfo(web.dshHome) : { ok: false, detail: '插件未加载，跳过局域网检查' }
+    const lan = loaded.ok ? await withPortHint(await checkLanInfo(web.dshHome), DEFAULT_CONFIG.lanPort, DEFAULT_CONFIG.lanBind) : { ok: false, detail: '插件未加载，跳过局域网检查' }
     const admin = loaded.ok ? await checkAdminPage(web.dshHome) : { ok: false, detail: '插件未加载，跳过配对页检查' }
     const ok = loaded.ok && lan.ok && admin.ok
     console.log(JSON.stringify({ check: 'load', dshVersion: web.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin }))

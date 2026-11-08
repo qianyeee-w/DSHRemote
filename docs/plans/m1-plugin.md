@@ -112,6 +112,8 @@ Node 自带的 `crypto` 能生成密钥、能解析证书，但**不能生成证
 
 > **结论（T6 已实现）**：插件运行在 DSH 的进程里，从 `process.argv[1]`（DSH 的 JS 入口）向上查找 `@deepseek-ai/dsh` 或 `@deepseek-ai/dsh-desktop-host` 的 `package.json` 读出版本（DSH 所有包同版本发布）。`dsh web` 上实测可读到；Desktop 上的效果在 T10 真机验证。读不到时 `/v1/info` 中的 `version`、`compatible` 为 `null`，配对页显示「未知版本」，不额外调用接口探测——插件连上 DSH 后配对页显示的连接状态已经能说明接口是否可用。DSH 重启或换端口后的自动恢复由单元测试（模拟的 DSH）覆盖；契约测试覆盖真实 DSH 的各项接口。
 
+**T10 的真机验证步骤**见 [m1-windows-verification.md](m1-windows-verification.md)，验证脚本是 `plugin/scripts/verify.mjs`。
+
 ## 6. M1 验收清单
 
 - [ ] 插件在 Linux 的 `dsh web` 和 Windows 的官方 Desktop 上都能安装、加载

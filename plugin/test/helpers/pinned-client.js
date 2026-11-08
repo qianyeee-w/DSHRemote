@@ -7,6 +7,8 @@ import tls from 'node:tls'
 import http from 'node:http'
 import { createHash } from 'node:crypto'
 
+const CONNECT_TIMEOUT_MS = 10_000
+
 export class PinMismatchError extends Error {
   /** @param {string} actual */
   constructor(actual) {
@@ -39,7 +41,10 @@ export function connectPinned({ host, port, fingerprint, minVersion, maxVersion 
       ...(maxVersion ? { maxVersion } : {}),
     })
     socket.once('error', reject)
+    // 被防火墙丢弃的连接不会报错，只会一直等待；超时后给出明确的错误
+    socket.setTimeout(CONNECT_TIMEOUT_MS, () => socket.destroy(new Error(`连接 ${host}:${port} 超时（${CONNECT_TIMEOUT_MS / 1000} 秒）`)))
     socket.once('secureConnect', () => {
+      socket.setTimeout(0)
       let actual
       try { actual = peerFingerprint(socket) } catch (error) { socket.destroy(); reject(error); return }
       if (actual !== fingerprint) {

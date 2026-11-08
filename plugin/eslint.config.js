@@ -20,8 +20,8 @@ export default [
     },
   },
   {
-    // 测试和测试辅助脚本可以直接输出到控制台
-    files: ['test/**'],
+    // 测试、测试辅助和手动运行的验证脚本可以直接输出到控制台（插件代码不行）
+    files: ['test/**', 'scripts/**'],
     rules: { 'no-console': 'off' },
   },
 ]

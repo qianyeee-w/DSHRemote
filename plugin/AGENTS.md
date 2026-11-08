@@ -19,6 +19,8 @@ npm run contract     # DSH 接口契约测试：假模型服务驱动真实 dsh 
                      # 环境变量同 load-check；stdout 最后一行是 JSON 结果，失败的项目就是适配层要改的地方
 npm run e2e          # 端到端测试：插件装进真实 dsh web，模拟手机走完配对 → 实时流 → 流式输出 → 任务完成通知
                      # → 提问和审批（含在 Desktop 上处理）→ DSH 重启后恢复 → 撤销设备。环境变量同 load-check
+node scripts/verify.mjs   # 真机验证：检查装在官方 Desktop（或 dsh web）里的插件，模拟手机走一遍对外接口
+                     # 用法见 docs/plans/m1-windows-verification.md；输出的 JSON 不含 token 和配对码
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
                      # 转换器（transcript.js、facade.js）的单元测试只用录制的数据，不手写 DSH 的格式
 ```
@@ -63,6 +65,8 @@ plugin/
 │       ├── live.js       # 实时状态：会话摘要的变化、任务完成（8 秒）、待处理事项广播；会话消息的增量推送和流式草稿
 │       ├── attention.js  # 待处理事项（审批、提问）：跟踪 waterfall / cancel、重连后重新同步、回答与 409 判断
 │       └── transcript.js # DSH 会话日志 → 消息结构（protocol.md 5.2），以及分页切点的修正
+├── scripts/
+│   └── verify.mjs        # 真机验证脚本（M1 T10），复用 test/helpers/pinned-client.js
 └── test/
     ├── unit/             # 单元测试（*.test.js）
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）

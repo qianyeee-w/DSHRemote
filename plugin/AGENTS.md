@@ -21,6 +21,11 @@ npm run e2e          # 端到端测试：插件装进真实 dsh web，模拟手�
                      # → 提问和审批（含在 Desktop 上处理）→ DSH 重启后恢复 → 撤销设备。环境变量同 load-check
 npm run browser-check     # 用系统安装的 Chrome（BROWSER_CHANNEL=msedge 用 Edge）点一遍配对页上的按钮
                      # 单元测试用 Node 客户端手动设置 Origin，测不出浏览器的行为；改配对页时必须跑
+npm run dev-server   # 给 App 开发用的服务器：真实 dsh web + 本插件 + 假模型（关键词驱动：ASK / SHELL / STREAM / THINK / SLOW）
+                     # 默认局域网端口 3290、配对页 3291，--port / --admin-port / --bind / --home 可改；数据目录默认 ~/.cache/dshremote-dev，
+                     # 重启后指纹和已配对设备保留。子命令：pair（打印配对二维码）、devices、revoke、restart（重启 DSH）、stop、status，
+                     # 加 --json 输出机器可读结果。前台运行时可按 p / d / r / q。用法见 scripts/dev-server.mjs 开头
+npm run dev-server-check  # 用临时目录和空闲端口把 dev-server 的功能走一遍（环境变量同 e2e）
 node scripts/verify.mjs   # 真机验证：检查装在官方 Desktop（或 dsh web）里的插件，模拟手机走一遍对外接口
                      # 用法见 docs/plans/m1-windows-verification.md；输出的 JSON 不含 token 和配对码
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
@@ -29,7 +34,7 @@ npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数�
 
 `load-check`、`contract`、`e2e` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
 
-**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载时，还要跑通 `npm run load-check`；改动涉及 DSH 接口（`src/dsh/`）时，还要跑通 `npm run contract`；改动涉及实时流、配对或对外接口时，还要跑通 `npm run e2e`；改动涉及配对页时，还要跑通 `npm run browser-check`。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
+**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载时，还要跑通 `npm run load-check`；改动涉及 DSH 接口（`src/dsh/`）时，还要跑通 `npm run contract`；改动涉及实时流、配对或对外接口时，还要跑通 `npm run e2e`；改动涉及配对页时，还要跑通 `npm run browser-check`；改动涉及 dev-server 或 `test/helpers/dsh-runtime.mjs` 时，还要跑通 `npm run dev-server-check`（dsh-runtime 被 load-check、contract、e2e 共用，这三项也要跑）。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
 
 ## 目录
 
@@ -68,7 +73,9 @@ plugin/
 │       ├── attention.js  # 待处理事项（审批、提问）：跟踪 waterfall / cancel、重连后重新同步、回答与 409 判断
 │       └── transcript.js # DSH 会话日志 → 消息结构（protocol.md 5.2），以及分页切点的修正
 ├── scripts/
-│   └── verify.mjs        # 真机验证脚本（M1 T10），复用 test/helpers/pinned-client.js
+│   ├── verify.mjs        # 真机验证脚本（M1 T10），复用 test/helpers/pinned-client.js
+│   ├── dev-server.mjs    # 给 App 开发用的服务器（M2 T1）：复用 dsh-runtime.mjs 和 fake-llm.mjs，不改插件代码
+│   └── dev-server-lib.mjs# dev-server 的纯函数（参数、读取配对页、终端二维码），有单元测试
 └── test/
     ├── unit/             # 单元测试（*.test.js）
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）
@@ -79,6 +86,7 @@ plugin/
     ├── fixtures/         # 从真实 DSH 录制的数据（npm run capture-fixtures），按 DSH 版本分目录
     ├── load/             # 加载检查：装进真实 dsh web，确认 active、连上 DSH，并按指纹访问 /v1/info
     ├── e2e/              # 端到端测试：模拟手机，只通过插件对外的接口和本机配对页操作
+    ├── dev-server/       # dev-server 检查（npm run dev-server-check）
     ├── browser/          # 真实浏览器操作配对页（playwright-core，使用系统安装的 Chrome / Edge）
     └── contract/         # 契约测试：fake-llm.mjs（假模型服务）+ contract.mjs；capture-fixtures.mjs（录制测试数据）
 ```

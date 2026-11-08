@@ -51,7 +51,7 @@ jobs:
           BROWSER_CHANNEL: msedge
 
   load:
-    name: load + contract + e2e in real dsh web (${{ matrix.os }})
+    name: load + contract + e2e + dev-server in real dsh web (${{ matrix.os }})
     needs: check
     strategy:
       fail-fast: false
@@ -83,5 +83,9 @@ jobs:
           DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
       # 端到端测试：模拟手机走完配对、实时流、审批和提问、DSH 重启、撤销设备
       - run: npm run e2e
+        env:
+          DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
+      # 给 App 开发用的 dev-server：启动、配对、流式对话、重启 DSH、撤销、停止后指纹不变
+      - run: npm run dev-server-check
         env:
           DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install

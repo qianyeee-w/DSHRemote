@@ -11,18 +11,15 @@
 | 需求与设计（spec、protocol、security、ADR 0001–0008） | 完成 | `docs/` |
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
-| **M2 Android App** | **进行中**（方案已确认，T1 开始） | `docs/plans/m2-android.md` |
+| **M2 Android App** | **进行中**：T1（插件 dev-server）完成，下一步 T2（Android 骨架 + CI） | `docs/plans/m2-android.md` |
 
 **下一步**：按 `docs/plans/m2-android.md` 第 5 节的顺序做 T1–T12，每完成一项汇报一次。
 
-M2 开工前要知道：
+M2 开发要知道：
 
-- `android/` 目前只有 `AGENTS.md`，里面是计划中的技术选型和约定，骨架还没建立。
-- `android/AGENTS.md` 提到「插件的 mock server」，**它还不存在**。现有的可复用部件：
-  - `plugin/test/helpers/dsh-runtime.mjs`：安装并启动真实的 `dsh web`，可以装入插件；
-  - `plugin/test/contract/fake-llm.mjs`：假模型服务，用关键词驱动 Agent，比如 ASK 触发提问、SHELL 触发审批、STREAM 慢速流式输出。
-
-  把这两个组合起来，就是一个给 App 开发用的「真实插件 + 假模型」服务器。建议作为 M2 的第一个任务，先把它做成命令，例如 `npm run dev-server`。**端口要能指定，默认不要用 3190 / 3191**：用户的开发服务器上，3190 已经被他自己的 `dsh web` 服务占用。测试代码一律用 `dsh-runtime.mjs` 的 `freePort()` 找空闲端口。
+- `android/` 目前只有 `AGENTS.md`（技术选型、目录、约定都已定），骨架在 T2 建立。
+- **开发 App 时连接 dev-server**（`cd plugin && npm run dev-server`，T1 完成）：真实的 `dsh web` + 本插件 + 假模型，消息里的关键词决定模型的行为（ASK 提问、SHELL 审批、STREAM 流式、THINK 思考、SLOW 长输出）。默认局域网端口 3290、配对页 3291，**不用 3190 / 3191**：用户的开发服务器上，3190 被他自己的 `dsh web` 服务占用。数据目录 `~/.cache/dshremote-dev` 保存指纹和已配对设备，重启后手机不需要重新配对。`npm run dev-server -- pair` 打印配对二维码，`restart` 重启 DSH，`revoke` 撤销设备。测试代码一律用 `dsh-runtime.mjs` 的 `freePort()` 找空闲端口。
+- **测试真机**：用户提供一台 Android 17 的小米手机，通过无线调试连接开发机（用法见 `android/AGENTS.md`「真机」）。手机和开发机在同一局域网，已确认手机能连到 dev-server 的 3290 端口。
 - 插件对外的接口以 `docs/protocol.md` 为准，已经按实现定稿，没有待定项。App 只能使用其中列出的接口。
 - App 端的安全要求在根目录 `AGENTS.md` 的安全红线和 `android/AGENTS.md` 中，尤其是：证书指纹不匹配时直接拒绝，**不提供「仍然继续」**。
 

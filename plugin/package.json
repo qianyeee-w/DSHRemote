@@ -34,7 +34,9 @@
     "contract": "node test/contract/contract.mjs",
     "capture-fixtures": "node test/contract/capture-fixtures.mjs",
     "e2e": "node test/e2e/e2e.mjs",
-    "browser-check": "node test/browser/admin-page.mjs"
+    "browser-check": "node test/browser/admin-page.mjs",
+    "dev-server": "node scripts/dev-server.mjs",
+    "dev-server-check": "node test/dev-server/dev-server-check.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

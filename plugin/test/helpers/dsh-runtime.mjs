@@ -92,21 +92,31 @@ export function installDsh(fallbackDir) {
  * @property {string} workspace dsh web 的工作目录
  * @property {string} version
  * @property {string} work 临时目录（传给下一次 startDshWeb 的 reuse，可以用同一个 DSH_HOME 重启）
+ * @property {number | undefined} pid dsh web 进程的 pid
+ * @property {Promise<number | null>} exited dsh web 进程退出时完成（值为退出码）
  * @property {(options?: { keepFiles?: boolean }) => Promise<void>} stop keepFiles：只停止进程，保留目录
  */
 
+/** 持久目录中记录「插件已经装进 web profile」的标记文件 */
+const PLUGIN_INSTALLED_MARKER = '.dshremote-plugin-installed'
+
 /**
  * 创建临时 DSH_HOME，可选地装入插件，启动 `dsh web --port 0`。
- * 传入 reuse（上一次返回的 work）时，沿用原来的 DSH_HOME 和已安装的插件，模拟 DSH 重启。
- * @param {{ withPlugin: boolean, pluginConfig?: Record<string, unknown>, env?: NodeJS.ProcessEnv, reuse?: string }} options
+ * - 传入 reuse（上一次返回的 work）时，沿用原来的 DSH_HOME 和已安装的插件，模拟 DSH 重启。
+ * - 传入 persistentDir 时，使用这个固定目录（不存在就创建），第一次使用时装入插件，以后直接复用；
+ *   每次启动都按 pluginConfig 重写插件配置；stop() 永远不删除目录。dev-server 用它让指纹和已配对设备跨重启保留。
+ * @param {{ withPlugin: boolean, pluginConfig?: Record<string, unknown>, env?: NodeJS.ProcessEnv, reuse?: string, persistentDir?: string }} options
  * @returns {Promise<DshWeb>}
  */
 export async function startDshWeb(options) {
   assertPnpm()
-  const work = options.reuse ?? mkdtempSync(join(tmpdir(), 'dshremote-rt-'))
+  const persistent = options.persistentDir !== undefined
+  const work = options.persistentDir ?? options.reuse ?? mkdtempSync(join(tmpdir(), 'dshremote-rt-'))
   const dshHome = join(work, 'home')
   const workspace = join(work, 'workspace')
-  if (!options.reuse) { mkdirSync(dshHome); mkdirSync(workspace) }
+  if (persistent) { mkdirSync(dshHome, { recursive: true }); mkdirSync(workspace, { recursive: true }) } else if (!options.reuse) { mkdirSync(dshHome); mkdirSync(workspace) }
+  const installPlugin = options.withPlugin && (persistent ? !existsSync(join(work, PLUGIN_INSTALLED_MARKER)) : !options.reuse)
+  const writeConfig = options.withPlugin && options.pluginConfig !== undefined && (persistent || !options.reuse)
   const env = { ...process.env, ...options.env, DSH_HOME: dshHome }
   const dsh = installDsh(join(work, 'dsh'))
   /** @type {import('node:child_process').ChildProcess | undefined} */
@@ -123,23 +133,26 @@ export async function startDshWeb(options) {
         if (child.exitCode === null) child.kill('SIGKILL')
       }
     }
-    if (stopOptions.keepFiles) return
+    if (stopOptions.keepFiles || persistent) return
     try { rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }) } catch { /* Windows 上文件可能仍被占用 */ }
   }
 
   try {
-    if (options.withPlugin && !options.reuse) {
+    if (installPlugin) {
       log(`DSH ${dsh.version}，把插件装进 web profile ...`)
       execFileSync(process.execPath, [dsh.entry, 'plugin', '--profile', 'web', 'add', '-w', PLUGIN_DIR], { env, cwd: workspace, stdio: ['ignore', 'inherit', 'inherit'] })
-      if (options.pluginConfig) {
-        // DSH 会整行替换 config，所以要写全
-        const lines = ['- id: dshremote', '  name: dshremote', '  config:', ...Object.entries(options.pluginConfig).map(([k, v]) => `    ${k}: ${v}`)]
-        writeFileSync(join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), `${lines.join('\n')}\n`)
-      }
+      if (persistent) writeFileSync(join(work, PLUGIN_INSTALLED_MARKER), `${dsh.version}\n`)
+    }
+    if (writeConfig && options.pluginConfig) {
+      // DSH 会整行替换 config，所以要写全
+      const lines = ['- id: dshremote', '  name: dshremote', '  config:', ...Object.entries(options.pluginConfig).map(([k, v]) => `    ${k}: ${v}`)]
+      writeFileSync(join(dshHome, 'profiles', 'web', 'cordis.patch.yml'), `${lines.join('\n')}\n`)
     }
     log('启动 dsh web --port 0 ...')
     const started = spawn(process.execPath, [dsh.entry, 'web', '--no-open', '--port', '0'], { env, cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'] })
     child = started
+    /** @type {Promise<number | null>} */
+    const exited = new Promise((resolveExit) => started.once('exit', (code) => resolveExit(code)))
     /** 错误信息里带出 DSH 的输出时，去掉其中的启动 token（安全红线 5） */
     const redact = (/** @type {string} */ text) => text.slice(-2000).replace(/token=[A-Za-z0-9_-]+/g, 'token=<redacted>')
     const launch = await new Promise((resolveLaunch, reject) => {
@@ -155,7 +168,7 @@ export async function startDshWeb(options) {
       started.stderr?.on('data', onData)
       started.on('exit', (code) => { clearTimeout(timer); reject(new Error(`dsh web 提前退出（code=${code}），输出：\n${redact(output)}`)) })
     })
-    return { launch, dshHome, workspace, version: dsh.version, work, stop }
+    return { launch, dshHome, workspace, version: dsh.version, work, pid: started.pid, exited, stop }
   } catch (error) {
     await stop()
     throw error

@@ -13,3 +13,5 @@
 | [0004](0004-android-only.md) | v1 只做 Android（Kotlin + Compose） | 已接受 |
 | [0005](0005-dsh-public-api-only.md) | DSH 基线 0.2.2-rc.1，只用公开接口 | 已接受 |
 | [0006](0006-plugin-windows-linux-only.md) | v1 插件只适配 Windows 和 Linux | 已接受 |
+| [0007](0007-plugin-facade-api.md) | 插件对 App 提供外观层接口，不透传 DSH 协议 | 已接受 |
+| [0008](0008-owner-principal-for-v1.md) | v1 插件以 owner 身份访问 DSH | 已接受 |

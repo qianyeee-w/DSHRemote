@@ -13,7 +13,7 @@
 import { spawn, execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname, resolve } from 'node:path'
+import { join, dirname, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DSH_BASELINE_VERSION } from '../../src/dsh/versions.js'
 
@@ -22,7 +22,7 @@ export const DSH_VERSION = process.env.DSH_VERSION || DSH_BASELINE_VERSION
 const STARTUP_TIMEOUT_MS = 120_000
 
 /** @param {string} message */
-export const log = (message) => console.error(`[${process.argv[1]?.includes('contract') ? 'contract' : 'dsh-runtime'}] ${message}`)
+export const log = (message) => console.error(`[${basename(process.argv[1] ?? 'dsh-runtime').replace(/\.m?js$/, '')}] ${message}`)
 
 /** npm 版的 dsh 安装插件时会调用 pnpm；找不到就尽早给出明确的提示。 */
 export function assertPnpm() {
@@ -74,26 +74,29 @@ export function installDsh(fallbackDir) {
  * @property {string} dshHome
  * @property {string} workspace dsh web 的工作目录
  * @property {string} version
- * @property {() => Promise<void>} stop
+ * @property {string} work 临时目录（传给下一次 startDshWeb 的 reuse，可以用同一个 DSH_HOME 重启）
+ * @property {(options?: { keepFiles?: boolean }) => Promise<void>} stop keepFiles：只停止进程，保留目录
  */
 
 /**
  * 创建临时 DSH_HOME，可选地装入插件，启动 `dsh web --port 0`。
- * @param {{ withPlugin: boolean, pluginConfig?: Record<string, unknown>, env?: NodeJS.ProcessEnv }} options
+ * 传入 reuse（上一次返回的 work）时，沿用原来的 DSH_HOME 和已安装的插件，模拟 DSH 重启。
+ * @param {{ withPlugin: boolean, pluginConfig?: Record<string, unknown>, env?: NodeJS.ProcessEnv, reuse?: string }} options
  * @returns {Promise<DshWeb>}
  */
 export async function startDshWeb(options) {
   assertPnpm()
-  const work = mkdtempSync(join(tmpdir(), 'dshremote-rt-'))
+  const work = options.reuse ?? mkdtempSync(join(tmpdir(), 'dshremote-rt-'))
   const dshHome = join(work, 'home')
   const workspace = join(work, 'workspace')
-  mkdirSync(dshHome); mkdirSync(workspace)
+  if (!options.reuse) { mkdirSync(dshHome); mkdirSync(workspace) }
   const env = { ...process.env, ...options.env, DSH_HOME: dshHome }
   const dsh = installDsh(join(work, 'dsh'))
   /** @type {import('node:child_process').ChildProcess | undefined} */
   let child
 
-  const stop = async () => {
+  /** @param {{ keepFiles?: boolean }} [stopOptions] */
+  const stop = async (stopOptions = {}) => {
     if (child && child.exitCode === null) {
       if (process.platform === 'win32' && child.pid) {
         try { execFileSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' }) } catch { /* 可能已退出 */ }
@@ -103,11 +106,12 @@ export async function startDshWeb(options) {
         if (child.exitCode === null) child.kill('SIGKILL')
       }
     }
+    if (stopOptions.keepFiles) return
     try { rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }) } catch { /* Windows 上文件可能仍被占用 */ }
   }
 
   try {
-    if (options.withPlugin) {
+    if (options.withPlugin && !options.reuse) {
       log(`DSH ${dsh.version}，把插件装进 web profile ...`)
       execFileSync(process.execPath, [dsh.entry, 'plugin', '--profile', 'web', 'add', '-w', PLUGIN_DIR], { env, cwd: workspace, stdio: ['ignore', 'inherit', 'inherit'] })
       if (options.pluginConfig) {
@@ -134,7 +138,7 @@ export async function startDshWeb(options) {
       started.stderr?.on('data', onData)
       started.on('exit', (code) => { clearTimeout(timer); reject(new Error(`dsh web 提前退出（code=${code}），输出：\n${redact(output)}`)) })
     })
-    return { launch, dshHome, workspace, version: dsh.version, stop }
+    return { launch, dshHome, workspace, version: dsh.version, work, stop }
   } catch (error) {
     await stop()
     throw error

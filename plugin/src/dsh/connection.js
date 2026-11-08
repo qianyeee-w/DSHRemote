@@ -105,6 +105,8 @@ export class DshConnection {
   #clientId
   /** @type {StreamHandle | undefined} */
   #eventsStream
+  /** 正在打开 $events 流 */
+  #eventsConnecting = false
   #backoff
   #idleTimeoutMs
   #backoffMinMs
@@ -407,12 +409,15 @@ export class DshConnection {
    */
   onEvent(listener) {
     this.#eventListeners.add(listener)
-    if (!this.#eventsStream && !this.#reconnectTimer) this.#connectEvents()
+    // 同一时刻只能有一条 $events 流：DSH 把每条流当成一个独立的客户端，
+    // 两条流时回答一个事件，另一条会收到 cancel（看起来像「被别处处理了」）
+    if (!this.#eventsStream && !this.#eventsConnecting && !this.#reconnectTimer) void this.#connectEvents()
     return () => this.#eventListeners.delete(listener)
   }
 
   async #connectEvents() {
-    if (this.#closed) return
+    if (this.#closed || this.#eventsConnecting) return
+    this.#eventsConnecting = true
     try {
       this.#eventsStream = await this.openStream('$events', {}, {
         onItem: (value) => this.#onEventItem(value),
@@ -424,6 +429,8 @@ export class DshConnection {
     } catch (error) {
       this.#setStatus('unavailable', error instanceof Error ? error.message : String(error))
       this.#scheduleReconnect()
+    } finally {
+      this.#eventsConnecting = false
     }
   }
 

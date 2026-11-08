@@ -2,7 +2,7 @@
 
 本文件是 App 和插件之间接口的**单一事实来源**。接口有任何变化，先改这里，再改两端代码。
 
-> 状态：草案。第 4 至 6 节已根据 [DSH 会话接口调研](research/dsh-session-api.md) 和 [ADR 0007](decisions/0007-plugin-facade-api.md) 确定方向（外观层）。字段细节在 M1 实现事件转换器时最终确定，标 **[待定]** 的部分届时补齐。
+> 状态：M1 已按本文实现（外观层，见 [DSH 会话接口调研](research/dsh-session-api.md) 和 [ADR 0007](decisions/0007-plugin-facade-api.md)），插件的契约测试和端到端测试覆盖了本文的接口。在 Windows 官方 Desktop 上的实机验证见 M1 计划的 T10。
 
 ## 1. 传输
 
@@ -217,33 +217,66 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 
 App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 
+### 6.0 连接
+
+- 地址：`wss://<电脑地址>:<端口>/v1/stream`，和其他接口在同一个 HTTPS 端口上，证书指纹校验方式相同。
+- 握手请求头必须带 `Authorization: Bearer <token>`。握手失败时**不升级**，直接返回 HTTP 错误（格式同第 7 节）：
+  - `401 TOKEN_INVALID`：token 无效或已被撤销。App 停止重连，提示重新配对。
+  - `403`：握手带了 `Origin` 头。App 不要发送 `Origin`（浏览器一定会发送，插件以此拒绝网页发起的连接）。
+  - `429`：这台设备已经有 4 条连接。
+- 所有消息都是 JSON 文本帧。App 发送二进制帧会被断开。App 发来的单条消息最大 4 KB。
+- 插件每 20 秒发送一次 WebSocket ping，App 的 WebSocket 库会自动回应 pong。连续一个周期没有回应就断开。
+
+关闭码：
+
+| 关闭码 | 含义 | App 的处理 |
+|---|---|---|
+| `4401` | 设备在电脑上被撤销 | 停止重连，提示重新配对 |
+| `1013` | DSH 暂时不可用（关闭前会先发一条 `error`，`code` 为 `DSH_UNAVAILABLE`） | 稍后重连 |
+| `1008` | App 违反协议（例如发送二进制帧） | 这是 App 的 bug |
+| 其他 | 网络断开、插件或 DSH 重启等 | 按退避重连 |
+
 ### 6.1 插件 → App
 
-| 消息 | 时机 |
-|---|---|
-| `hello` | 连接建立后立刻发送：`{ protocol, sessions: [会话摘要...], attention: [待处理事项...] }`，即当前的完整状态 |
-| `session.updated` | 会话摘要发生变化（状态、标题等），附带新的会话摘要 |
-| `session.removed` | 会话被删除 |
-| `attention.requested` | 出现新的待处理事项，附带完整的事项内容 |
-| `attention.resolved` | 某个事项已经处理完：`{ attentionId, by: "this-device" \| "other" }`。`other` 表示在别处处理掉了，或者任务被停止（DSH 0.2.2 不区分这两种情况）。App 收到后收起对应的界面和通知 |
-| `session.idle` | 会话从运行变为空闲，并持续 8 秒（用于发出「任务完成」通知；8 秒内又开始运行就不发） |
-| `message.upsert` | **只对已订阅的会话发送**：新增或更新一条消息（结构见 5.2）。流式输出时，同一条消息会多次发送，并带上递增的 `rev` |
-| `error` | 出错，附带错误码 |
+所有消息都带 `type` 和 `eventId`。`eventId` 每条消息唯一，App 用它来去重。
 
-所有消息都带 `eventId`，App 用它来去重。
+| 消息 | 内容 | 时机 |
+|---|---|---|
+| `hello` | `{ protocol, sessions: [会话摘要], attention: [待处理事项] }` | 连接建立后第一条消息，即当前的完整状态。在它之前发生的变化会排在它后面发送 |
+| `session.updated` | `{ session: 会话摘要 }` | 会话摘要发生变化（状态、标题、模型、权限模式、待处理事项等），也用于新出现的会话 |
+| `session.removed` | `{ sessionId }` | 会话从列表中消失（被删除或归档） |
+| `session.idle` | `{ sessionId, title }` | 会话从运行变为空闲，并持续 8 秒（用于发出「任务完成」通知；8 秒内又开始运行就不发）。停下来是因为在等审批或提问时不发 |
+| `attention.requested` | `{ attention: 待处理事项 }`（结构见 5.3） | 出现新的待处理事项 |
+| `attention.resolved` | `{ attentionId, sessionId, by: "this-device" \| "other" }` | 某个事项已经处理完。`other` 表示在别处处理掉了，或者任务被停止（DSH 0.2.2 不区分这两种情况）。App 收到后收起对应的界面和通知 |
+| `message.upsert` | `{ sessionId, rev, message, replaces? }`（`message` 结构见 5.2） | **只对已订阅的会话发送**：新增或更新一条消息。见 6.4 |
+| `message.removed` | `{ sessionId, messageId }` | **只对已订阅的会话发送**：删除一条消息（目前只用于被放弃的草稿） |
+| `error` | `{ code, message }` | 出错，`code` 同第 7 节 |
 
 ### 6.2 App → 插件
 
 | 消息 | 说明 |
 |---|---|
-| `subscribe` | `{ sessionId }`：打开会话详情页时订阅，开始接收这个会话的 `message.upsert` |
-| `unsubscribe` | `{ sessionId }`：离开会话详情页时取消订阅 |
+| `{ "type": "subscribe", "sessionId": "…" }` | 打开会话详情页时订阅，开始接收这个会话的 `message.upsert`。重复订阅会被忽略。一条连接最多同时订阅 20 个会话 |
+| `{ "type": "unsubscribe", "sessionId": "…" }` | 离开会话详情页时取消订阅 |
+
+格式不对的消息会收到一条 `error`（`BAD_REQUEST`），连接不断开。
 
 前台服务**不订阅**任何会话，只接收状态和待处理事项，以节省电量和流量。
 
 ### 6.3 重连
 
-连接断开后，App 重新连接，并重新发送 `subscribe`。插件会发送新的 `hello`，App 以它为准**覆盖**本地的状态。已订阅会话的消息由 App 调用 `/v1/sessions/{id}/messages` 补齐 **[待定：是否支持「从某个 cursor 之后续传」以减少重复传输]**。
+连接断开后，App 重新连接，并重新发送 `subscribe`。插件会发送新的 `hello`，App 以它为准**覆盖**本地的状态。已订阅会话的消息由 App 调用 `/v1/sessions/{id}/messages` 重新读取最新一页来补齐。v1 不支持「从某个 cursor 之后续传」：断线一般很短，重新读一页的流量可以接受。
+
+DSH 重启（端口会变）时插件也会重启，连接会断开；DSH 启动完成后 App 用原来的 token 重新连接即可，**不需要重新配对**。
+
+### 6.4 消息的增量推送
+
+订阅后，App 先用 `/v1/sessions/{id}/messages` 读取历史，再按 `message.upsert` 更新：
+
+- 同一条消息（`message.id` 相同）可能推送多次，例如工具从 `running` 变为 `done`。App 用新内容整条替换旧内容。`rev` 对同一条消息递增，App 丢弃 `rev` 不大于已有值的推送。
+- **流式输出**：模型正在输出时，插件推送一条**草稿**消息，`message.draft` 为 `true`，`id` 以 `draft:` 开头，内容随输出不断更新（大约每 0.1 秒一次）。草稿写入会话日志后，插件推送正式的消息，并带上 `replaces: "<草稿的 id>"`，App 收到后删除草稿、显示正式消息。输出被放弃时（例如重试），插件发送 `message.removed` 删除草稿。
+- 订阅时模型正在输出，插件会立即推送当前的草稿。
+- 草稿只是给人看的进度，不会出现在 `/v1/sessions/{id}/messages` 中。
 
 ## 7. 错误格式
 

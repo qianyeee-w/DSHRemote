@@ -32,7 +32,8 @@
     "check": "npm run lint && npm run typecheck && npm test",
     "load-check": "node test/load/load-check.mjs",
     "contract": "node test/contract/contract.mjs",
-    "capture-fixtures": "node test/contract/capture-fixtures.mjs"
+    "capture-fixtures": "node test/contract/capture-fixtures.mjs",
+    "e2e": "node test/e2e/e2e.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

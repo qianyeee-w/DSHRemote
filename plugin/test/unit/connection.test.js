@@ -122,6 +122,22 @@ test('$events：ready 后状态变为 ready；emit、waterfall、cancel 都能�
   assert.deepEqual(answer?.args, { clientId: client?.clientId, eventId, outcome: { kind: 'result', value: 'allowed-once' } })
 })
 
+test('【回归】同一时刻注册多个事件监听者，只打开一条 $events 流（两条流时回答一个事件，另一条会收到 cancel）', async () => {
+  /** @type {import('../../src/dsh/connection.js').DshAppEvent[]} */
+  const a = []
+  /** @type {import('../../src/dsh/connection.js').DshAppEvent[]} */
+  const b = []
+  conn.onEvent((e) => a.push(e))
+  conn.onEvent((e) => b.push(e))
+  await until(() => conn.status().state === 'ready')
+  await new Promise((r) => setTimeout(r, 100))
+  assert.equal(dsh.eventsOpens, 1)
+  dsh.emit('api-session/status', ['s', true])
+  await until(() => a.length === 1 && b.length === 1)
+  await new Promise((r) => setTimeout(r, 50))
+  assert.equal(a.length, 1, '同一个事件只收到一次')
+})
+
 test('DSH 重启（换端口、换 token、旧 cookie 失效）后，$events 自动重连并继续收到事件', async () => {
   /** @type {import('../../src/dsh/connection.js').DshAppEvent[]} */
   const events = []

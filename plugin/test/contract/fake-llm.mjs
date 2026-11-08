@@ -8,12 +8,14 @@
  *   "SHELL" → 调用 shell 工具（名称从请求的 tools 里自动找）
  *   "SLOW"  → 慢慢输出很长的文本，用来测试取消
  *   "THINK" → 先输出一段思考（thinking），再回复文本
+ *   "STREAM"→ 用约 1 秒分块输出一段文本（STREAM_REPLY），用来观察流式输出
  *   其他     → 直接回复一段文本（包含 FAKE_REPLY）
  * 收到 tool_result 后回复一段文本结束本轮。
  */
 import http from 'node:http'
 
 export const FAKE_REPLY = '你好，这是假模型的回复。'
+export const STREAM_REPLY = '这是一段分块慢慢输出的回复，用来验证手机上能实时看到模型正在输出的内容。'
 export const TOOL_DONE_REPLY = '已完成，结果收到了。'
 export const SHELL_MARKER_FILE = 'contract-output.txt'
 
@@ -121,6 +123,8 @@ export async function startFakeLlm() {
           sandbox_permissions: 'danger-full-access',
           justification: '验证审批流程',
         })
+      } else if (text.includes('STREAM')) {
+        void textReply(res, STREAM_REPLY, 80)
       } else if (text.includes('THINK')) {
         void thinkingReply(res, '用户想让我想一想。', '想好了。')
       } else if (text.includes('SLOW')) {

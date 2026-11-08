@@ -30,6 +30,8 @@ export class FakeDsh {
   calls = []
   /** @type {Map<string, UnaryHandler>} */
   handlers = new Map()
+  /** 一共打开过多少条 $events 流 */
+  eventsOpens = 0
   /** @type {Set<{ socket: import('ws').WebSocket, eventsStreamId: string | undefined, clientId: string }>} */
   clients = new Set()
   /** 是否发送心跳 Ping */
@@ -124,6 +126,7 @@ export class FakeDsh {
       /** @type {any} */
       const frame = JSON.parse(String(data))
       if (frame.type === 'open' && frame.endpoint === '$events') {
+        this.eventsOpens++
         client.eventsStreamId = frame.streamId
         socket.send(JSON.stringify({ type: 'item', streamId: frame.streamId, value: { type: 'ready', clientId: client.clientId, host: { home: '/home/test' } } }))
       } else if (frame.type === 'open' && frame.endpoint === 'test/echo') {

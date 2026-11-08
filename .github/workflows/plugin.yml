@@ -45,7 +45,7 @@ jobs:
       - run: npm test
 
   load:
-    name: load + contract in real dsh web (${{ matrix.os }})
+    name: load + contract + e2e in real dsh web (${{ matrix.os }})
     needs: check
     strategy:
       fail-fast: false
@@ -73,5 +73,9 @@ jobs:
           DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
       # DSH 接口契约测试：假模型驱动真实 dsh web，逐项验证适配层依赖的接口
       - run: npm run contract
+        env:
+          DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
+      # 端到端测试：模拟手机走完配对、实时流、审批和提问、DSH 重启、撤销设备
+      - run: npm run e2e
         env:
           DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install

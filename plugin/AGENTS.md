@@ -17,15 +17,15 @@ npm run load-check   # 把插件装进真实的 dsh web（基线版本），确�
                      # 同时检查插件已通过适配层连上 DSH（配对页显示「已连接」，/v1/info 报告正确的 DSH 版本）
 npm run contract     # DSH 接口契约测试：假模型服务驱动真实 dsh web，通过适配层逐项验证插件依赖的接口
                      # 环境变量同 load-check；stdout 最后一行是 JSON 结果，失败的项目就是适配层要改的地方
+npm run e2e          # 端到端测试：插件装进真实 dsh web，模拟手机走完配对 → 实时流 → 流式输出 → 任务完成通知
+                     # → 提问和审批（含在 Desktop 上处理）→ DSH 重启后恢复 → 撤销设备。环境变量同 load-check
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
                      # 转换器（transcript.js、facade.js）的单元测试只用录制的数据，不手写 DSH 的格式
 ```
 
-`load-check`、`contract` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
+`load-check`、`contract`、`e2e` 和用 npm 版 `dsh` 安装插件，都要求 **PATH 上有 pnpm**（`npm install -g pnpm`）。npm 版的 `dsh plugin add` 内部会调用 pnpm；官方 Desktop 自带依赖管理，不受影响。
 
-以下命令在后续任务中加入：`npm run e2e`（T9，端到端测试）。
-
-**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载时，还要跑通 `npm run load-check`；改动涉及 DSH 接口（`src/dsh/`）时，还要跑通 `npm run contract`。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
+**提交前**：本任务的 `npm run check` 必须全部通过；改动涉及加载时，还要跑通 `npm run load-check`；改动涉及 DSH 接口（`src/dsh/`）时，还要跑通 `npm run contract`；改动涉及实时流、配对或对外接口时，还要跑通 `npm run e2e`。我们直接推送 `main`，CI 只能事后发现问题，所以本地验证不能省。
 
 ## 目录
 
@@ -54,11 +54,13 @@ plugin/
 │   ├── server/
 │   │   ├── https.js      # 局域网 HTTPS 服务（只提供 TLS 1.2+）
 │   │   ├── body.js       # JSON 请求体读取与字段校验（大小、Content-Type、控制字符）
-│   │   └── routes.js     # /v1/* 路由表：外观层操作的白名单 + Bearer token 认证
+│   │   ├── routes.js     # /v1/* 路由表：外观层操作的白名单 + Bearer token 认证
+│   │   └── stream.js     # /v1/stream：握手认证、拒绝带 Origin 的握手、连接数和消息大小限制、心跳、撤销即断开
 │   └── dsh/              # DSH 适配层：插件访问 DSH 的唯一入口
 │       ├── versions.js   # 支持的 DSH 版本范围（唯一定义处）、从入口路径读取 DSH 版本
 │       ├── connection.js # 登录（启动 token 换 cookie）、一元调用、mux 流、$events 订阅与回答、断线重连
 │       ├── facade.js     # 外观层：protocol.md 的操作 → DSH 接口调用 → protocol.md 的数据结构；DSH 错误 → FacadeError；发消息去重
+│       ├── live.js       # 实时状态：会话摘要的变化、任务完成（8 秒）、待处理事项广播；会话消息的增量推送和流式草稿
 │       ├── attention.js  # 待处理事项（审批、提问）：跟踪 waterfall / cancel、重连后重新同步、回答与 409 判断
 │       └── transcript.js # DSH 会话日志 → 消息结构（protocol.md 5.2），以及分页切点的修正
 └── test/
@@ -66,9 +68,11 @@ plugin/
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）
     │                     #   fake-dsh.js（模拟 DSH 的 HTTP + mux，单元测试用）
     │                     #   dsh-runtime.mjs（安装并启动真实 dsh web，load-check 和 contract 共用）
+    │                     #   pinned-client.js 也提供 pinnedWebSocket（按指纹连接 /v1/stream）
     │                     #   stub-facade.js（不涉及 DSH 的路由测试用）
     ├── fixtures/         # 从真实 DSH 录制的数据（npm run capture-fixtures），按 DSH 版本分目录
     ├── load/             # 加载检查：装进真实 dsh web，确认 active、连上 DSH，并按指纹访问 /v1/info
+    ├── e2e/              # 端到端测试：模拟手机，只通过插件对外的接口和本机配对页操作
     └── contract/         # 契约测试：fake-llm.mjs（假模型服务）+ contract.mjs；capture-fixtures.mjs（录制测试数据）
 ```
 
@@ -80,6 +84,7 @@ plugin/
 - **所有对 DSH 的调用都必须放在 `src/dsh/` 适配层里**，其他模块只能调用适配层，不能直接访问 DSH。支持的 DSH 版本范围只在 `src/dsh/versions.js` 中定义，`package.json` 的 `engines.dsh` 必须和它一致（单元测试会检查）。这是为以后的「DSH 新版本自动适配」预留的设计，见 `docs/roadmap.md`。
 - 测试代码（`test/` 下）可以直接调用 DSH 的接口，用来做验证；插件代码不可以。
 - DSH 的端口每次启动都可能变化，**每个请求都要实时读取** `ctx.webServer.port`，不要缓存（`DshConnection` 已经这样做）。DSH 自己开启 TLS（`ctx.webServer.protocol` 为 `https:`）时，v1 视为 DSH 不可用。
+- 一个 `DshConnection` 只打开一条 `$events` 流，所有模块通过 `onEvent()` 共享它。不要为了订阅事件再建一个 `DshConnection`：DSH 会把它当成另一个客户端，回答审批时另一条流会收到 cancel。
 - `DshConnection` 的每次调用都要传 `actor`：替哪台设备调用就传它的 `deviceId`，插件自身的调用传 `PLUGIN_ACTOR`。现在都以 owner 身份访问 DSH，这个参数是为以后的受限身份预留的（`docs/roadmap.md` 第 2 条）。
 - 插件的生命周期用 `ctx.effect()` 管理。加载时不要阻塞等待 DSH 启动，在后台轮询即可。
 - **日志**：使用 `ctx.logger`，并且带上 `[dshremote]` 前缀。`dsh web` 默认不输出插件的 info 日志，所以排查问题时不能指望日志；需要让用户看到的状态，要显示在本机配对页上。

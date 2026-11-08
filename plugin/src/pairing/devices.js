@@ -72,6 +72,8 @@ function parseDevicesFile(data) {
 }
 
 export class DeviceRegistry {
+  /** @type {Set<(deviceId: string) => void>} */
+  #revokeListeners = new Set()
   /** @type {DeviceRecord[]} */
   #devices
   #storage
@@ -177,6 +179,27 @@ export class DeviceRegistry {
    * @returns {Promise<boolean>} 设备是否存在
    */
   async revoke(deviceId) {
+    const revoked = await this.#revoke(deviceId)
+    if (revoked) {
+      for (const listener of this.#revokeListeners) {
+        try { listener(deviceId) } catch { /* 监听者的错误不影响撤销 */ }
+      }
+    }
+    return revoked
+  }
+
+  /**
+   * 设备被撤销时通知（例如立即断开它的实时连接）。
+   * @param {(deviceId: string) => void} listener
+   * @returns {() => void} 取消监听
+   */
+  onRevoke(listener) {
+    this.#revokeListeners.add(listener)
+    return () => this.#revokeListeners.delete(listener)
+  }
+
+  /** @param {string} deviceId */
+  async #revoke(deviceId) {
     const before = this.#devices
     if (!before.some((d) => d.deviceId === deviceId)) return false
     this.#devices = before.filter((d) => d.deviceId !== deviceId)

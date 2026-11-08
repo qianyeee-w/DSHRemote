@@ -80,3 +80,59 @@ export async function pinnedRequest(options) {
     req.end()
   })
 }
+
+/**
+ * 通过指纹固定的连接打开 WebSocket（模拟 App 连接 /v1/stream）。
+ * 握手被拒绝时 reject，错误中带 HTTP 状态码（error.status）。
+ * @param {{ host: string, port: number, fingerprint: string, path?: string, headers?: Record<string, string> }} options
+ * @returns {Promise<import('ws').WebSocket>}
+ */
+export async function pinnedWebSocket({ host, port, fingerprint, path = '/v1/stream', headers = {} }) {
+  const { default: WebSocket } = await import('ws')
+  const socket = await connectPinned({ host, port, fingerprint })
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`wss://${host}:${port}${path}`, { headers, createConnection: () => socket, perMessageDeflate: false })
+    ws.once('open', () => resolve(ws))
+    ws.once('unexpected-response', (_req, res) => {
+      let body = ''
+      res.on('data', (c) => { body += c })
+      res.on('end', () => reject(Object.assign(new Error(`握手被拒绝：${res.statusCode}`), { status: res.statusCode, headers: res.headers, body })))
+    })
+    ws.once('error', reject)
+  })
+}
+
+/**
+ * 收集 WebSocket 消息，提供「等到某条消息出现」。
+ * @param {import('ws').WebSocket} ws
+ */
+export function collectMessages(ws) {
+  /** @type {any[]} */
+  const messages = []
+  /** @type {{ code: number, reason: string } | undefined} */
+  let closed
+  ws.on('message', (data) => messages.push(JSON.parse(String(data))))
+  ws.on('close', (code, reason) => { closed = { code, reason: String(reason) } })
+  return {
+    messages,
+    closed: () => closed,
+    /** @param {(m: any) => boolean} predicate @param {number} [timeoutMs] */
+    async waitFor(predicate, timeoutMs = 10_000) {
+      const end = Date.now() + timeoutMs
+      while (Date.now() < end) {
+        const found = messages.find(predicate)
+        if (found) return found
+        await new Promise((r) => setTimeout(r, 20))
+      }
+      throw new Error(`等待消息超时，已收到：${JSON.stringify(messages.map((m) => m.type))}`)
+    },
+    async waitClosed(timeoutMs = 10_000) {
+      const end = Date.now() + timeoutMs
+      while (Date.now() < end) {
+        if (closed) return closed
+        await new Promise((r) => setTimeout(r, 20))
+      }
+      throw new Error('等待连接关闭超时')
+    },
+  }
+}

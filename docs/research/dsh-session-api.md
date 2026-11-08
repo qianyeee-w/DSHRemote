@@ -132,6 +132,22 @@ DSH 的 `remote-access` 包和 Peer 身份机制（2026-10-12 实现）目前用
 - 审批请求中只有 `toolName`、`callId`、`reason`、`displayReason`（8 种语言），**没有要执行的命令**。插件用 `callId` 在会话日志末尾找到 `tool/call`，补上命令。
 - `session/page` 在源码中已标为 `@deprecated`，建议改用 `events`。0.2.2-rc.1 上仍然可用，以后的版本适配时留意。
 
+### 5.8 T9 实现实时流时确认的细节
+
+- **会话列表的广播**（`api/session-controller/src/index.ts`）：
+  - `api-session/added`：会话出现，或它的 Agent 被创建、销毁时发出，附带完整的会话摘要。
+  - `api-session/removed`：会话**从内存中卸载**时发出（`session/disposed`），并不代表被删除。
+  - `api-session/status [sessionId, running]`：Agent 开始、停止运行。
+  - `api-session/activity [sessionId, updatedAt]`：用户发了消息。
+  - **标题变化没有广播**。所以插件的会话摘要变化一律通过重新读取 `session/list` 比较得到（有事件时防抖 0.3 秒，有手机在线时另外每 30 秒刷新一次）。
+- **`assistant-stream` 帧**（`types.ts` 的 `SessionAssistantStreamFrame`，`session/follow` 时带 `assistantStream: true`）：
+  - `start { attemptId, turn, step, startedAfterSeq }` → 多个 `chunk { chunk }` → `end { outcome }`。
+  - chunk 的类型：`block-start { index, blockType }`、`text-delta`、`reasoning-delta`（`{ index, text }`）、`tool-call-delta { index, id, name?, argumentsDelta }`、`block-end { index, block }`、`usage`、`finish`。
+  - `end.outcome`：`{ kind: "committed", eventType: "assistant/message" | "assistant/attempt", seq }` 或 `{ kind: "abandoned" }`。实测**写入日志的 `assistant/message` 事件先于 `end` 帧到达**，两者通过 `turn`、`step` 对应。
+  - 订阅时如果正在输出，snapshot 的 `assistantStream.activeAttempt` 中带有已经输出的部分（`stream` 数组，元素为 `{ type: "chunk", chunk }` 或压缩过的 `{ type: "text-chunks", index, texts }`）。
+- **一个客户端只能有一条 `$events` 流**：DSH 把每条 `$events` 流当成一个独立的客户端。插件曾因为同时注册两个监听者而打开了两条流，结果用其中一条回答提问后，另一条收到 `cancel`，被误判为「别处已处理」（端到端测试发现，已修复并加了回归测试）。
+- **`ask_user_question` 的限时模式**（`interaction/tool-ask-user` 的 `mode: "timed"`，默认是 `legacy`）：没有客户端通过 `userQuestions/attachWait` 认领时，超时后提问变为 `continued` 状态并撤回 waterfall，之后只能用 `userQuestions/answer` 回答。v1 只支持默认的阻塞模式，限时模式记入 roadmap。
+
 ## 6. 结论：透传还是外观层
 
 | 考量 | 透传（App 直接说 DSH 协议） | 外观层（插件提供精简接口） |

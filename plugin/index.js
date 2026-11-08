@@ -17,6 +17,8 @@ import { openInBrowser } from './src/admin/open-browser.js'
 import { DshConnection } from './src/dsh/connection.js'
 import { Facade } from './src/dsh/facade.js'
 import { AttentionTracker } from './src/dsh/attention.js'
+import { LiveHub } from './src/dsh/live.js'
+import { attachStream } from './src/server/stream.js'
 import { dshVersionStatus } from './src/dsh/versions.js'
 import { readFileSync } from 'node:fs'
 
@@ -62,6 +64,7 @@ export function apply(ctx, rawConfig) {
     // 跟踪审批和提问；它订阅 DSH 的应用事件，也让插件和 DSH 一直保持连接
     const attention = new AttentionTracker(dsh)
     const facade = new Facade(dsh, { attention })
+    const hub = new LiveHub(dsh, facade, attention)
 
     const codes = new PairingCodes()
     const devices = await DeviceRegistry.open(storage)
@@ -88,6 +91,7 @@ export function apply(ctx, rawConfig) {
       dsh.close()
       throw error
     }
+    const stream = attachStream({ server: lan.server, devices, hub, audit })
     let admin
     try {
       admin = await startAdminServer({
@@ -104,6 +108,8 @@ export function apply(ctx, rawConfig) {
         }),
       })
     } catch (error) {
+      stream.close()
+      hub.close()
       await lan.close()
       dsh.close()
       const code = /** @type {NodeJS.ErrnoException} */ (error).code
@@ -123,6 +129,8 @@ export function apply(ctx, rawConfig) {
 
     const adminServer = admin
     return async () => {
+      stream.close()
+      hub.close()
       attention.close()
       dsh.close()
       await adminServer.close()

@@ -78,3 +78,8 @@ v1 的插件以 owner 身份访问 DSH，只在外观层限制手机能做的操
 ## 3. 其他方向
 
 v1 范围之外的其他功能，见 [`spec-v1.md`](spec-v1.md) 中「第二版」和「以后再说」两节。
+
+## 待评估：`ask_user_question` 的限时模式
+
+DSH 的 `ask_user_question` 可以配置为限时模式（`mode: "timed"`）：没有界面认领时，超时后提问转为「之后还能回答」的状态，并从手机端撤回。v1 只支持默认的阻塞模式。要支持限时模式，插件需要认领等待（`userQuestions/attachWait`）并用 `userQuestions/answer` 回答已经转为 continued 的提问。见调研文档 5.8。
+

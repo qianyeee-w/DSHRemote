@@ -26,6 +26,7 @@ Android App ──HTTPS / WSS（证书指纹固定 + 设备 token）──> 电�
 | `docs/security.md` | 威胁模型与安全红线 |
 | `docs/decisions/` | 已确定的架构决策（ADR）；要推翻某条决策，先新写一条 ADR，不要直接改代码 |
 | `docs/roadmap.md` | 后续优化方向，以及 **v1 必须遵守的预留设计** |
+| `docs/research/` | 调研记录。`dsh-session-api.md` 记录了 DSH 0.2.2-rc.1 接口的实测结论，**写插件的 DSH 适配层之前必读** |
 
 各子项目自己的命令和约定写在 `plugin/AGENTS.md` 和 `android/AGENTS.md` 里。
 
@@ -47,6 +48,7 @@ Android App ──HTTPS / WSS（证书指纹固定 + 设备 token）──> 电�
 5. token、配对码、私钥、DSH cookie 不得写入日志、提交到仓库或出现在错误信息中。
 6. 设备 token 在电脑端只存哈希。
 7. 不得调用、修改 DSH 的私有字段或内部数组（例如 `trustedHosts`、cookie 有效期）。
+8. 插件不得向 App 提供通用的 DSH 调用通道（例如原样转发 `/api/*`）。只能提供 `docs/protocol.md` 中列出的操作（ADR 0007）。
 
 ## 工作方式
 

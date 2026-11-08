@@ -1,0 +1,119 @@
+[
+  {
+    "name": "登录：token 换取 cookie",
+    "ok": true,
+    "detail": "status=303"
+  },
+  {
+    "name": "未带 cookie 的调用被拒绝",
+    "ok": true,
+    "detail": "status=401"
+  },
+  {
+    "name": "session/list",
+    "ok": true,
+    "detail": "{\"ok\":true,\"value\":{\"items\":[{\"sessionId\":\"session-24ebedce-7c5b-4b65-aa3c-aa3c4bf6f547\",\"updatedAt\":1794107669094,\"agentAvailable\":true,\"formatStatus\":\"current\",\"running\":false,\"blank\":false,\"cwd\":\"<工作目录>\",\"projections\":{\"kind\":\"sequenced\",\"asO…"
+  },
+  {
+    "name": "session/modelCatalog",
+    "ok": true,
+    "detail": "{\"ok\":true,\"value\":{\"default\":{\"provider\":\"deepseek-official\",\"model\":\"deepseek-flash\"},\"routableProviders\":[\"deepseek-official\"],\"groups\":[{\"id\":\"deepseek-official\",\"name\":\"DeepSeek\",\"models\":[{\"id\":\"deepseek-flash\",\"name\":\"DeepSeek-V4.1-Flash\",\"reasoning\":{\"efforts\":[{\"id\":\"off\",\"name\":\"Off\",\"description\":\"Use for simple tasks that do not need reasoning.\"},{\"id\":\"low\",\"name\":\"Low\",\"description\":…"
+  },
+  {
+    "name": "permissionPresets/catalog",
+    "ok": true,
+    "detail": "{\"ok\":true,\"value\":{\"options\":[{\"value\":\"read-only\",\"name\":\"read-only\"},{\"value\":\"workspace-write\",\"name\":\"workspace-write\"},{\"value\":\"danger-full-access\",\"name\":\"danger-full-access\"}],\"defaultOptions\":[{\"value\":\"read-only\",\"name\":\"read-only\"},{\"value\":\"workspace-write\",\"name\":\"workspace-write\"},{\"v…"
+  },
+  {
+    "name": "打开 /api/remote.mux",
+    "ok": true
+  },
+  {
+    "name": "$events ready 帧",
+    "ok": true,
+    "detail": "clientId=52643821…"
+  },
+  {
+    "name": "workspace/follow 首帧",
+    "ok": true,
+    "detail": "{\"type\":\"baseline\",\"value\":{\"items\":[],\"archivedSessionIds\":[],\"pinnedSessionIds\":[]}}"
+  },
+  {
+    "name": "第二个客户端 $events ready",
+    "ok": true
+  },
+  {
+    "name": "session/create",
+    "ok": true,
+    "detail": "{\"ok\":true,\"value\":{\"sessionId\":\"session-09e84323-796c-44ba-a696-17489e6e34b4\",\"agentPreset\":\"standard\"}}"
+  },
+  {
+    "name": "session/follow 首帧",
+    "ok": true,
+    "detail": "{\"type\":\"item\",\"streamId\":\"4d9b3aee-05f7-4a64-a278-1ac603dc8d53\",\"value\":{\"type\":\"snapshot\",\"header\":{\"version\":4,\"id\":\"session-09e84323-796c-44ba-a696-17489e6e34b4\",\"createdAt\":1794107747457,\"cwd\":\"<工作目录>\",\"isSeeded\":false,\"agentPreset\":\"standard\"},\"projections\":{\"asOfSeq\":2,\"values\":{\"sessionStats\":{\"turns\":0,\"steps\":0,\"llmMs\":0,\"toolMs\":0,\"ttftMs\":0,\"ttftSteps\":0,\"decodeMs\":0,\"de…"
+  },
+  {
+    "name": "session/observeState",
+    "ok": true,
+    "detail": "{\"cursor\":2,\"active\":true,\"running\":false,\"queue\":[],\"pendingInput\":[]}"
+  },
+  {
+    "name": "session/prompt（文本）",
+    "ok": true,
+    "detail": "{\"ok\":true,\"value\":{\"accepted\":true}}"
+  },
+  {
+    "name": "流式输出到达 follow 流",
+    "ok": true,
+    "detail": "新增帧数=28"
+  },
+  {
+    "name": "收到提问 waterfall",
+    "ok": true,
+    "detail": "{\"type\":\"waterfall\",\"event\":\"user-questions/request\",\"eventId\":\"41e1e5e9-4bf0-4a9c-9122-99055ff9a4b0\",\"agentId\":\"session-09e84323-796c-44ba-a696-17489e6e34b4\",\"request\":{\"questions\":[{\"id\":\"q1\",\"question\":\"用哪种方案？\",\"header\":\"选择\",\"options\":[{\"label\":\"方案A\"},{\"label\":\"方案B\"}],\"multiSelect\":false}]}}"
+  },
+  {
+    "name": "$events/result 回答提问",
+    "ok": true,
+    "detail": "{\"ok\":true}"
+  },
+  {
+    "name": "收到审批 waterfall",
+    "ok": true,
+    "detail": "{\"type\":\"waterfall\",\"event\":\"approval/request\",\"eventId\":\"d1a4748d-51c0-44b7-a9f8-94a8e7e19a81\",\"agentId\":\"session-09e84323-796c-44ba-a696-17489e6e34b4\",\"request\":{\"toolName\":\"bash\",\"callId\":\"toolu_1794107755939\",\"reason\":\"escalate sandbox to danger-full-access: 验证审批流程\",\"displayReason\":{\"en\":\"Allow this operation with danger-full-access permissions: 验证审批流程\",\"zh\":\"允许本次操作使用 danger-full-access 权限：验证审…"
+  },
+  {
+    "name": "第二个客户端也收到同一个审批",
+    "ok": true,
+    "detail": "eventId 相同=true"
+  },
+  {
+    "name": "$events/result 批准",
+    "ok": true,
+    "detail": "{\"ok\":true}"
+  },
+  {
+    "name": "第一个客户端批准后，第二个客户端收到的帧",
+    "ok": true,
+    "detail": "[\"waterfall\",\"cancel\"]"
+  },
+  {
+    "name": "命令确实执行了",
+    "ok": true
+  },
+  {
+    "name": "session/page（maxMessages=2）",
+    "ok": true,
+    "detail": "{\"ok\":true,\"value\":{\"cursor\":54,\"records\":[{\"type\":\"event\",\"event\":{\"type\":\"assistant/message\",\"seq\":42,\"time\":1794107755941,\"data\":{\"turn\":3,\"step\":1,\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"我先确认一下。\"},{\"type\":\"tool-call\",\"id\":\"toolu_1794107755939\",\"name\":\"bash\",\"arguments\":\"{…"
+  },
+  {
+    "name": "session/cancel",
+    "ok": true,
+    "detail": "{\"ok\":true,\"value\":{\"accepted\":true}}"
+  },
+  {
+    "name": "收到的事件种类",
+    "ok": true,
+    "detail": "emit:api-session/added, emit:api-session/status, emit:api-session/activity, waterfall:user-questions/request, waterfall:approval/request"
+  }
+]

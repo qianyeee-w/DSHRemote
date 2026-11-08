@@ -2,7 +2,7 @@
 
 本文件是 App 和插件之间接口的**单一事实来源**。接口有任何变化，先改这里，再改两端代码。
 
-> 状态：草案。标注 **[待定]** 的部分需要在 M1 阶段调研 DSH 0.2.2-rc.1 的接口后确定。
+> 状态：草案。第 4 至 6 节已根据 [DSH 会话接口调研](research/dsh-session-api.md) 和 [ADR 0007](decisions/0007-plugin-facade-api.md) 确定方向（外观层）。字段细节在 M1 实现事件转换器时最终确定，标 **[待定]** 的部分届时补齐。
 
 ## 1. 传输
 
@@ -65,7 +65,9 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - WebSocket 也在握手请求头里带这个 header（OkHttp 支持在 WebSocket 握手时设置请求头）。
 - token 无效或已被撤销时返回 `401`，错误码是 `TOKEN_INVALID`。App 收到后停止重连，提示用户重新配对。
 
-## 4. 插件自己的接口
+## 4. 接口总览
+
+插件对 App 提供**外观层**接口（ADR 0007）。App 只依赖本节定义的接口，**不直接接触 DSH 的协议和数据格式**。
 
 | 方法 | 路径 | 认证 | 说明 |
 |---|---|---|---|
@@ -73,37 +75,126 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | POST | `/v1/pair` | 无需认证 | 见 2.4 |
 | GET | `/v1/me` | 需要 | 当前设备的信息 |
 | DELETE | `/v1/me` | 需要 | 设备自行取消配对 |
-| GET | `/v1/events` | 需要 | WebSocket。推送「需要你处理」类事件，供 App 发通知用，见第 6 节 **[待定]** |
+| GET | `/v1/workspaces` | 需要 | 工作区列表 |
+| GET | `/v1/sessions` | 需要 | 会话列表，每项的结构见 5.1 |
+| POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
+| GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，返回 `{ messages, hasMore, cursor }`，消息结构见 5.2 |
+| POST | `/v1/sessions/{id}/prompt` | 需要 | `{ requestId, text, mode: "queue" \| "steer" }`。`requestId` 由 App 生成，用于防止重复提交 |
+| POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务 |
+| GET | `/v1/models` | 需要 | 可选的模型列表 |
+| POST | `/v1/sessions/{id}/model` | 需要 | 切换模型 `{ provider, model }` |
+| GET | `/v1/permission-presets` | 需要 | 权限模式列表 |
+| POST | `/v1/sessions/{id}/permission-preset` | 需要 | 切换权限模式 **[待定]**：DSH 侧对应哪个接口还要在 M1 中确认 |
+| POST | `/v1/attention/{attentionId}/answer` | 需要 | 处理审批或回答提问，见 5.3 |
+| GET | `/v1/stream` | 需要 | WebSocket，所有实时数据都走这一条连接，见第 6 节 |
 
 设备的列表和撤销**只在本机配对页上提供**，不开放给局域网访问。
 
-## 5. 访问 DSH 的接口 **[待定]**
+插件内部通过 DSH 官方的 Remote API 实现以上接口，转换逻辑都在 `plugin/src/dsh/` 中。具体对应关系见 [调研文档](research/dsh-session-api.md) 第 4 节。**App 永远拿不到 DSH 的 cookie 或启动 token。**
 
-插件在内部持有 DSH 的官方会话：它通过 `ctx.connection.authenticatedUrl()` 拿到启动 token，换成 DSH 的 cookie。**App 永远拿不到 DSH 的 cookie 或启动 token。**
+## 5. 数据结构
 
-有两种方案，M1 阶段调研后选定：
+### 5.1 会话摘要
 
-- **方案 A：透传**。`/dsh/*` 原样转发给 DSH 的 `/api/*`（包括 WebSocket），由插件替换掉认证信息。
-  - 优点：插件代码最少，DSH 的功能自动全部可用。
-  - 缺点：App 要直接实现 DSH 的 Session V3 协议，DSH 每次升级都可能影响 App。
-- **方案 B：外观层**。插件对外提供一组为手机精简过的接口（会话列表、消息、审批、提问等），在内部调用 DSH。
-  - 优点：DSH 升级时只需要改插件，App 不受影响；接口可以按手机的需要设计，比如分页、聚合状态。
-  - 缺点：插件的工作量大，DSH 新增的功能要手动接入。
+```json
+{
+  "sessionId": "session-…",
+  "title": "修复登录页样式",
+  "workspaceId": "…",
+  "cwd": "/home/me/project",
+  "status": "running | waiting | idle",
+  "attention": [{ "attentionId": "…", "kind": "approval | question" }],
+  "updatedAt": 1794107669094
+}
+```
 
-初步倾向：**v1 用方案 A**，只把通知相关的事件聚合放到插件里（`/v1/events`）。等 DSH 的协议稳定下来，再考虑是否切换到方案 B。
+`status` 为 `waiting` 表示有未处理的审批或提问（`attention` 不为空）。会话列表按「waiting → running → idle」排序，同一状态内按 `updatedAt` 倒序。
 
-## 6. 通知事件 **[待定]**
+### 5.2 消息
 
-App 的前台服务只连接 `/v1/events`，不需要订阅所有会话，从而节省电量和流量。插件在内部监听 DSH，聚合出以下事件：
+插件把 DSH 的原始事件转换成以下结构。App 不需要了解 DSH 的内部事件。
 
-| 事件 | 触发时机 |
+```json
+{
+  "id": "…",
+  "role": "user | assistant",
+  "parts": [
+    { "type": "text", "text": "…" },
+    { "type": "thinking", "text": "…" },
+    { "type": "tool", "callId": "…", "name": "bash", "summary": "运行命令：npm test", "status": "running | done | error | rejected", "input": {…}, "output": "…（可能被截断）" }
+  ],
+  "createdAt": 1794107669094
+}
+```
+
+- `thinking` 和 `tool` 在 App 中默认折叠显示。
+- 工具的 `input` 和 `output` 可能很大，插件按上限截断，并标记 `truncated: true` **[待定：上限多少]**。
+- DSH 的内部事件和遥测事件（如 `request/header`、`session-log-*`）**不转发给 App**。
+
+### 5.3 待处理事项（attention）
+
+审批和提问统称「待处理事项」，用统一的 `attentionId` 标识。
+
+```json
+{
+  "attentionId": "…",
+  "sessionId": "…",
+  "kind": "approval",
+  "approval": { "toolName": "bash", "reason": "允许本次操作使用 danger-full-access 权限：…" },
+  "createdAt": 1794107669094
+}
+```
+
+```json
+{
+  "attentionId": "…",
+  "sessionId": "…",
+  "kind": "question",
+  "question": {
+    "questions": [{ "id": "q1", "question": "用哪种方案？", "header": "选择", "options": [{ "label": "方案A", "description": "…" }], "multiSelect": false }]
+  },
+  "createdAt": 1794107669094
+}
+```
+
+回答（`POST /v1/attention/{attentionId}/answer`）：
+
+- 审批：`{ "decision": "allow" | "reject" }`。DSH 的审批**只对当前这一个请求有效**，没有「以后都允许」这个选项。想减少审批次数，要去切换权限模式。
+- 提问：`{ "answers": [{ "id": "q1", "selected": ["方案A"], "custom": "可选的自由文本" }] }`
+
+如果这项事项已经在别处被处理了（例如在 Desktop 上点了批准），返回 `409`，错误码 `ATTENTION_RESOLVED`。
+
+## 6. 实时流 `/v1/stream`
+
+App 只维持**一条** WebSocket 连接，前台服务和界面共用。
+
+### 6.1 插件 → App
+
+| 消息 | 时机 |
 |---|---|
-| `approval.requested` | 某个会话请求审批 |
-| `question.asked` | 某个会话向用户提问 |
-| `attention.resolved` | 上面两类事件已经被处理（在任何一端处理都算），App 据此收起对应通知 |
-| `session.idle` | 会话从运行中变为空闲，并保持 8 秒 |
+| `hello` | 连接建立后立刻发送：`{ protocol, sessions: [会话摘要...], attention: [待处理事项...] }`，即当前的完整状态 |
+| `session.updated` | 会话摘要发生变化（状态、标题等），附带新的会话摘要 |
+| `session.removed` | 会话被删除 |
+| `attention.requested` | 出现新的待处理事项，附带完整的事项内容 |
+| `attention.resolved` | 某个事项已经处理完：`{ attentionId, by: "this-device" \| "other" \| "cancelled" }`。App 收到后收起对应的界面和通知 |
+| `session.idle` | 会话从运行变为空闲，并持续 8 秒（用于发出「任务完成」通知；8 秒内又开始运行就不发） |
+| `message.upsert` | **只对已订阅的会话发送**：新增或更新一条消息（结构见 5.2）。流式输出时，同一条消息会多次发送，并带上递增的 `rev` |
+| `error` | 出错，附带错误码 |
 
-每个事件都带上 `eventId`（用于去重）、`sessionId`、`title`、`summary`。
+所有消息都带 `eventId`，App 用它来去重。
+
+### 6.2 App → 插件
+
+| 消息 | 说明 |
+|---|---|
+| `subscribe` | `{ sessionId }`：打开会话详情页时订阅，开始接收这个会话的 `message.upsert` |
+| `unsubscribe` | `{ sessionId }`：离开会话详情页时取消订阅 |
+
+前台服务**不订阅**任何会话，只接收状态和待处理事项，以节省电量和流量。
+
+### 6.3 重连
+
+连接断开后，App 重新连接，并重新发送 `subscribe`。插件会发送新的 `hello`，App 以它为准**覆盖**本地的状态。已订阅会话的消息由 App 调用 `/v1/sessions/{id}/messages` 补齐 **[待定：是否支持「从某个 cursor 之后续传」以减少重复传输]**。
 
 ## 7. 错误格式
 
@@ -116,6 +207,8 @@ App 的前台服务只连接 `/v1/events`，不需要订阅所有会话，从而
 | `TOKEN_INVALID` | 401 | token 无效或已被撤销 |
 | `PAIRING_CODE_INVALID` | 400 | 配对码错误或已过期 |
 | `PAIRING_LOCKED` | 429 | 输错次数过多，接口暂时锁定 |
+| `ATTENTION_RESOLVED` | 409 | 这项审批或提问已经在别处处理掉了 |
+| `NOT_FOUND` | 404 | 会话或待处理事项不存在 |
 | `DSH_UNAVAILABLE` | 503 | DSH 还没启动完成 |
 | `DSH_INCOMPATIBLE` | 503 | DSH 版本不兼容 |
 

@@ -48,6 +48,9 @@ async function until(fn, label, ms = STEP_TIMEOUT_MS) {
   throw new Error(`等待超时：${label}`)
 }
 
+/** @type {(() => unknown) | undefined} */
+let diagnostics
+
 /**
  * 跑一个检查项；抛出异常记为失败，后续项目继续执行。
  * @param {string} name @param {() => Promise<string | undefined | void>} fn
@@ -58,7 +61,8 @@ async function step(name, fn) {
     record(name, true, detail ?? undefined)
     return true
   } catch (error) {
-    record(name, false, error instanceof Error ? error.message : String(error))
+    const message = error instanceof Error ? error.message : String(error)
+    record(name, false, diagnostics ? `${message}；${short(diagnostics(), 900)}` : message)
     return false
   }
 }
@@ -78,6 +82,7 @@ async function prompt(dsh, sessionId, text) {
 
 async function main() {
   const llm = await startFakeLlm()
+  diagnostics = llm.diagnostics
   /** @type {import('../helpers/dsh-runtime.mjs').DshWeb | undefined} */
   let web
   /** @type {DshConnection | undefined} */

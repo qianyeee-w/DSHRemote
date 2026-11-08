@@ -59,10 +59,13 @@ function toolReply(res, name, input) {
 }
 
 /**
- * @returns {Promise<{ url: string, requests: () => number, close: () => Promise<void> }>}
+ * @returns {Promise<{ url: string, requests: () => number, diagnostics: () => { tools: string[], lastToolResult: string }, close: () => Promise<void> }>}
  */
 export async function startFakeLlm() {
   let requests = 0
+  /** @type {string[]} */
+  let lastTools = []
+  let lastToolResult = ''
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (d) => { body += d })
@@ -82,7 +85,10 @@ export async function startFakeLlm() {
       const messages = parsed.messages ?? []
       const last = messages.at(-1)
       const lastBlocks = Array.isArray(last?.content) ? last.content : [{ type: 'text', text: String(last?.content ?? '') }]
-      if (lastBlocks.some((/** @type {{ type: string }} */ b) => b.type === 'tool_result')) {
+      lastTools = tools
+      const toolResults = lastBlocks.filter((/** @type {{ type: string }} */ b) => b.type === 'tool_result')
+      if (toolResults.length > 0) {
+        lastToolResult = JSON.stringify(toolResults).slice(0, 600)
         void textReply(res, TOOL_DONE_REPLY)
         return
       }
@@ -90,7 +96,8 @@ export async function startFakeLlm() {
       if (text.includes('ASK')) {
         void toolReply(res, 'ask_user_question', { questions: [{ id: 'q1', question: '用哪种方案？', header: '选择', options: [{ label: '方案A' }, { label: '方案B' }], multi_select: false }] })
       } else if (text.includes('SHELL')) {
-        const shell = tools.find((n) => /bash|shell|exec|command/i.test(n)) ?? 'bash'
+        // Linux 上是 bash，Windows 上是 pwsh
+        const shell = tools.find((n) => /^(bash|pwsh)$/.test(n)) ?? tools.find((n) => /bash|pwsh|powershell|shell|exec|command/i.test(n)) ?? 'bash'
         void toolReply(res, shell, {
           command: `echo dshremote-contract > ${SHELL_MARKER_FILE}`,
           description: 'contract write',
@@ -109,6 +116,8 @@ export async function startFakeLlm() {
   return {
     url: `http://127.0.0.1:${address.port}`,
     requests: () => requests,
+    // 检查失败时用来定位原因：DSH 提供了哪些工具、最近一次工具结果是什么
+    diagnostics: () => ({ tools: lastTools, lastToolResult }),
     close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()) }),
   }
 }

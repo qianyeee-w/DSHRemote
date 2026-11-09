@@ -74,6 +74,9 @@ class SessionListNavigation(
     val onAddHost: ((manual: Boolean) -> Unit)?,
     val onRepair: (manual: Boolean) -> Unit,
     val onRetry: () -> Unit,
+    val onOpenSettings: () -> Unit = {},
+    /** 列表最上方的提示（例如后台运行的引导）。 */
+    val hint: (@Composable () -> Unit)? = null,
 )
 
 @Composable
@@ -142,6 +145,7 @@ fun SessionListContent(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            navigation.hint?.let { hint -> item(key = "hint") { hint() } }
             if (!online) {
                 item(key = "status") {
                     StatusBanner(state.status, hasSessions = state.sessions.isNotEmpty(), navigation, onRepair = { choosingRepair = true })
@@ -198,6 +202,10 @@ private fun OverflowMenu(
             DropdownMenuItem(text = { Text(stringResource(R.string.menu_manage_host)) }, onClick = {
                 open = false
                 navigation.onManageHost()
+            })
+            DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = {
+                open = false
+                navigation.onOpenSettings()
             })
             if (navigation.onAddHost != null) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.hosts_add)) }, onClick = {

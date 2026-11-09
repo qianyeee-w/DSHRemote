@@ -1,7 +1,9 @@
 package io.github.qianyeeew.dshremote.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -10,6 +12,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.qianyeeew.dshremote.AppContainer
+import io.github.qianyeeew.dshremote.service.NotificationTarget
+import io.github.qianyeeew.dshremote.service.VisibleSession
 import io.github.qianyeeew.dshremote.ui.attention.AttentionScreen
 import io.github.qianyeeew.dshremote.ui.attention.AttentionViewModel
 import io.github.qianyeeew.dshremote.ui.attention.LiveAttentionResponder
@@ -26,6 +30,8 @@ import io.github.qianyeeew.dshremote.ui.sessions.PluginSessionCreator
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListNavigation
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListScreen
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListViewModel
+import io.github.qianyeeew.dshremote.ui.settings.BackgroundHint
+import io.github.qianyeeew.dshremote.ui.settings.SettingsScreen
 import kotlinx.serialization.Serializable
 
 /*
@@ -56,6 +62,10 @@ data class AttentionRoute(
     val attentionId: String,
 )
 
+/** 设置。 */
+@Serializable
+object SettingsRoute
+
 /** 主机管理。 */
 @Serializable
 data class HostRoute(
@@ -75,19 +85,32 @@ fun AppNavigation(
     versionName: String,
 ) {
     val nav = rememberNavController()
+    // 点了通知：打开对应的处理页面或会话（MainActivity 把令牌换成页面后放在这里）
+    val target by container.pendingTarget.collectAsStateWithLifecycle()
+    LaunchedEffect(target) {
+        when (val t = target) {
+            is NotificationTarget.AttentionPage -> nav.navigate(AttentionRoute(t.hostId, t.attentionId)) { launchSingleTop = true }
+            is NotificationTarget.SessionPage -> nav.navigate(SessionRoute(t.hostId, t.sessionId)) { launchSingleTop = true }
+            null -> return@LaunchedEffect
+        }
+        container.pendingTarget.value = null
+    }
+    val hint: @Composable () -> Unit = { BackgroundHint(container.settings) { nav.navigate(SettingsRoute) } }
     NavHost(nav, startDestination = HomeRoute) {
         composable<HomeRoute> {
             val hosts = viewModel { HostListViewModel(container.hosts.hosts, container.connections.states) }
             val rows by hosts.rows.collectAsStateWithLifecycle()
             val only = rows?.singleOrNull()
             if (only != null) {
-                SessionList(container, nav, only.hostId, home = true)
+                SessionList(container, nav, only.hostId, home = true, hint = hint)
             } else {
                 HostListContent(
                     rows = rows,
                     versionName = versionName,
                     onOpenHost = { nav.navigate(SessionsRoute(it)) },
                     onPair = { manual -> nav.navigate(PairRoute(manual)) },
+                    onOpenSettings = { nav.navigate(SettingsRoute) },
+                    hint = if (rows.isNullOrEmpty()) null else hint,
                 )
             }
         }
@@ -96,6 +119,12 @@ fun AppNavigation(
         }
         composable<SessionRoute> { entry ->
             val route = entry.toRoute<SessionRoute>()
+            // 正在看这个会话：通知规则不为它发通知，并撤回它的「任务完成」通知
+            LifecycleStartEffect(route) {
+                val visible = VisibleSession(route.hostId, route.sessionId)
+                container.visibleSession.value = visible
+                onStopOrDispose { container.visibleSession.compareAndSet(visible, null) }
+            }
             ChatScreen(
                 viewModel =
                     viewModel {
@@ -126,6 +155,14 @@ fun AppNavigation(
                     },
                 onBack = { nav.popBackStack() },
                 onOpenSession = { nav.navigate(SessionRoute(route.hostId, it)) },
+            )
+        }
+        composable<SettingsRoute> {
+            SettingsScreen(
+                container.settings,
+                versionName,
+                onBack = { nav.popBackStack() },
+                onPermissionGranted = container.linkController::refresh,
             )
         }
         composable<HostRoute> { entry ->
@@ -163,6 +200,7 @@ private fun SessionList(
     nav: NavController,
     hostId: String,
     home: Boolean,
+    hint: (@Composable () -> Unit)? = null,
 ) {
     SessionListScreen(
         // 首页上的会话列表跟着唯一的主机变化，所以按 hostId 区分 ViewModel
@@ -184,6 +222,8 @@ private fun SessionList(
                 onAddHost = if (home) ({ manual -> nav.navigate(PairRoute(manual)) }) else null,
                 onRepair = { manual -> nav.navigate(PairRoute(manual, hostId)) },
                 onRetry = { container.connections.retry(hostId) },
+                onOpenSettings = { nav.navigate(SettingsRoute) },
+                hint = hint,
             ),
     )
 }

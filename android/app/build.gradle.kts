@@ -104,6 +104,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.datastore)
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.camerax.camera2)
     implementation(libs.camerax.lifecycle)

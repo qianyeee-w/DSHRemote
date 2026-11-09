@@ -10,6 +10,10 @@
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+    <!-- 前台服务保持连接，需要审批、回答提问或任务完成时通知（ADR 0009、m2-android.md 3.6） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
       明文流量一律禁止（ADR 0003、安全红线第 4 条）：
@@ -28,14 +32,29 @@
         android:theme="@style/Theme.DSHRemote"
         android:usesCleartextTraffic="false">
 
+        <!-- singleTop：点通知时复用已经打开的界面（onNewIntent），不再叠一个新的 -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          前台服务的类型只在这里定义（ADR 0009）。specialUse 没有时长限制；
+          PROPERTY_SPECIAL_USE_FGS_SUBTYPE 说明用途。不对外开放。
+        -->
+        <service
+            android:name=".service.LinkService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="保持与用户自己电脑上 DSH 的连接，以便在需要审批或回答提问时通知用户" />
+        </service>
     </application>
 
 </manifest>

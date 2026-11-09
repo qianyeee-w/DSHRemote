@@ -11,7 +11,7 @@
 | 需求与设计（spec、protocol、security、ADR 0001–0008） | 完成 | `docs/` |
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
-| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）、T6（实时连接）、T7（配对与主机界面）、T8（会话列表与新建会话）、T9（会话详情）、T10（审批与提问）完成，下一步 T11（前台服务与通知） | `docs/plans/m2-android.md` |
+| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）、T6（实时连接）、T7（配对与主机界面）、T8（会话列表与新建会话）、T9（会话详情）、T10（审批与提问）、T11（前台服务与通知）完成，下一步 T12（收尾：真机验证清单） | `docs/plans/m2-android.md` |
 
 **下一步**：按 `docs/plans/m2-android.md` 第 5 节的顺序做 T1–T12，每完成一项汇报一次。
 
@@ -27,6 +27,8 @@ M2 开发要知道：
 - **会话列表**（T8，`ui/sessions/`）：会话来自实时连接的状态（`hello` 和之后的 `session.*` 事件），不单独请求 `/v1/sessions`。新建会话等 REST 调用用 `ConnectionManager.api(hostId)`：只在在线时可用，地址是连接正在用的地址。会话详情页（`ui/chat/`）在 T8 中是占位页面。
 - **会话详情**（T9）：合并规则在 `android/.../data/chat/ChatTimeline`，本地发出的消息在 `Outbox`，界面在 `ui/chat/`（`ChatViewModel` 通过 `ChatBackend` 访问实时连接和接口）。Markdown 用 `multiplatform-markdown-renderer` 0.46.0（m3 + 代码高亮）。设计要点见 `m2-android.md` 3.4「实现要点」。假模型新增 `MARKDOWN` 关键词（输出标题、列表、长代码块、宽表格和链接）。T10 在会话详情页底部加入审批和提问。
 - **审批与提问**（T10）：`android/.../data/attention/AnswerForm`（本地校验）、`ui/attention/`（卡片、`AttentionHandler`、独立处理页面 `AttentionRoute`）。会话详情页底部显示这个会话的事项，会话列表上方显示不属于任何会话的事项。T11 的通知点开后进入 `AttentionRoute(hostId, attentionId)`。`devServerTest` 里的 `AttentionDevServerTest` 用第二台测试设备模拟 Desktop 先处理。
+- **前台服务与通知**（T11）：`android/.../service/`。`LinkController` 在有主机、通知开关打开并且 App 在前台时启动 `LinkService`，它持有一个 `hold()`，按 `NotificationRules` 发通知和撤回。点通知的入口用进程内的随机令牌（`security.md`「App 端的通知」）。设置页（`ui/settings/`）有通知开关、通知权限、电池优化和小米省电设置的引导。真机上已验证锁屏收到审批通知、点开直接进入处理页面。
+- **查看真机上本 App 的通知**：`adb shell cmd notification list | grep dshremote` 只列出本 App 的通知（tag 中有 hostId 和事项 id）。不要用截图看通知栏，会截到其他 App 的通知。
 - **时钟差**：手机和电脑的时钟可能差很多（开发时这台服务器和手机就差了 8 小时），会话的 `updatedAt` 来自电脑。App 用 `/v1/info` 响应的 `Date` 头估算时钟差（`HostLiveState.clockOffsetMillis`），显示「多久以前」时用 `ui/common/ServerClock.kt` 换算。以后显示电脑给的时间都要这样处理。
 - **在真机上发消息做验证**：手机上是中文输入法，`adb shell input text` 打的字母会被输入法吞掉，发不出去。需要让某个会话收到消息时，用一台临时测试设备通过插件接口发送（配对、发送、撤销，配对码和 token 只在内存中），或者请用户在手机上输入。不要为此修改手机的输入法设置。
 - **测试真机**：用户提供一台 Android 17 的小米手机，通过无线调试连接开发机（用法见 `android/AGENTS.md`「真机」）。手机和开发机在同一局域网，已确认手机能连到 dev-server 的 3290 端口。

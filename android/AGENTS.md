@@ -2,7 +2,7 @@
 
 Kotlin + Jetpack Compose。先读根目录的 `AGENTS.md`，M2 的实施方案见 `docs/plans/m2-android.md`。
 
-> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）、协议客户端（T5）、实时连接（T6）、配对与主机界面（T7）、会话列表与新建会话（T8）、会话详情（T9）、审批与提问（T10）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
+> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）、协议客户端（T5）、实时连接（T6）、配对与主机界面（T7）、会话列表与新建会话（T8）、会话详情（T9）、审批与提问（T10）、前台服务与通知（T11）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
 
 ## 基线（ADR 0004、0011）
 
@@ -57,12 +57,12 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 │   ├── attention/  # （T10 已完成）AnswerForm：回答提问前的本地校验（和插件的规则一致）
 │   ├── chat/       # （T9 已完成）ChatTimeline（历史分页和推送的合并规则）、Outbox（发出但还没出现在日志里的消息）
 │   ├── live/       # （T6 已完成）ConnectionManager、HostConnection：每台主机一条 /v1/stream 连接，选地址、重连、hello、订阅、事件分发
+│   ├── settings/   # （T11 已完成）SettingsRepository：通知开关等设置（DataStore Preferences，不含秘密）
 │   └── pairing/    # （T7 已完成）PairingService：探测指纹、配对、重新配对、取消配对（DELETE /v1/me）
-├── service/        # 前台服务、通知
+├── service/        # （T11 已完成）LinkService（specialUse 前台服务）、LinkController（启停）、NotificationRules（通知规则，纯逻辑）、Notifier
 ├── ui/             # 各页面。AppNavigation（路由）、hosts/（主机列表、主机管理）、pairing/（扫码、手动输入、指纹核对）、
 │                   # sessions/（会话列表、新建会话）、chat/（会话详情：消息、Markdown、输入框、模型和权限模式）、
-│                   # attention/（审批和提问的卡片、独立处理页面、AttentionHandler）、common/
-│                   # 之后：设置
+│                   # attention/（审批和提问的卡片、独立处理页面、AttentionHandler）、settings/（设置页、后台运行提示）、common/
 ├── DshRemoteApp.kt # Application：AppContainer 手动创建 HostRepository、ConnectionManager、PairingService，注册 NetworkMonitor
 └── MainActivity.kt # 唯一的 Activity；可见时（onStart 到 onStop）持有 ConnectionManager.hold()
 ```

@@ -14,9 +14,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -44,10 +47,30 @@ fun HostListContent(
     versionName: String,
     onOpenHost: (hostId: String) -> Unit,
     onPair: (manual: Boolean) -> Unit,
+    onOpenSettings: () -> Unit = {},
+    hint: (@Composable () -> Unit)? = null,
 ) {
     var choosing by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.hosts_title)) }) },
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.hosts_title)) },
+                actions = {
+                    Box {
+                        IconButton(onClick = { menu = true }) {
+                            Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.action_more))
+                        }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = {
+                                menu = false
+                                onOpenSettings()
+                            })
+                        }
+                    }
+                },
+            )
+        },
         floatingActionButton = {
             if (!rows.isNullOrEmpty()) {
                 ExtendedFloatingActionButton(
@@ -67,6 +90,7 @@ fun HostListContent(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.padding(padding),
                 ) {
+                    hint?.let { item(key = "hint") { it() } }
                     items(rows, key = { it.hostId }) { row -> HostCard(row) { onOpenHost(row.hostId) } }
                 }
         }

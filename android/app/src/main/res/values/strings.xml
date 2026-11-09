@@ -220,4 +220,38 @@
     <string name="attention_waiting_connection">连上电脑后显示这一项。</string>
     <string name="attention_open_session">打开会话</string>
     <string name="sessions_other_attention">其他待处理事项（例如子代理发起的）</string>
+
+    <!-- 通知 -->
+    <string name="channel_attention">需要你处理</string>
+    <string name="channel_attention_description">电脑上的任务需要你批准或回答问题</string>
+    <string name="channel_task_done">任务完成</string>
+    <string name="channel_task_done_description">电脑上的任务运行结束</string>
+    <string name="channel_link">后台连接</string>
+    <string name="channel_link_description">App 不在前台时保持和电脑的连接（常驻通知）</string>
+    <string name="notification_attention_public">需要你处理</string>
+    <string name="notification_task_done">任务完成</string>
+    <string name="notification_title_with_host">%1$s · %2$s</string>
+    <string name="notification_link_starting">正在连接电脑……</string>
+    <string name="notification_link_none">电脑都不在线</string>
+    <string name="notification_link_connected">已连接 %1$d 台电脑</string>
+    <string name="notification_link_detail">需要你处理或任务完成时会通知你</string>
+
+    <!-- 设置 -->
+    <string name="menu_settings">设置</string>
+    <string name="settings_title">设置</string>
+    <string name="settings_notifications">通知和后台连接</string>
+    <string name="settings_notifications_detail">打开时，App 不在前台也保持和电脑的连接，在需要你处理或任务完成时通知你。通知栏会有一条常驻通知。关闭后，只在打开 App 时连接。</string>
+    <string name="settings_permission_missing">没有通知权限，收不到通知。</string>
+    <string name="settings_permission_grant">允许通知</string>
+    <string name="settings_permission_open">打开通知设置</string>
+    <string name="settings_background">后台运行</string>
+    <string name="settings_battery_ok">已关闭电池优化。</string>
+    <string name="settings_battery_needed">电池优化可能会在锁屏后断开连接，收不到通知。请在系统设置中把 DSHRemote 设为「不优化」。</string>
+    <string name="settings_battery_open">打开电池优化设置</string>
+    <string name="settings_vendor_hint">小米、红米等手机还需要：在「设置 → 应用设置 → 应用管理 → DSHRemote」中打开「自启动」，并把「省电策略」设为「无限制」。其他品牌的手机也有类似的设置。</string>
+    <string name="settings_app_details">打开 App 的系统设置</string>
+    <string name="settings_version">版本 %1$s</string>
+    <string name="background_hint">为了锁屏后也能收到通知，请关闭 DSHRemote 的电池优化。</string>
+    <string name="background_hint_go">去设置</string>
+    <string name="background_hint_dismiss">不再提示</string>
 </resources>

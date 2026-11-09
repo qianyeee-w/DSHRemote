@@ -48,6 +48,13 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests.all {
+            // 对 dev-server 的集成测试只由下面的 devServerTest 任务运行
+            it.exclude("**/*DevServerTest.class")
+        }
+    }
+
     lint {
         abortOnError = true
         warningsAsErrors = true
@@ -63,6 +70,19 @@ android {
                 "AndroidGradlePluginVersion",
             )
     }
+}
+
+// 对插件 dev-server 的集成测试（m2-android.md T5）。只在本地运行：先在 plugin/ 下 npm run dev-server
+tasks.register<Test>("devServerTest") {
+    description = "对插件的 dev-server 跑集成测试（需要先启动 dev-server）"
+    group = "verification"
+    val unitTest = tasks.named<Test>("testDebugUnitTest").get()
+    testClassesDirs = unitTest.testClassesDirs
+    classpath = unitTest.classpath
+    include("**/*DevServerTest.class")
+    systemProperty("dshremote.pluginDir", rootProject.projectDir.resolve("../plugin").canonicalPath)
+    // 结果取决于外部的 dev-server，每次都要真的运行
+    outputs.upToDateWhen { false }
 }
 
 kotlin {

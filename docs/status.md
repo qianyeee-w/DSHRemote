@@ -11,7 +11,7 @@
 | 需求与设计（spec、protocol、security、ADR 0001–0008） | 完成 | `docs/` |
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
-| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）完成，下一步 T5（协议客户端） | `docs/plans/m2-android.md` |
+| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）完成，下一步 T6（实时连接） | `docs/plans/m2-android.md` |
 
 **下一步**：按 `docs/plans/m2-android.md` 第 5 节的顺序做 T1–T12，每完成一项汇报一次。
 
@@ -21,6 +21,7 @@ M2 开发要知道：
 - **开发 App 时连接 dev-server**（`cd plugin && npm run dev-server`，T1 完成）：真实的 `dsh web` + 本插件 + 假模型，消息里的关键词决定模型的行为（ASK 提问、SHELL 审批、STREAM 流式、THINK 思考、SLOW 长输出）。默认局域网端口 3290、配对页 3291，**不用 3190 / 3191**：用户的开发服务器上，3190 被用户自己的 `dsh web` 服务占用。数据目录 `~/.cache/dshremote-dev` 保存指纹和已配对设备，重启后手机不需要重新配对。`npm run dev-server -- pair` 打印配对二维码，`restart` 重启 DSH，`revoke` 撤销设备。测试代码一律用 `dsh-runtime.mjs` 的 `freePort()` 找空闲端口。
 - **证书校验层**在 `android/.../data/net/`（T3）：App 的所有请求都必须用 `ClientFactory.forPin(指纹)` 创建的客户端；手动配对用 `PairingProbe` 取指纹。它的测试放在 `app/src/sharedTest/`，同一组测试在 JVM 和真机上各跑一遍；改动这一层后必须在真机上跑 `connectedDebugAndroidTest`。
 - **主机与凭据**在 `android/.../data/host/`（T4）：`HostRepository` 保存主机列表，指纹和 token 用 Keystore 密钥加密（`SecretBox`）；`PairUri` 严格解析配对二维码。持有 token 的类型（`DeviceToken`、`PairUri` 的配对码）的 `toString()` 都不输出秘密。
+- **协议客户端**在 `android/.../data/api/`（T5）：`PluginApi` 实现 protocol.md 的全部 REST 接口，失败时抛出 `ApiException`（`Http` / `FingerprintMismatch` / `Network` / `BadResponse`）。发消息用 `OutgoingMessage`，重试时传同一个对象（requestId 不变）。`./gradlew devServerTest` 对 dev-server 跑配对、只读接口、发消息去重和取消配对。
 - **测试真机**：用户提供一台 Android 17 的小米手机，通过无线调试连接开发机（用法见 `android/AGENTS.md`「真机」）。手机和开发机在同一局域网，已确认手机能连到 dev-server 的 3290 端口。
 - 插件对外的接口以 `docs/protocol.md` 为准，已经按实现定稿，没有待定项。App 只能使用其中列出的接口。
 - App 端的安全要求在根目录 `AGENTS.md` 的安全红线和 `android/AGENTS.md` 中，尤其是：证书指纹不匹配时直接拒绝，**不提供「仍然继续」**。
@@ -59,6 +60,7 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
   - 用 VS Code Remote-SSH 时，VS Code 会把服务器上监听的端口自动转发到 Windows 本机，可能占用插件的端口。
   - 装了 VMware、VirtualBox、WSL 的电脑，会有很多虚拟网卡。
   - 防火墙放行时只勾「专用网络」。
+- **DSH 会把工作目录所在的整个 git 仓库快照到系统临时目录**（`dsh-workspace-changes-*`，每一轮结束时）。开发服务器的 home 目录本身就是一个 git 仓库，dev-server 的工作目录又在 `~/.cache` 下，于是每个会话都复制一遍整个 home 仓库：T5 时把 7.7G 的 `/tmp`（内存盘）写满了，每一轮还要多等约 30 秒才变为空闲。现在 dev-server 把工作目录 `git init` 成独立的空仓库，一轮结束后约 1 秒就空闲。`/tmp` 被写满时先停掉 dev-server，DSH 退出时会清理自己的临时目录。
 - **Android 构建和 TLS**：
   - AGP 9 内置了 Kotlin 支持。给 source set 加目录要用 `kotlin.directories.add(...)`；放在 `java.srcDir(...)` 里的 `.kt` 文件不会被编译，测试会**静默地不运行**（构建照样成功）。加测试后要看一眼测试报告里的数量。
   - 手机上的 TLS 实现（Conscrypt）和电脑上的 JDK 有差别。例如握手失败后，Conscrypt 的 session 仍然带着对端证书，JDK 的不带。所以 TLS 相关的测试必须在真机上也跑一遍。

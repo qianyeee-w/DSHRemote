@@ -1,0 +1,381 @@
+package io.github.qianyeeew.dshremote.data.api
+
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonContentPolymorphicSerializer
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+
+/*
+ * docs/protocol.md 第 4、5 节的数据结构（插件的外观层接口，不是 DSH 的协议）。
+ *
+ * 兼容规则：插件新增的字段会被忽略；枚举出现不认识的值时变成 UNKNOWN，消息中不认识的 part 变成 UnknownPart。
+ * 这样插件在同一协议版本内增加内容时，旧版 App 不会因为解析失败而整页出错。
+ */
+
+/** 解析插件响应用的 JSON 配置。 */
+internal val ApiJson =
+    Json {
+        ignoreUnknownKeys = true
+        // 不认识的枚举值变成属性的默认值（UNKNOWN）
+        coerceInputValues = true
+        // 为 null 的可选字段在请求中省略，缺少的可空字段解析为 null
+        explicitNulls = false
+        // 请求中带默认值的字段也写出（例如回答提问时空的 selected）
+        encodeDefaults = true
+    }
+
+// ---------------------------------------------------------------- /v1/info、/v1/pair、/v1/me
+
+@Serializable
+data class PluginInfo(
+    val protocol: Int,
+    val pluginVersion: String,
+    val dsh: DshInfo,
+)
+
+@Serializable
+data class DshInfo(
+    val baseline: String,
+    /** 插件读不到 DSH 版本时为 null。 */
+    val version: String? = null,
+    val compatible: Boolean? = null,
+)
+
+@Serializable
+data class DeviceInfo(
+    val deviceId: String,
+    val name: String,
+    val platform: String,
+    val createdAt: Long,
+)
+
+// ---------------------------------------------------------------- 工作区、会话
+
+@Serializable
+data class Workspace(
+    val workspaceId: String,
+    val title: String,
+    val path: String,
+)
+
+@Serializable
+internal data class WorkspaceList(
+    val workspaces: List<Workspace>,
+)
+
+@Serializable
+enum class SessionStatus {
+    @SerialName("running")
+    RUNNING,
+
+    @SerialName("waiting")
+    WAITING,
+
+    @SerialName("idle")
+    IDLE,
+
+    UNKNOWN,
+}
+
+@Serializable
+enum class AttentionKind {
+    @SerialName("approval")
+    APPROVAL,
+
+    @SerialName("question")
+    QUESTION,
+
+    UNKNOWN,
+}
+
+@Serializable
+data class ModelRef(
+    val provider: String,
+    val model: String,
+)
+
+@Serializable
+data class AttentionRef(
+    val attentionId: String,
+    val kind: AttentionKind = AttentionKind.UNKNOWN,
+)
+
+/** 会话摘要（protocol.md 5.1）。 */
+@Serializable
+data class SessionSummary(
+    val sessionId: String,
+    /** 还没有标题时为 null，界面显示「新会话」。 */
+    val title: String? = null,
+    val workspaceId: String? = null,
+    val cwd: String? = null,
+    val status: SessionStatus = SessionStatus.UNKNOWN,
+    val attention: List<AttentionRef> = emptyList(),
+    val model: ModelRef? = null,
+    val permissionPreset: String? = null,
+    val updatedAt: Long,
+)
+
+@Serializable
+internal data class SessionList(
+    val sessions: List<SessionSummary>,
+)
+
+@Serializable
+internal data class CreateSessionRequest(
+    val workspaceId: String?,
+)
+
+@Serializable
+internal data class CreateSessionResponse(
+    val sessionId: String,
+)
+
+// ---------------------------------------------------------------- 消息（protocol.md 5.2）
+
+@Serializable
+enum class MessageRole {
+    @SerialName("user")
+    USER,
+
+    @SerialName("assistant")
+    ASSISTANT,
+
+    UNKNOWN,
+}
+
+@Serializable
+data class Message(
+    val id: String,
+    val role: MessageRole = MessageRole.UNKNOWN,
+    val parts: List<MessagePart>,
+    val createdAt: Long,
+    /** 流式输出中的草稿（只出现在实时推送中，id 以 `draft:` 开头），见 protocol.md 6.4。 */
+    val draft: Boolean = false,
+)
+
+@Serializable(with = MessagePartSerializer::class)
+sealed interface MessagePart
+
+@Serializable
+data class TextPart(
+    val text: String,
+) : MessagePart
+
+@Serializable
+data class ThinkingPart(
+    val text: String,
+) : MessagePart
+
+@Serializable
+enum class ToolStatus {
+    @SerialName("running")
+    RUNNING,
+
+    @SerialName("done")
+    DONE,
+
+    @SerialName("error")
+    ERROR,
+
+    @SerialName("rejected")
+    REJECTED,
+
+    UNKNOWN,
+}
+
+@Serializable
+data class ToolPart(
+    val callId: String,
+    val name: String,
+    /** 一行给人看的说明，例如「运行命令：npm test」。 */
+    val summary: String = "",
+    val status: ToolStatus = ToolStatus.UNKNOWN,
+    val input: JsonObject = JsonObject(emptyMap()),
+    val output: String? = null,
+    /** `input` 或 `output` 被插件截断了。 */
+    val truncated: Boolean = false,
+) : MessagePart
+
+/** 这个版本的 App 不认识的 part 类型，界面上忽略。 */
+@Serializable
+data object UnknownPart : MessagePart
+
+internal object MessagePartSerializer : JsonContentPolymorphicSerializer<MessagePart>(MessagePart::class) {
+    override fun selectDeserializer(element: JsonElement): KSerializer<out MessagePart> =
+        when (((element as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull) {
+            "text" -> TextPart.serializer()
+            "thinking" -> ThinkingPart.serializer()
+            "tool" -> ToolPart.serializer()
+            else -> UnknownPart.serializer()
+        }
+}
+
+/** 一页历史消息。`hasMore` 为 true 时，把 [cursor] 作为下一次请求的 `before`。 */
+@Serializable
+data class MessagePage(
+    val messages: List<Message>,
+    val hasMore: Boolean,
+    val cursor: String? = null,
+)
+
+// ---------------------------------------------------------------- 发消息
+
+@Serializable
+enum class PromptMode {
+    /** 当前任务结束后再处理。 */
+    @SerialName("queue")
+    QUEUE,
+
+    /** 插话：在当前任务的下一步就让模型看到。 */
+    @SerialName("steer")
+    STEER,
+}
+
+@Serializable
+internal data class PromptRequest(
+    val requestId: String,
+    val text: String,
+    val mode: PromptMode,
+)
+
+@Serializable
+internal data class Accepted(
+    val accepted: Boolean,
+)
+
+// ---------------------------------------------------------------- 模型和权限模式
+
+@Serializable
+data class ModelOption(
+    val provider: String,
+    val providerName: String,
+    val model: String,
+    val name: String,
+    val description: String? = null,
+)
+
+@Serializable
+data class ModelList(
+    val default: ModelRef? = null,
+    val models: List<ModelOption>,
+)
+
+@Serializable
+internal data class SetModelResponse(
+    val model: ModelRef,
+)
+
+@Serializable
+data class PermissionPreset(
+    val id: String,
+    val name: String,
+)
+
+@Serializable
+data class PermissionPresetList(
+    val default: String? = null,
+    val presets: List<PermissionPreset>,
+)
+
+@Serializable
+internal data class SetPresetRequest(
+    val preset: String,
+)
+
+@Serializable
+internal data class SetPresetResponse(
+    val permissionPreset: String,
+)
+
+// ---------------------------------------------------------------- 待处理事项（protocol.md 5.3）
+
+@Serializable
+data class Attention(
+    val attentionId: String,
+    /** 子代理发起的事项可能是子代理的 id，不在会话列表中。 */
+    val sessionId: String,
+    val kind: AttentionKind = AttentionKind.UNKNOWN,
+    val approval: Approval? = null,
+    val question: QuestionSet? = null,
+    val createdAt: Long,
+)
+
+@Serializable
+data class Approval(
+    val toolName: String,
+    val reason: String = "",
+    /** 插件找不到对应的工具调用时没有 summary 和 input。 */
+    val summary: String? = null,
+    val input: JsonObject? = null,
+)
+
+@Serializable
+data class QuestionSet(
+    val questions: List<Question>,
+)
+
+@Serializable
+data class Question(
+    val id: String,
+    val question: String,
+    val header: String? = null,
+    val options: List<QuestionOption> = emptyList(),
+    val multiSelect: Boolean = false,
+)
+
+@Serializable
+data class QuestionOption(
+    val label: String,
+    val description: String? = null,
+)
+
+/** 回答待处理事项（`POST /v1/attention/{id}/answer` 的请求体）。回答前的本地校验在 T10。 */
+sealed interface AttentionAnswer {
+    data class Decision(
+        val allow: Boolean,
+    ) : AttentionAnswer
+
+    data class Answers(
+        val answers: List<QuestionAnswer>,
+    ) : AttentionAnswer
+}
+
+@Serializable
+data class QuestionAnswer(
+    val id: String,
+    val selected: List<String> = emptyList(),
+    val custom: String? = null,
+)
+
+@Serializable
+internal data class DecisionRequest(
+    val decision: String,
+)
+
+@Serializable
+internal data class AnswersRequest(
+    val answers: List<QuestionAnswer>,
+)
+
+@Serializable
+internal data class AnswerResponse(
+    val attentionId: String,
+)
+
+// ---------------------------------------------------------------- 错误（protocol.md 第 7 节）
+
+@Serializable
+internal data class ErrorEnvelope(
+    val error: ErrorBody,
+)
+
+@Serializable
+internal data class ErrorBody(
+    val code: String,
+    val message: String? = null,
+)

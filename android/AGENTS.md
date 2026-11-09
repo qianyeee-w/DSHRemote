@@ -2,7 +2,7 @@
 
 Kotlin + Jetpack Compose。先读根目录的 `AGENTS.md`，M2 的实施方案见 `docs/plans/m2-android.md`。
 
-> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
+> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）、协议客户端（T5）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
 
 ## 基线（ADR 0004、0011）
 
@@ -16,7 +16,7 @@ cd android
 ./gradlew lint ktlintCheck         # lint（CI 也跑）
 ./gradlew assembleDebug            # 构建 debug APK（CI 也跑）
 ./gradlew connectedDebugAndroidTest  # 在已连接的真机上跑测试（只在本地跑）：src/sharedTest 的证书校验测试、androidTest 的 Keystore 测试，以及之后的界面测试
-./gradlew devServerTest            # 对插件的 dev-server 跑集成测试（只在本地跑；T5 起加入）
+./gradlew devServerTest            # 对插件的 dev-server 跑集成测试（只在本地跑）：先在 plugin/ 下 npm run dev-server
 ```
 
 构建需要 JDK 21 和 Android SDK 的 `platforms;android-37.0`（`sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"`），`ANDROID_HOME` 指向 SDK 目录。CI 见 `.github/workflows/android.yml`。
@@ -24,7 +24,7 @@ cd android
 - lint 把警告也当成错误（`warningsAsErrors`）。关掉的检查写在 `app/build.gradle.kts` 和 `app/lint.xml` 中，每一项都注明了原因；不要为了让构建通过而随手关闭检查。
 - ktlint 的规则在 `android/.editorconfig`（`ktlint_official` 风格，Compose 函数允许大写开头）。
 
-**提交前**：`test`、`lint ktlintCheck`、`assembleDebug` 必须通过；改了证书校验（`data/net/`）、界面、Keystore 或前台服务时，还要在真机上跑 `connectedDebugAndroidTest`。
+**提交前**：`test`、`lint ktlintCheck`、`assembleDebug` 必须通过；改了 `data/api/` 或之后的实时连接时，还要启动 dev-server 跑 `devServerTest`；改了证书校验（`data/net/`）、界面、Keystore 或前台服务时，还要在真机上跑 `connectedDebugAndroidTest`。
 
 **测试目录**：`app/src/test/` 只在 JVM 上跑；`app/src/androidTest/` 只在真机上跑；`app/src/sharedTest/` 同时加入两者，同一组测试在电脑的 JDK 和手机的 Conscrypt 上各跑一遍（证书校验的测试放在这里）。AGP 9 内置 Kotlin，给 source set 加目录要用 `kotlin.directories`，用 `java.srcDir` 时 `.kt` 文件不会被编译。
 
@@ -50,7 +50,7 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 ├── data/
 │   ├── net/        # 唯一的证书校验点（T3 已完成）：Fingerprint、PinnedTls（两道检查）、ClientFactory、PairingProbe
 │   ├── host/       # （T4 已完成）Host、HostAddress、DeviceToken、PairUri（二维码解析）、SecretBox（Keystore AES-GCM）、HostRepository
-│   ├── api/        # protocol.md 的 REST 接口和数据结构（外观层，不是 DSH 的协议）
+│   ├── api/        # （T5 已完成）PluginApi：protocol.md 的 REST 接口、数据结构、错误码（外观层，不是 DSH 的协议）
 │   └── live/       # 每台主机一条 /v1/stream 连接：重连、hello、订阅、事件分发
 ├── service/        # 前台服务、通知
 └── ui/             # 各页面：主机列表与配对、会话列表、会话详情、审批与提问、设置

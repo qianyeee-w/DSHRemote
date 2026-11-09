@@ -11,7 +11,7 @@
 | 需求与设计（spec、protocol、security、ADR 0001–0008） | 完成 | `docs/` |
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
-| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）、T6（实时连接）、T7（配对与主机界面）、T8（会话列表与新建会话）、T9（会话详情）完成，下一步 T10（审批与提问） | `docs/plans/m2-android.md` |
+| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）、T6（实时连接）、T7（配对与主机界面）、T8（会话列表与新建会话）、T9（会话详情）、T10（审批与提问）完成，下一步 T11（前台服务与通知） | `docs/plans/m2-android.md` |
 
 **下一步**：按 `docs/plans/m2-android.md` 第 5 节的顺序做 T1–T12，每完成一项汇报一次。
 
@@ -26,6 +26,7 @@ M2 开发要知道：
 - **配对与主机界面**（T7）：`DshRemoteApp` 的 `AppContainer` 手动创建 `HostRepository`、`ConnectionManager`、`PairingService` 并注册 `NetworkMonitor`；`MainActivity` 可见时持有 `hold()`。配对逻辑在 `android/.../data/pairing/PairingService`（同一台电脑再次配对时更新已有主机并撤销旧设备，见 `m2-android.md` 3.2）。界面在 `ui/hosts/`、`ui/pairing/`，用 Navigation Compose 的类型安全路由（`ui/AppNavigation.kt`）；配对码只在 ViewModel 内存中。只有一台主机时首页直接是它的会话列表，有多台时是主机列表；主机管理页从会话列表的菜单进入。
 - **会话列表**（T8，`ui/sessions/`）：会话来自实时连接的状态（`hello` 和之后的 `session.*` 事件），不单独请求 `/v1/sessions`。新建会话等 REST 调用用 `ConnectionManager.api(hostId)`：只在在线时可用，地址是连接正在用的地址。会话详情页（`ui/chat/`）在 T8 中是占位页面。
 - **会话详情**（T9）：合并规则在 `android/.../data/chat/ChatTimeline`，本地发出的消息在 `Outbox`，界面在 `ui/chat/`（`ChatViewModel` 通过 `ChatBackend` 访问实时连接和接口）。Markdown 用 `multiplatform-markdown-renderer` 0.46.0（m3 + 代码高亮）。设计要点见 `m2-android.md` 3.4「实现要点」。假模型新增 `MARKDOWN` 关键词（输出标题、列表、长代码块、宽表格和链接）。T10 在会话详情页底部加入审批和提问。
+- **审批与提问**（T10）：`android/.../data/attention/AnswerForm`（本地校验）、`ui/attention/`（卡片、`AttentionHandler`、独立处理页面 `AttentionRoute`）。会话详情页底部显示这个会话的事项，会话列表上方显示不属于任何会话的事项。T11 的通知点开后进入 `AttentionRoute(hostId, attentionId)`。`devServerTest` 里的 `AttentionDevServerTest` 用第二台测试设备模拟 Desktop 先处理。
 - **时钟差**：手机和电脑的时钟可能差很多（开发时这台服务器和手机就差了 8 小时），会话的 `updatedAt` 来自电脑。App 用 `/v1/info` 响应的 `Date` 头估算时钟差（`HostLiveState.clockOffsetMillis`），显示「多久以前」时用 `ui/common/ServerClock.kt` 换算。以后显示电脑给的时间都要这样处理。
 - **在真机上发消息做验证**：手机上是中文输入法，`adb shell input text` 打的字母会被输入法吞掉，发不出去。需要让某个会话收到消息时，用一台临时测试设备通过插件接口发送（配对、发送、撤销，配对码和 token 只在内存中），或者请用户在手机上输入。不要为此修改手机的输入法设置。
 - **测试真机**：用户提供一台 Android 17 的小米手机，通过无线调试连接开发机（用法见 `android/AGENTS.md`「真机」）。手机和开发机在同一局域网，已确认手机能连到 dev-server 的 3290 端口。
@@ -66,6 +67,7 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
   - 用 VS Code Remote-SSH 时，VS Code 会把服务器上监听的端口自动转发到 Windows 本机，可能占用插件的端口。
   - 装了 VMware、VirtualBox、WSL 的电脑，会有很多虚拟网卡。
   - 防火墙放行时只勾「专用网络」。
+- **Compose 聊天列表「停在底部时跟随新消息」**：新的一项插入后，LazyColumn 会把原来的那一项留在原位；消息连续到达时（用户消息和回复几乎同时），不能用那一刻的滚动位置判断「是否在底部」。现在只在用户自己滚动结束后更新「停在底部」，列表变化时据此滚动（`ui/chat/ChatScreen.kt`）。输入框上方的面板用 `weight(1f, fill = false)` 和列表分剩余空间，不要用窗口高度算上限（打开键盘时会把输入框挤扁）。
 - **DSH 切换模型时不发出会话事件**：插件原来只在收到 `api-session/*` 事件时推送 `session.updated`（另有 30 秒定时刷新），切换模型后手机要等最多 30 秒才更新。现在切换模型和权限模式成功后插件主动刷新（`LiveHub.refreshSoon()`）。插件依赖 DSH 事件的地方，都要在 devServerTest 或 e2e 里确认事件真的会来。
 - **DSH 会把工作目录所在的整个 git 仓库快照到系统临时目录**（`dsh-workspace-changes-*`，每一轮结束时）。开发服务器的 home 目录本身就是一个 git 仓库，dev-server 的工作目录又在 `~/.cache` 下，于是每个会话都复制一遍整个 home 仓库：T5 时把 7.7G 的 `/tmp`（内存盘）写满了，每一轮还要多等约 30 秒才变为空闲。现在 dev-server 把工作目录 `git init` 成独立的空仓库，一轮结束后约 1 秒就空闲。`/tmp` 被写满时先停掉 dev-server，DSH 退出时会清理自己的临时目录。
 - **Android 构建和 TLS**：

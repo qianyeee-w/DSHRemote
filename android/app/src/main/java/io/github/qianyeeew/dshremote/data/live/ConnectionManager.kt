@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -56,6 +58,10 @@ class ConnectionManager(
     }
 
     fun connection(hostId: String): HostConnection? = synchronized(lock) { connections[hostId]?.connection }
+
+    /** 一台主机的 `attention.resolved` 事件（审批和提问的界面据此收起）。 */
+    fun resolvedEvents(hostId: String): Flow<LiveEvent.AttentionResolved> =
+        events.filterIsInstance<LiveEvent.AttentionResolved>().filter { it.hostId == hostId }
 
     /** 这台主机在线时调用 REST 接口用的客户端，见 [HostConnection.api]。 */
     fun api(hostId: String): PluginApi? = connection(hostId)?.api()

@@ -3,6 +3,7 @@ package io.github.qianyeeew.dshremote.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.qianyeeew.dshremote.data.api.ApiException
+import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
 import io.github.qianyeeew.dshremote.data.api.ModelList
@@ -19,8 +20,12 @@ import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
+import io.github.qianyeeew.dshremote.data.live.LiveEvent
 import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.data.live.SessionEvent
+import io.github.qianyeeew.dshremote.ui.attention.AttentionHandler
+import io.github.qianyeeew.dshremote.ui.attention.AttentionResponder
+import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,6 +121,9 @@ data class ChatState(
     val loadingOlder: Boolean,
     /** 读取历史失败，可以重试。 */
     val loadFailed: Boolean,
+    /** 这个会话的待处理事项（不含已经在本地确认结束的），按出现的先后。 */
+    val attention: List<Attention> = emptyList(),
+    val attentionUi: Map<String, AttentionUi> = emptyMap(),
 ) {
     val online: Boolean get() = link is LinkStatus.Online
 
@@ -162,7 +170,12 @@ class ChatViewModel(
     sessionId: String,
     states: Flow<Map<String, HostLiveState>>,
     private val backend: ChatBackend,
+    responder: AttentionResponder,
+    resolvedEvents: Flow<LiveEvent.AttentionResolved>,
 ) : ViewModel() {
+    /** 这个会话的审批和提问（T10）。 */
+    val attention = AttentionHandler(viewModelScope, responder, resolvedEvents)
+
     private val timeline = MutableStateFlow(ChatTimeline())
     private val outbox = MutableStateFlow(Outbox())
     private val flags = MutableStateFlow(Flags())
@@ -175,18 +188,26 @@ class ChatViewModel(
     )
 
     val state: StateFlow<ChatState> =
-        combine(states, timeline, outbox, flags) { live, t, o, f ->
+        combine(states, timeline, outbox, flags, attention.ui) { live, t, o, f, attentionUi ->
             val host = live[hostId]
+            val session = host?.sessions?.get(sessionId)
             ChatState(
-                session = host?.sessions?.get(sessionId),
+                session = session,
                 link = host?.status ?: LinkStatus.Stopped,
                 items = chatItems(t, o),
                 loaded = t.loaded,
                 hasMore = t.hasMore,
                 loadingOlder = f.loadingOlder,
                 loadFailed = f.loadFailed,
+                attention = pendingAttention(host, session, sessionId).filter { attentionUi[it.attentionId]?.resolution == null },
+                attentionUi = attentionUi,
             )
         }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatState(null, LinkStatus.Stopped, emptyList(), false, false, false, false))
+
+    init {
+        // 出现在这个页面上的事项之后在别处被处理时，提示「已在其他地方处理」
+        viewModelScope.launch { state.collect { s -> attention.shown(s.attention.map { it.attentionId }) } }
+    }
 
     private val _notice = MutableStateFlow<ChatNotice?>(null)
     val notice: StateFlow<ChatNotice?> = _notice.asStateFlow()
@@ -366,6 +387,24 @@ class ChatViewModel(
             }
         }
     }
+}
+
+/**
+ * 这个会话的待处理事项：`sessionId` 是这个会话的，以及会话摘要的 `attention` 中列出的
+ * （子代理发起的事项 `sessionId` 可能是子代理的 id，protocol.md 5.3）。
+ */
+internal fun pendingAttention(
+    host: HostLiveState?,
+    session: SessionSummary?,
+    sessionId: String,
+): List<Attention> {
+    val listed = session?.attention?.mapTo(HashSet()) { it.attentionId }.orEmpty()
+    return host
+        ?.attention
+        ?.values
+        ?.filter { it.sessionId == sessionId || it.attentionId in listed }
+        ?.sortedBy { it.createdAt }
+        .orEmpty()
 }
 
 /** 正式消息、草稿、本地消息依次排列。key 重复时（例如草稿的 id 被重新使用）退回消息自己的 id。 */

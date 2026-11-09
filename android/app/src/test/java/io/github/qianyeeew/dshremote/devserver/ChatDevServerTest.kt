@@ -11,6 +11,7 @@ import io.github.qianyeeew.dshremote.data.live.Backoff
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.net.ClientFactory
+import io.github.qianyeeew.dshremote.ui.attention.LiveAttentionResponder
 import io.github.qianyeeew.dshremote.ui.chat.ChatItem
 import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
@@ -57,7 +58,17 @@ class ChatDevServerTest {
             Dispatchers.setMain(main)
             withTimeout(20_000) { manager.states.first { it[HOST_ID]?.status is LinkStatus.Online } }
             sessionId = api.createSession()
-            vm = withContext(main) { ChatViewModel(HOST_ID, sessionId, manager.states, LiveChatBackend(manager, HOST_ID, sessionId)) }
+            vm =
+                withContext(main) {
+                    ChatViewModel(
+                        HOST_ID,
+                        sessionId,
+                        manager.states,
+                        LiveChatBackend(manager, HOST_ID, sessionId),
+                        LiveAttentionResponder(manager, HOST_ID),
+                        manager.resolvedEvents(HOST_ID),
+                    )
+                }
             withContext(main) { vm.onVisible() }
             await("读到历史") { it.loaded }
         }

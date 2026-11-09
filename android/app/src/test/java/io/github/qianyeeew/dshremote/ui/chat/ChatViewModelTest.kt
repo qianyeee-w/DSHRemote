@@ -215,9 +215,110 @@ class ChatViewModelTest {
         assertEquals("draft:1", keys.first())
     }
 
+    @Test
+    fun pendingAttentionBelongsToThisSessionOrIsListedInItsSummary() {
+        val own = attention("a1", SESSION, createdAt = 2)
+        val subagent = attention("a2", "subagent-1", createdAt = 1)
+        val other = attention("a3", "s9", createdAt = 0)
+        val summary =
+            SessionSummary(
+                sessionId = SESSION,
+                status = SessionStatus.WAITING,
+                updatedAt = 0,
+                attention =
+                    listOf(
+                        io.github.qianyeeew.dshremote.data.api
+                            .AttentionRef("a2", io.github.qianyeeew.dshremote.data.api.AttentionKind.APPROVAL),
+                    ),
+            )
+        val host =
+            HostLiveState(
+                LinkStatus.Online(address),
+                mapOf(SESSION to summary),
+                listOf(own, subagent, other).associateBy { it.attentionId },
+            )
+        assertEquals(listOf("a2", "a1"), pendingAttention(host, summary, SESSION).map { it.attentionId })
+
+        states.value = mapOf("h1" to host)
+        val vm = visible()
+        assertEquals(
+            listOf("a2", "a1"),
+            vm.state.value.attention
+                .map { it.attentionId },
+        )
+        // 本地已经确认结束的事项（例如回答成功、409）立即收起，不等实时流
+        vm.attention.decide(own, allow = true)
+        assertEquals(
+            listOf("a2"),
+            vm.state.value.attention
+                .map { it.attentionId },
+        )
+    }
+
+    @Test
+    fun attentionHandledElsewhereIsNoticedOnlyIfItWasOnThisPage() {
+        val own = attention("a1", SESSION, createdAt = 0)
+        states.value =
+            mapOf(
+                "h1" to HostLiveState(LinkStatus.Online(address), live(SessionStatus.WAITING).getValue("h1").sessions, mapOf("a1" to own)),
+            )
+        val vm = visible()
+        assertEquals(
+            listOf("a1"),
+            vm.state.value.attention
+                .map { it.attentionId },
+        )
+
+        // 别的会话的事项被处理：不提示
+        resolved.tryEmit(
+            io.github.qianyeeew.dshremote.data.live.LiveEvent.AttentionResolved(
+                "h1",
+                "a9",
+                "s9",
+                io.github.qianyeeew.dshremote.data.live.ResolvedBy.OTHER,
+            ),
+        )
+        assertNull(vm.attention.notice.value)
+
+        // 这个页面上的事项在 Desktop 上被处理（实时连接先从状态里删掉，再发事件）
+        states.value = mapOf("h1" to states.value.getValue("h1").copy(attention = emptyMap()))
+        resolved.tryEmit(
+            io.github.qianyeeew.dshremote.data.live.LiveEvent.AttentionResolved(
+                "h1",
+                "a1",
+                SESSION,
+                io.github.qianyeeew.dshremote.data.live.ResolvedBy.OTHER,
+            ),
+        )
+        assertTrue(
+            vm.state.value.attention
+                .isEmpty(),
+        )
+        assertEquals(io.github.qianyeeew.dshremote.ui.attention.Resolution.ELSEWHERE, vm.attention.notice.value)
+    }
+
     // ---- 工具 ----
 
-    private fun viewModel() = ChatViewModel("h1", SESSION, states, backend)
+    private fun attention(
+        id: String,
+        sessionId: String,
+        createdAt: Long,
+    ) = io.github.qianyeeew.dshremote.data.api.Attention(
+        id,
+        sessionId,
+        io.github.qianyeeew.dshremote.data.api.AttentionKind.APPROVAL,
+        approval =
+            io.github.qianyeeew.dshremote.data.api
+                .Approval("bash"),
+        createdAt = createdAt,
+    )
+
+    private val resolved =
+        kotlinx.coroutines.flow.MutableSharedFlow<io.github.qianyeeew.dshremote.data.live.LiveEvent.AttentionResolved>(
+            extraBufferCapacity = 8,
+        )
+
+    private fun viewModel() = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved)
 
     private fun visible(page: MessagePage = MessagePage(emptyList(), hasMore = false, cursor = null)): ChatViewModel {
         backend.pages[null] = page

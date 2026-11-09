@@ -10,6 +10,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.qianyeeew.dshremote.AppContainer
+import io.github.qianyeeew.dshremote.ui.attention.AttentionScreen
+import io.github.qianyeeew.dshremote.ui.attention.AttentionViewModel
+import io.github.qianyeeew.dshremote.ui.attention.LiveAttentionResponder
 import io.github.qianyeeew.dshremote.ui.chat.ChatScreen
 import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
 import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
@@ -44,6 +47,13 @@ data class SessionsRoute(
 data class SessionRoute(
     val hostId: String,
     val sessionId: String,
+)
+
+/** 独立的处理页面（子代理发起的事项、从通知进入）。 */
+@Serializable
+data class AttentionRoute(
+    val hostId: String,
+    val attentionId: String,
 )
 
 /** 主机管理。 */
@@ -94,9 +104,28 @@ fun AppNavigation(
                             sessionId = route.sessionId,
                             states = container.connections.states,
                             backend = LiveChatBackend(container.connections, route.hostId, route.sessionId),
+                            responder = LiveAttentionResponder(container.connections, route.hostId),
+                            resolvedEvents = container.connections.resolvedEvents(route.hostId),
                         )
                     },
                 onBack = { nav.popBackStack() },
+            )
+        }
+        composable<AttentionRoute> { entry ->
+            val route = entry.toRoute<AttentionRoute>()
+            AttentionScreen(
+                viewModel =
+                    viewModel {
+                        AttentionViewModel(
+                            hostId = route.hostId,
+                            attentionId = route.attentionId,
+                            states = container.connections.states,
+                            responder = LiveAttentionResponder(container.connections, route.hostId),
+                            resolvedEvents = container.connections.resolvedEvents(route.hostId),
+                        )
+                    },
+                onBack = { nav.popBackStack() },
+                onOpenSession = { nav.navigate(SessionRoute(route.hostId, it)) },
             )
         }
         composable<HostRoute> { entry ->
@@ -150,6 +179,7 @@ private fun SessionList(
             SessionListNavigation(
                 onBack = if (home) null else ({ nav.popBackStack() }),
                 onOpenSession = { nav.navigate(SessionRoute(hostId, it)) },
+                onOpenAttention = { nav.navigate(AttentionRoute(hostId, it)) },
                 onManageHost = { nav.navigate(HostRoute(hostId)) },
                 onAddHost = if (home) ({ manual -> nav.navigate(PairRoute(manual)) }) else null,
                 onRepair = { manual -> nav.navigate(PairRoute(manual, hostId)) },

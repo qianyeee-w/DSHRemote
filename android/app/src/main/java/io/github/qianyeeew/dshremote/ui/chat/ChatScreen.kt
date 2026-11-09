@@ -53,7 +53,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +70,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
+import io.github.qianyeeew.dshremote.ui.attention.AttentionCard
+import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
+import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
+import io.github.qianyeeew.dshremote.ui.attention.Resolution
 import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -100,6 +103,7 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val picker by viewModel.picker.collectAsStateWithLifecycle()
+    val attentionNotice by viewModel.attention.notice.collectAsStateWithLifecycle()
     // 只在页面可见时订阅这个会话（插件按引用计数订阅，m2-android.md 3.3「订阅」）
     LifecycleStartEffect(viewModel) {
         viewModel.onVisible()
@@ -124,6 +128,9 @@ fun ChatScreen(
                 onClosePicker = viewModel::closePicker,
                 onDismissNotice = viewModel::dismissNotice,
             ),
+        attentionActions = AttentionCardActions.of(viewModel.attention),
+        attentionNotice = attentionNotice,
+        onDismissAttentionNotice = viewModel.attention::dismissNotice,
     )
 }
 
@@ -133,8 +140,18 @@ fun ChatContent(
     notice: ChatNotice?,
     picker: Picker,
     actions: ChatActions,
+    attentionActions: AttentionCardActions = AttentionCardActions(),
+    attentionNotice: Resolution? = null,
+    onDismissAttentionNotice: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
+    val elsewhere = stringResource(R.string.attention_elsewhere)
+    LaunchedEffect(attentionNotice) {
+        if (attentionNotice == Resolution.ELSEWHERE) {
+            snackbar.showSnackbar(elsewhere)
+            onDismissAttentionNotice()
+        }
+    }
     val scope = rememberCoroutineScope()
     var pendingLink by remember { mutableStateOf<String?>(null) }
     val copied = stringResource(R.string.chat_copied)
@@ -151,7 +168,8 @@ fun ChatContent(
     Scaffold(topBar = { ChatTopBar(state, actions) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
             if (!state.online) LinkBanner(state)
-            if (state.session?.status == SessionStatus.WAITING) WaitingBanner()
+            // 等待处理、但事项还没到（或者不在这台手机能看到的范围）时，至少提示一下
+            if (state.session?.status == SessionStatus.WAITING && state.attention.isEmpty()) WaitingBanner()
             CompositionLocalProvider(LocalUriHandler provides confirmingHandler) {
                 // Android 13 起系统会自己显示复制成功的提示，不再重复提示
                 val onCopied = {
@@ -159,6 +177,9 @@ fun ChatContent(
                 }
                 MessageList(state, actions, onCopied = { onCopied() }, modifier = Modifier.weight(1f))
             }
+            // 和消息列表按同样的权重分剩余空间，并且不强制占满：事项最多占一半，少时只占需要的高度。
+            // 按剩余空间而不是窗口高度计算，打开键盘时输入框不会被挤扁
+            AttentionPanel(state, attentionActions, Modifier.weight(1f, fill = false))
             InputBar(state, actions)
         }
     }
@@ -258,14 +279,22 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     val reversed = remember(state.items) { state.items.asReversed() }
-    // 停在底部时跟随新消息：新的一项插入后，LazyColumn 会把原来的那一项留在原位，需要手动滚回底部。
-    // 是否在底部要在这次组合时（新的一项排版之前）记下，等下一帧排版完成后再滚动。正在往上翻看历史时不打扰
+    // 停在底部时跟随新消息。「是否停在底部」只在用户自己滚动之后更新：新消息连续到达时，
+    // 列表会把原来的那一项留在原位，不能拿那一刻的位置来判断
+    var stickToBottom by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling) {
+                stickToBottom = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < STICK_TOLERANCE_PX
+            }
+        }
+    }
     val newestKey = reversed.firstOrNull()?.key
-    val wasAtBottom = remember(newestKey) { Snapshot.withoutReadObservation { listState.firstVisibleItemIndex == 0 } }
-    LaunchedEffect(newestKey) {
-        if (newestKey != null && wasAtBottom) {
+    LaunchedEffect(newestKey, reversed.size) {
+        if (newestKey != null && stickToBottom) {
+            // 等这一帧排版完成（新的一项已经在列表里）再滚动
             withFrameNanos { }
-            listState.animateScrollToItem(0)
+            listState.scrollToItem(0)
         }
     }
     LaunchedEffect(listState) {
@@ -334,7 +363,29 @@ private fun LinkBanner(state: ChatState) {
     }
 }
 
-/** 审批和提问的处理界面在 T10 加入，这里先提示。 */
+/** 这个会话的审批和提问，显示在输入框上方。事项多或者很长时可以滚动。 */
+@Composable
+private fun AttentionPanel(
+    state: ChatState,
+    actions: AttentionCardActions,
+    modifier: Modifier,
+) {
+    if (state.attention.isEmpty() || !state.online) return
+    HorizontalDivider()
+    Column(
+        modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        state.attention.forEach { attention ->
+            AttentionCard(attention, state.attentionUi[attention.attentionId] ?: AttentionUi(), actions)
+        }
+    }
+}
+
+/** 会话在等待处理，但还没有可以显示的事项。 */
 @Composable
 private fun WaitingBanner() {
     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
@@ -515,6 +566,9 @@ private fun noticeText(notice: ChatNotice): Int =
         ChatNotice.LOAD_OLDER_FAILED -> R.string.chat_notice_older_failed
         ChatNotice.CHANGE_FAILED -> R.string.chat_notice_change_failed
     }
+
+/** 离底部不到这么多像素也算停在底部。 */
+private const val STICK_TOLERANCE_PX = 48
 
 /** 离顶部还剩几项时开始取更早的一页。 */
 private const val LOAD_OLDER_THRESHOLD = 3

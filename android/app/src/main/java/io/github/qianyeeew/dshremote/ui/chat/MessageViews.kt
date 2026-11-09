@@ -309,7 +309,7 @@ private fun ToolStatusLabel(status: ToolStatus) {
 
 /** 等宽字体、可以横向滚动和选中的文本块。 */
 @Composable
-private fun CodeSection(
+internal fun CodeSection(
     title: String,
     text: String,
 ) {

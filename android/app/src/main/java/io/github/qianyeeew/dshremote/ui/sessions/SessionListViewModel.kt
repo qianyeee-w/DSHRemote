@@ -3,6 +3,7 @@ package io.github.qianyeeew.dshremote.ui.sessions
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.qianyeeew.dshremote.data.api.ApiException
+import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.PluginApi
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
@@ -31,6 +32,8 @@ data class SessionListState(
     val sessions: List<SessionSummary>,
     /** 电脑的时钟比手机快多少毫秒，见 [HostLiveState.clockOffsetMillis]。 */
     val clockOffsetMillis: Long = 0,
+    /** 不属于列表中任何会话的待处理事项（例如子代理发起的），在列表上方单独显示。 */
+    val otherAttention: List<Attention> = emptyList(),
 )
 
 /** 新建会话的进度。 */
@@ -107,6 +110,7 @@ class SessionListViewModel(
                 status = statusOf(host, hostState),
                 sessions = sortSessions(hostState?.sessions?.values.orEmpty()),
                 clockOffsetMillis = hostState?.clockOffsetMillis ?: 0,
+                otherAttention = otherAttention(hostState),
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
 
@@ -162,6 +166,15 @@ class SessionListViewModel(
         const val STOP_TIMEOUT_MILLIS = 5_000L
         const val HTTP_UNAVAILABLE = 503
     }
+}
+
+/** 不属于任何会话的待处理事项：`sessionId` 不在会话列表中，也没有出现在任何会话摘要的 `attention` 里。 */
+internal fun otherAttention(state: HostLiveState?): List<Attention> {
+    if (state == null) return emptyList()
+    val listed = state.sessions.values.flatMapTo(HashSet()) { s -> s.attention.map { it.attentionId } }
+    return state.attention.values
+        .filter { it.sessionId !in state.sessions && it.attentionId !in listed }
+        .sortedBy { it.createdAt }
 }
 
 /** protocol.md 5.1：按「waiting → running → idle」排序，同一状态内按 `updatedAt` 倒序。不认识的状态排在最后。 */

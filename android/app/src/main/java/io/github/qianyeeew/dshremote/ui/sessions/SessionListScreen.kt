@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -49,6 +50,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
+import io.github.qianyeeew.dshremote.data.api.Attention
+import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
@@ -65,6 +68,7 @@ class SessionListNavigation(
     /** 不为 null 时显示返回按钮（有多台主机时从主机列表进入）。只有一台主机时这一页就是首页，没有返回。 */
     val onBack: (() -> Unit)?,
     val onOpenSession: (sessionId: String) -> Unit,
+    val onOpenAttention: (attentionId: String) -> Unit,
     val onManageHost: () -> Unit,
     /** 不为 null 时菜单中有「添加电脑」（首页）。 */
     val onAddHost: ((manual: Boolean) -> Unit)?,
@@ -142,6 +146,9 @@ fun SessionListContent(
                 item(key = "status") {
                     StatusBanner(state.status, hasSessions = state.sessions.isNotEmpty(), navigation, onRepair = { choosingRepair = true })
                 }
+            }
+            if (state.otherAttention.isNotEmpty() && online) {
+                item(key = "other-attention") { OtherAttention(state.otherAttention, navigation.onOpenAttention) }
             }
             if (state.sessions.isEmpty() && online) {
                 item(key = "empty") { EmptySessions(onNewSession) }
@@ -290,6 +297,49 @@ private fun SessionStatusLabel(
             SessionStatus.UNKNOWN -> stringResource(R.string.session_status_unknown) to MaterialTheme.colorScheme.onSurfaceVariant
         }
     Text(text, style = MaterialTheme.typography.labelLarge, color = color, modifier = modifier)
+}
+
+/** 不属于任何会话的待处理事项，点击进入独立的处理页面。 */
+@Composable
+private fun OtherAttention(
+    attention: List<Attention>,
+    onOpen: (attentionId: String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            stringResource(R.string.sessions_other_attention),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        attention.forEach { item ->
+            Card(
+                Modifier.fillMaxWidth().clickable { onOpen(item.attentionId) },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        stringResource(
+                            if (item.kind ==
+                                AttentionKind.QUESTION
+                            ) {
+                                R.string.attention_question_title
+                            } else {
+                                R.string.attention_approval_title
+                            },
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    val detail =
+                        item.approval?.let { it.summary ?: stringResource(R.string.attention_tool, it.toolName) }
+                            ?: item.question
+                                ?.questions
+                                ?.firstOrNull()
+                                ?.question
+                    detail?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) }
+                }
+            }
+        }
+    }
 }
 
 @Composable

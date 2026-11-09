@@ -153,6 +153,42 @@ class SessionListViewModelTest {
     }
 
     @Test
+    fun attentionOutsideAnyListedSessionIsShownSeparately() {
+        val approval =
+            io.github.qianyeeew.dshremote.data.api
+                .Approval("bash")
+
+        fun item(
+            id: String,
+            sessionId: String,
+        ) = io.github.qianyeeew.dshremote.data.api
+            .Attention(id, sessionId, AttentionKind.APPROVAL, approval = approval, createdAt = 0)
+        val state =
+            HostLiveState(
+                LinkStatus.Online(address),
+                sessions = mapOf("s1" to session("s1", SessionStatus.WAITING, 0)),
+                attention =
+                    listOf(
+                        // 属于 s1
+                        item("a-s1", "s1"),
+                        // 子代理的，s1 的摘要里列出了它（session() 给 waiting 的会话加上 a-<id>）
+                        item("a-x", "sub-1").copy(attentionId = "a-s1-sub"),
+                        // 不属于任何会话
+                        item("a-orphan", "sub-2"),
+                    ).associateBy { it.attentionId },
+            )
+        val listed =
+            state.copy(
+                sessions =
+                    mapOf(
+                        "s1" to state.sessions.getValue("s1").copy(attention = listOf(AttentionRef("a-s1-sub", AttentionKind.APPROVAL))),
+                    ),
+            )
+        assertEquals(listOf("a-orphan"), otherAttention(listed).map { it.attentionId })
+        assertEquals(emptyList<String>(), otherAttention(null).map { it.attentionId })
+    }
+
+    @Test
     fun pathsAreShortenedToLastTwoLevels() {
         assertEquals("work/app", shortPath("/home/me/work/app/"))
         assertEquals("Projects/app", shortPath("C:\\Users\\me\\Projects\\app"))

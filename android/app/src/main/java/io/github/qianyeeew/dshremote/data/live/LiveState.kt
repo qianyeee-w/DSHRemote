@@ -185,3 +185,6 @@ internal class RecentIds(
         return true
     }
 }
+
+/** 这台主机现在不在线，无法调用接口（[ConnectionManager.api] 返回 null）。 */
+class OfflineException : Exception("电脑不在线")

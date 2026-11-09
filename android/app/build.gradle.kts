@@ -109,6 +109,8 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
     implementation(libs.zxing.core)
+    implementation(libs.markdown.renderer.m3)
+    implementation(libs.markdown.renderer.code)
     debugImplementation(libs.compose.ui.tooling)
     // Compose 界面测试需要的空 Activity（只进 debug 包）
     debugImplementation(libs.compose.ui.test.manifest)

@@ -9,6 +9,8 @@
  *   "SLOW"  → 慢慢输出很长的文本，用来测试取消
  *   "THINK" → 先输出一段思考（thinking），再回复文本
  *   "STREAM"→ 用约 1 秒分块输出一段文本（STREAM_REPLY），用来观察流式输出
+ *   "MARKDOWN" → 分块慢慢输出一段包含标题、列表、引用、长代码块、宽表格和链接的 Markdown（MARKDOWN_REPLY），
+ *               用来在手机上检查 Markdown 渲染和流式输出时是否闪烁
  *   其他     → 直接回复一段文本（包含 FAKE_REPLY）
  * 收到 tool_result 后回复一段文本结束本轮。
  */
@@ -17,6 +19,38 @@ import http from 'node:http'
 export const FAKE_REPLY = '你好，这是假模型的回复。'
 export const STREAM_REPLY = '这是一段分块慢慢输出的回复，用来验证手机上能实时看到模型正在输出的内容。'
 export const TOOL_DONE_REPLY = '已完成，结果收到了。'
+export const MARKDOWN_REPLY = `# Markdown 测试
+
+这一段有 **粗体**、*斜体*、\`行内代码\` 和一个链接：[示例网站](https://example.com/dshremote)。
+
+## 列表
+
+1. 第一项
+2. 第二项，带一个很长很长的说明，用来看手机上自动换行的效果是否正常
+   - 嵌套的子项
+   - 另一个子项
+
+> 引用：手机上应该能看清楚这段引用的样式。
+
+## 代码块
+
+\`\`\`kotlin
+fun main() {
+    val message = "这是一行非常长的代码，用来测试代码块能不能横向滚动，而不是被强行换行或者截断显示"
+    repeat(3) { index -> println("$index: $message") }
+}
+\`\`\`
+
+## 宽表格
+
+| 编号 | 名称 | 状态 | 负责人 | 开始时间 | 结束时间 | 备注 | 链接 |
+|---|---|---|---|---|---|---|---|
+| 1 | 配对 | 完成 | 甲 | 11-01 | 11-03 | 扫码和手动输入都支持 | https://example.com/1 |
+| 2 | 会话列表 | 完成 | 乙 | 11-04 | 11-05 | 按状态排序 | https://example.com/2 |
+| 3 | 会话详情 | 进行中 | 丙 | 11-06 | — | 流式输出和 Markdown | https://example.com/3 |
+
+最后一段：以上内容都应该能长按选中和复制。
+`
 export const SHELL_MARKER_FILE = 'contract-output.txt'
 
 /** @param {http.ServerResponse} res @param {[string, unknown][]} events @param {number} [delayMs] */
@@ -123,6 +157,8 @@ export async function startFakeLlm() {
           sandbox_permissions: 'danger-full-access',
           justification: '验证审批流程',
         })
+      } else if (text.includes('MARKDOWN')) {
+        void textReply(res, MARKDOWN_REPLY, 30)
       } else if (text.includes('STREAM')) {
         void textReply(res, STREAM_REPLY, 80)
       } else if (text.includes('THINK')) {

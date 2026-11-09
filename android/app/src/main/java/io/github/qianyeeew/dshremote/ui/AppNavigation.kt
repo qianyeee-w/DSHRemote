@@ -11,6 +11,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.qianyeeew.dshremote.AppContainer
 import io.github.qianyeeew.dshremote.ui.chat.ChatScreen
+import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
+import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailScreen
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailViewModel
 import io.github.qianyeeew.dshremote.ui.hosts.HostListContent
@@ -84,9 +86,16 @@ fun AppNavigation(
         }
         composable<SessionRoute> { entry ->
             val route = entry.toRoute<SessionRoute>()
-            val states by container.connections.states.collectAsStateWithLifecycle()
             ChatScreen(
-                title = states[route.hostId]?.sessions?.get(route.sessionId)?.title,
+                viewModel =
+                    viewModel {
+                        ChatViewModel(
+                            hostId = route.hostId,
+                            sessionId = route.sessionId,
+                            states = container.connections.states,
+                            backend = LiveChatBackend(container.connections, route.hostId, route.sessionId),
+                        )
+                    },
                 onBack = { nav.popBackStack() },
             )
         }

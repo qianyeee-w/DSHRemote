@@ -19,6 +19,7 @@ camerax = "1.6.2"
 zxing = "3.5.4"
 # Compose UI Test 依赖的 Espresso 默认是 3.5，它在 Android 15 以上的系统中调用已经删除的 InputManager.getInstance，所以显式指定新版
 espresso = "3.7.0"
+markdown-renderer = "0.46.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
@@ -37,6 +38,8 @@ camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "ca
 camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
+markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }
+markdown-renderer-code = { module = "com.mikepenz:multiplatform-markdown-renderer-code", version.ref = "markdown-renderer" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 junit = { module = "junit:junit", version.ref = "junit" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }

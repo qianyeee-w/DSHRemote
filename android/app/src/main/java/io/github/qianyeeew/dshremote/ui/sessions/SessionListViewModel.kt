@@ -12,6 +12,7 @@ import io.github.qianyeeew.dshremote.data.api.isTokenInvalid
 import io.github.qianyeeew.dshremote.data.host.Host
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
+import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.ui.hosts.statusOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,8 +77,6 @@ interface SessionCreator {
     /** 返回新会话的 id。[workspaceId] 为 null 时由 DSH 决定工作目录。 */
     suspend fun create(workspaceId: String?): String
 }
-
-class OfflineException : Exception("电脑不在线")
 
 /** 通过这台主机当前在线的连接调用插件（[io.github.qianyeeew.dshremote.data.live.ConnectionManager.api]）。 */
 class PluginSessionCreator(

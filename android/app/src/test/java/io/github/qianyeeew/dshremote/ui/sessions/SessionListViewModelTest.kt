@@ -10,6 +10,7 @@ import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
+import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.data.live.OfflineReason
 import io.github.qianyeeew.dshremote.data.live.PairingReason
 import io.github.qianyeeew.dshremote.ui.FakePairer.Companion.host

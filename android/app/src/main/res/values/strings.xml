@@ -151,6 +151,45 @@
     <string name="new_session_needs_pairing">这台手机需要重新配对。</string>
     <string name="new_session_failed">新建会话失败，请稍后再试。</string>
 
-    <!-- 会话详情（T9 实现，这里只是占位） -->
-    <string name="chat_placeholder">会话详情还在开发中。</string>
+    <!-- 会话详情 -->
+    <string name="chat_menu_model">切换模型</string>
+    <string name="chat_menu_model_current">切换模型（当前：%1$s）</string>
+    <string name="chat_menu_preset">权限模式</string>
+    <string name="chat_menu_preset_current">权限模式（当前：%1$s）</string>
+    <string name="chat_input_hint">发消息</string>
+    <string name="chat_input_hint_offline">电脑不在线，暂时不能发消息</string>
+    <string name="chat_send">发送</string>
+    <string name="chat_stop">停止</string>
+    <string name="chat_mode_steer">插话</string>
+    <string name="chat_mode_steer_hint">开着时，消息在当前任务的下一步就让模型看到；关掉则排队，等当前任务结束后再处理。</string>
+    <string name="chat_local_sending">发送中……</string>
+    <string name="chat_local_sent">已发送</string>
+    <string name="chat_local_failed">发送失败，点此重试</string>
+    <string name="chat_thinking">思考过程</string>
+    <string name="chat_tool_running">运行中</string>
+    <string name="chat_tool_done">完成</string>
+    <string name="chat_tool_error">失败</string>
+    <string name="chat_tool_rejected">已拒绝</string>
+    <string name="chat_tool_unknown">状态未知</string>
+    <string name="chat_tool_input">参数</string>
+    <string name="chat_tool_output">结果</string>
+    <string name="chat_tool_truncated">内容太长，已截断。</string>
+    <string name="chat_drafting">正在输出……</string>
+    <string name="chat_copy">复制全文</string>
+    <string name="chat_copied">已复制</string>
+    <string name="chat_expand">展开</string>
+    <string name="chat_loading">正在读取消息……</string>
+    <string name="chat_load_failed">读取消息失败。</string>
+    <string name="chat_empty">还没有消息，发一条开始吧。</string>
+    <string name="chat_waiting">这个会话在等待你处理（审批或提问）。</string>
+    <string name="chat_notice_offline">电脑不在线</string>
+    <string name="chat_notice_cancel_failed">停止失败，请稍后再试</string>
+    <string name="chat_notice_older_failed">读取更早的消息失败</string>
+    <string name="chat_notice_change_failed">操作失败，请稍后再试</string>
+    <string name="chat_link_title">打开链接？</string>
+    <string name="chat_link_open">打开</string>
+    <string name="chat_link_unsupported">只能打开 http 和 https 链接。</string>
+    <string name="chat_link_no_browser">没有可以打开链接的应用。</string>
+    <string name="chat_picker_loading">正在读取……</string>
+    <string name="chat_picker_empty">没有可选的项目。</string>
 </resources>

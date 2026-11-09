@@ -26,6 +26,7 @@ npm run dev-server   # 给 App 开发用的服务器：真实 dsh web + 本插�
                      # 重启后指纹和已配对设备保留。子命令：pair（打印配对二维码）、devices、revoke、restart（重启 DSH）、stop、status，
                      # 加 --json 输出机器可读结果。前台运行时可按 p / d / r / q。用法见 scripts/dev-server.mjs 开头
 npm run dev-server-check  # 用临时目录和空闲端口把 dev-server 的功能走一遍（环境变量同 e2e）
+                     # dev-server 的工作目录会被 git init 成独立的空仓库：DSH 每一轮结束时会把工作目录所在的整个 git 仓库快照到 /tmp
 node scripts/verify.mjs   # 真机验证：检查装在官方 Desktop（或 dsh web）里的插件，模拟手机走一遍对外接口
                      # 用法见 docs/plans/m1-windows-verification.md；输出的 JSON 不含 token 和配对码
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/

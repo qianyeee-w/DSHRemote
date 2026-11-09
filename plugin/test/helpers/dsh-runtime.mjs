@@ -97,6 +97,24 @@ export function installDsh(fallbackDir) {
  * @property {(options?: { keepFiles?: boolean }) => Promise<void>} stop keepFiles：只停止进程，保留目录
  */
 
+/**
+ * 让持久工作目录成为一个独立的（空的）git 仓库。
+ *
+ * DSH 在每一轮结束时，会把工作目录所在的整个 git 仓库做一次快照，写到系统临时目录（dsh-workspace-changes-*）。
+ * 如果持久目录（默认在 ~/.cache 下）位于一个很大的 git 仓库里（例如整个 home 目录就是一个仓库），
+ * 每个会话都会复制一遍这个仓库：曾经把 /tmp 写满，每一轮还要多等约 30 秒。
+ * 在工作目录里 git init 之后，快照只覆盖这个空目录。没有安装 git 时跳过。
+ * @param {string} workspace
+ */
+function isolateWorkspaceRepo(workspace) {
+  if (existsSync(join(workspace, '.git'))) return
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: workspace, stdio: 'ignore' })
+  } catch {
+    // 没有 git：DSH 也不会做快照
+  }
+}
+
 /** 持久目录中记录「插件已经装进 web profile」的标记文件 */
 const PLUGIN_INSTALLED_MARKER = '.dshremote-plugin-installed'
 
@@ -114,7 +132,11 @@ export async function startDshWeb(options) {
   const work = options.persistentDir ?? options.reuse ?? mkdtempSync(join(tmpdir(), 'dshremote-rt-'))
   const dshHome = join(work, 'home')
   const workspace = join(work, 'workspace')
-  if (persistent) { mkdirSync(dshHome, { recursive: true }); mkdirSync(workspace, { recursive: true }) } else if (!options.reuse) { mkdirSync(dshHome); mkdirSync(workspace) }
+  if (persistent) {
+    mkdirSync(dshHome, { recursive: true })
+    mkdirSync(workspace, { recursive: true })
+    isolateWorkspaceRepo(workspace)
+  } else if (!options.reuse) { mkdirSync(dshHome); mkdirSync(workspace) }
   const installPlugin = options.withPlugin && (persistent ? !existsSync(join(work, PLUGIN_INSTALLED_MARKER)) : !options.reuse)
   const writeConfig = options.withPlugin && options.pluginConfig !== undefined && (persistent || !options.reuse)
   const env = { ...process.env, ...options.env, DSH_HOME: dshHome }

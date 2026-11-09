@@ -3,6 +3,8 @@
 
     <!-- 连接局域网中电脑上的插件（只用 TLS，见下方说明） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 监听网络变化，换网络后立即重连（data/live/NetworkMonitor） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
       明文流量一律禁止（ADR 0003、安全红线第 4 条）：

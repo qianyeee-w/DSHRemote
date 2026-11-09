@@ -11,7 +11,7 @@
 | 需求与设计（spec、protocol、security、ADR 0001–0008） | 完成 | `docs/` |
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
-| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）完成，下一步 T6（实时连接） | `docs/plans/m2-android.md` |
+| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）、T6（实时连接）完成，下一步 T7（配对与主机界面） | `docs/plans/m2-android.md` |
 
 **下一步**：按 `docs/plans/m2-android.md` 第 5 节的顺序做 T1–T12，每完成一项汇报一次。
 
@@ -22,6 +22,7 @@ M2 开发要知道：
 - **证书校验层**在 `android/.../data/net/`（T3）：App 的所有请求都必须用 `ClientFactory.forPin(指纹)` 创建的客户端；手动配对用 `PairingProbe` 取指纹。它的测试放在 `app/src/sharedTest/`，同一组测试在 JVM 和真机上各跑一遍；改动这一层后必须在真机上跑 `connectedDebugAndroidTest`。
 - **主机与凭据**在 `android/.../data/host/`（T4）：`HostRepository` 保存主机列表，指纹和 token 用 Keystore 密钥加密（`SecretBox`）；`PairUri` 严格解析配对二维码。持有 token 的类型（`DeviceToken`、`PairUri` 的配对码）的 `toString()` 都不输出秘密。
 - **协议客户端**在 `android/.../data/api/`（T5）：`PluginApi` 实现 protocol.md 的全部 REST 接口，失败时抛出 `ApiException`（`Http` / `FingerprintMismatch` / `Network` / `BadResponse`）。发消息用 `OutgoingMessage`，重试时传同一个对象（requestId 不变）。`./gradlew devServerTest` 对 dev-server 跑配对、只读接口、发消息去重和取消配对。
+- **实时连接**在 `android/.../data/live/`（T6）：`ConnectionManager` 跟随主机列表，每台主机一条 `HostConnection`；只有存在 `hold()` 时才连接（界面可见、前台服务各持有一个）。连接时先用 `/v1/info` 选地址（lastGoodAddress 优先，失败后其他地址同时试），通过后才用 token 打开 WebSocket。状态 `LinkStatus` 中 `isTerminal` 的几种（需要重新配对、指纹不匹配、App 版本太旧）不会自动重连；指纹不匹配在网络变化后会再试一次。会话详情页用 `HostConnection.subscribe(sessionId)` 收消息，收到 `SessionEvent.Resync` 时重新读取最新一页历史。`NetworkMonitor` 和 Application 的接线在 T7 做。`devServerTest` 里的 `LiveDevServerTest` 会重启 dev-server 中的 DSH 并撤销自己的测试设备。
 - **测试真机**：用户提供一台 Android 17 的小米手机，通过无线调试连接开发机（用法见 `android/AGENTS.md`「真机」）。手机和开发机在同一局域网，已确认手机能连到 dev-server 的 3290 端口。
 - 插件对外的接口以 `docs/protocol.md` 为准，已经按实现定稿，没有待定项。App 只能使用其中列出的接口。
 - App 端的安全要求在根目录 `AGENTS.md` 的安全红线和 `android/AGENTS.md` 中，尤其是：证书指纹不匹配时直接拒绝，**不提供「仍然继续」**。
@@ -64,6 +65,8 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
 - **Android 构建和 TLS**：
   - AGP 9 内置了 Kotlin 支持。给 source set 加目录要用 `kotlin.directories.add(...)`；放在 `java.srcDir(...)` 里的 `.kt` 文件不会被编译，测试会**静默地不运行**（构建照样成功）。加测试后要看一眼测试报告里的数量。
   - 手机上的 TLS 实现（Conscrypt）和电脑上的 JDK 有差别。例如握手失败后，Conscrypt 的 session 仍然带着对端证书，JDK 的不带。所以 TLS 相关的测试必须在真机上也跑一遍。
+  - MockWebServer 服务器端的 WebSocket 不支持 `cancel()`（会抛 NullPointerException）。测试中要模拟「突然断线」，用 `FakePlugin.ServerSide.kill()`（调用 OkHttp 内部的 `failWebSocket`）。
+  - JUnit 4 的 `@BeforeClass` / `@Test` 方法必须返回 void：用 `runBlocking` 时写成 `runBlocking<Unit>`，否则最后一行有返回值时整个测试类报 `initializationError`。
 - **DSH 源码**：做接口相关的工作时，需要查看 DSH 的源码。仓库是 `https://github.com/deepseek-ai/deepseek-harness`，标签 `dsh-v0.2.2-rc.1`。可以克隆到项目外的目录中参考，不要放进本仓库。社区项目 dsh-Go 是 AGPL 许可证，**只能看接口名，不能复制代码**。
 
 ## 4. 测试命令速查

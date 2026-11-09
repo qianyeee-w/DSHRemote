@@ -265,6 +265,9 @@ class PluginApi(
 
     companion object {
         const val PLATFORM = "android"
+
+        /** 这个版本的 App 支持的协议版本（`/v1/info` 和 `hello` 的 `protocol`，protocol.md 第 8 节）。 */
+        const val PROTOCOL = 1
         const val MAX_PAGE_LIMIT = 200
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_BODY = ByteArray(0).toRequestBody(null)

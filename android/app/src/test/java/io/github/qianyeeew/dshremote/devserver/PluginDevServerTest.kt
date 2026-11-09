@@ -16,24 +16,16 @@ import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.net.ClientFactory
 import io.github.qianyeeew.dshremote.data.net.Fingerprint
 import io.github.qianyeeew.dshremote.data.net.PairingProbe
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.BeforeClass
 import org.junit.Test
-import java.io.File
-import java.util.concurrent.TimeUnit
 
 /**
- * 对插件的 dev-server 跑的集成测试（m2-android.md T5）：真实的 `dsh web` + 插件 + 假模型。
+ * 对插件的 dev-server 跑的集成测试（m2-android.md T5）：真实的 `dsh web` + 插件 + 假模型。实时连接的集成测试见 [LiveDevServerTest]。
  *
  * 只由 `./gradlew devServerTest` 运行（普通的 `test` 不跑，CI 也不跑）。运行前先在 plugin/ 下启动 dev-server：
  * `npm run dev-server`。测试通过 dev-server 的命令行生成配对码，配对一台测试设备，结束时用 `DELETE /v1/me` 取消配对。
@@ -129,7 +121,6 @@ class PluginDevServerTest {
         }
 
     companion object {
-        private val pluginDir = File(System.getProperty("dshremote.pluginDir") ?: "../../plugin").canonicalFile
         private lateinit var address: HostAddress
         private lateinit var pin: Fingerprint
         private val client by lazy { ClientFactory().forPin(pin) }
@@ -142,16 +133,12 @@ class PluginDevServerTest {
         @JvmStatic
         fun pair() =
             runBlocking {
-                val status = Json.parseToJsonElement(devServer("status", "--json")).jsonObject
-                check(status["running"]?.jsonPrimitive?.content == "true") {
-                    "dev-server 没有在运行。先在 plugin/ 下运行：npm run dev-server"
-                }
-                address = HostAddress("127.0.0.1", status.getValue("lanPort").jsonPrimitive.int)
-                pin = Fingerprint.parse(status.getValue("fingerprint").jsonPrimitive.content)!!
+                val status = DevServer.status()
+                address = status.address
+                pin = status.pin
 
                 // 先输错一次（不会让配对码作废），再用正确的配对码配对
-                val pairing = Json.parseToJsonElement(devServer("pair", "--json", "--no-qr", "--addr", "127.0.0.1")).jsonObject
-                usedCode = pairing.getValue("code").jsonPrimitive.content
+                usedCode = DevServer.newPairingCode()
                 val unpaired = PluginApi(client, address, token = null)
                 val wrong = expect<ApiException.Http> { unpaired.pair("AAAAAAAA", "DevServerTest") }
                 assertEquals(ErrorCode.PAIRING_CODE_INVALID, wrong.code)
@@ -172,41 +159,5 @@ class PluginDevServerTest {
                 val error = expect<ApiException.Http> { api.sessions() }
                 assertTrue(error.isTokenInvalid)
             }
-
-        /** 运行 dev-server 的命令行，返回标准输出（其中可能有配对码，不打印）。 */
-        private fun devServer(vararg args: String): String {
-            val process =
-                ProcessBuilder(listOf("node", "scripts/dev-server.mjs") + args)
-                    .directory(pluginDir)
-                    .redirectError(ProcessBuilder.Redirect.INHERIT)
-                    .start()
-            val output = process.inputStream.bufferedReader().readText()
-            check(process.waitFor(60, TimeUnit.SECONDS) && process.exitValue() == 0) { "dev-server ${args.first()} 失败" }
-            return output.trim().lines().last()
-        }
-
-        private suspend fun <T : Any> waitFor(
-            what: String,
-            attempts: Int = 100,
-            check: suspend () -> T?,
-        ): T {
-            repeat(attempts) {
-                check()?.let { return it }
-                delay(200)
-            }
-            fail("等待超时：$what")
-            throw IllegalStateException()
-        }
-
-        private suspend inline fun <reified T : ApiException> expect(crossinline block: suspend () -> Unit): T {
-            try {
-                block()
-            } catch (e: ApiException) {
-                if (e is T) return e
-                throw AssertionError("期望 ${T::class.java.simpleName}，实际是 $e", e)
-            }
-            fail("期望 ${T::class.java.simpleName}，但没有抛出异常")
-            throw IllegalStateException()
-        }
     }
 }

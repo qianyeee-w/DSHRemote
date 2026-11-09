@@ -2,7 +2,6 @@ package io.github.qianyeeew.dshremote.data.net
 
 import java.security.MessageDigest
 import java.security.cert.X509Certificate
-import java.util.Base64
 
 /**
  * 插件证书的公钥指纹（protocol.md 第 1 节）：证书公钥（SubjectPublicKeyInfo，DER 编码）的 SHA-256，
@@ -18,7 +17,7 @@ class Fingerprint private constructor(
     private val bytes: ByteArray,
 ) {
     /** base64url（无填充）形式，和插件、二维码中的 `fp` 字段一致。 */
-    val value: String = ENCODER.encodeToString(bytes)
+    val value: String = Base64Url.encode(bytes)
 
     /** 恒定时间比较：比较所用的时间不随第一个不同字节的位置变化。 */
     override fun equals(other: Any?): Boolean = other is Fingerprint && constantTimeEquals(bytes, other.bytes)
@@ -29,29 +28,13 @@ class Fingerprint private constructor(
 
     companion object {
         /** SHA-256 为 32 字节，base64url 不加填充是 43 个字符。 */
-        const val LENGTH = 43
-        private const val SHA256_BYTES = 32
-
-        private val ENCODER = Base64.getUrlEncoder().withoutPadding()
-        private val FORMAT = Regex("^[A-Za-z0-9_-]{$LENGTH}$")
+        const val LENGTH = Base64Url.LENGTH_32
 
         /**
          * 解析 base64url 形式的指纹。格式不对时返回 null：长度不是 43、带填充 `=`、
          * 含标准 base64 的 `+` `/` 或其他字符、最后一个字符的多余位不为零（非规范编码）。
          */
-        fun parse(text: String): Fingerprint? {
-            if (!FORMAT.matches(text)) return null
-            val decoded =
-                try {
-                    Base64.getUrlDecoder().decode(text)
-                } catch (_: IllegalArgumentException) {
-                    return null
-                }
-            if (decoded.size != SHA256_BYTES) return null
-            // 同一组字节只接受一种写法，避免两个不同的字符串代表同一个指纹
-            if (ENCODER.encodeToString(decoded) != text) return null
-            return Fingerprint(decoded)
-        }
+        fun parse(text: String): Fingerprint? = Base64Url.decode32(text)?.let { Fingerprint(it) }
 
         /** 计算证书公钥的指纹。 */
         fun of(certificate: X509Certificate): Fingerprint = ofSpki(certificate.publicKey.encoded)

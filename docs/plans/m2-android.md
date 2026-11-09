@@ -54,6 +54,9 @@ android/
 
 - `Host`：`hostId`（App 本地生成）、`name`（电脑名，可以重命名）、`addresses`（地址列表，每项为 IP 或主机名加端口）、`lastGoodAddress`、`fingerprint`、`deviceId`、`token`。
 - `fingerprint` 和 `token` 用 Keystore 中的 AES-GCM 密钥（不可导出）加密后存进 DataStore；其他字段明文存储。
+  - `hostId` 作为附加认证数据参与加密，一台主机的密文挪到另一台主机的记录上无法解密。
+  - 密钥不要求用户解锁或验证身份：前台服务在锁屏时也要读取 token 重连。
+  - 凭据无法解密时（例如卸载重装后密钥已不存在），主机仍在列表中，但标记为需要重新配对；整个文件损坏时清空列表。
 - 持有 token 的类型重写 `toString()`，不输出 token。
 - 二维码解析 `PairUri`：严格校验 `v=1`；`h` 为 IPv4；`p` 为 1–65535；`fp` 为 43 个 base64url 字符；`c` 为 8 位配对码字符集；`n` 去掉控制字符并截断长度。任何一项不合法就拒绝整个二维码。
 - **地址可编辑**：用户可以添加、修改、删除地址（例如加上 Tailscale 地址）。地址不是信任的依据，修改地址不需要重新配对。

@@ -78,6 +78,8 @@ export function apply(ctx, rawConfig) {
         devices,
         // 审计信息只记录事件和设备标识，不包含 token 或配对码
         audit,
+        // 切换模型和权限模式后立即推送新的会话摘要
+        sessionChanged: () => hub.refreshSoon(),
       },
       { onError: (error) => log('error', `处理请求出错：${error instanceof Error ? error.message : String(error)}`) },
     )

@@ -491,6 +491,11 @@ export class LiveHub {
     this.#scheduleRefresh()
   }
 
+  /** 会话的设置被改动了（切换模型、权限模式）：尽快重新读取会话列表并推送变化。 */
+  refreshSoon() {
+    this.#scheduleRefresh()
+  }
+
   #scheduleRefresh() {
     if (this.#listeners.size === 0) return
     clearTimeout(this.#debounceTimer)

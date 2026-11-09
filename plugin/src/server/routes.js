@@ -56,6 +56,8 @@ export function sendError(res, status, code, message, headers = {}) {
  * @property {import('../pairing/devices.js').DeviceRegistry} devices
  * @property {FacadeApi} facade 外观层（src/dsh/facade.js），路由只通过它访问 DSH
  * @property {(event: string, detail?: Record<string, string>) => void} [audit] 记录安全相关事件（不含任何秘密）
+ * @property {(sessionId: string) => void} [sessionChanged] 切换模型或权限模式成功后调用。DSH 不一定为这些操作发出事件，
+ *   由它通知实时流立即重新读取会话列表，手机上的会话摘要才能马上更新（否则要等定时刷新）
  */
 
 /**
@@ -213,7 +215,9 @@ export const ROUTES = Object.freeze([
     auth: true,
     async handle(req, res, ctx, auth) {
       const body = await readJsonBody(req)
-      sendJson(res, 200, await ctx.facade.selectModel(deviceIdOf(auth), auth.params.id ?? '', body))
+      const result = await ctx.facade.selectModel(deviceIdOf(auth), auth.params.id ?? '', body)
+      ctx.sessionChanged?.(auth.params.id ?? '')
+      sendJson(res, 200, result)
     },
   },
   {
@@ -222,7 +226,9 @@ export const ROUTES = Object.freeze([
     auth: true,
     async handle(req, res, ctx, auth) {
       const body = await readJsonBody(req)
-      sendJson(res, 200, await ctx.facade.setPermissionPreset(deviceIdOf(auth), auth.params.id ?? '', body))
+      const result = await ctx.facade.setPermissionPreset(deviceIdOf(auth), auth.params.id ?? '', body)
+      ctx.sessionChanged?.(auth.params.id ?? '')
+      sendJson(res, 200, result)
     },
   },
   {

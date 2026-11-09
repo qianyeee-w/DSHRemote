@@ -243,7 +243,7 @@ App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 | 消息 | 内容 | 时机 |
 |---|---|---|
 | `hello` | `{ protocol, sessions: [会话摘要], attention: [待处理事项] }` | 连接建立后第一条消息，即当前的完整状态。在它之前发生的变化会排在它后面发送 |
-| `session.updated` | `{ session: 会话摘要 }` | 会话摘要发生变化（状态、标题、模型、权限模式、待处理事项等），也用于新出现的会话 |
+| `session.updated` | `{ session: 会话摘要 }` | 会话摘要发生变化（状态、标题、模型、权限模式、待处理事项等），也用于新出现的会话。通过 `/v1/sessions/{id}/model`、`/permission-preset` 切换后会立即推送 |
 | `session.removed` | `{ sessionId }` | 会话从列表中消失（被删除或归档） |
 | `session.idle` | `{ sessionId, title }` | 会话从运行变为空闲，并持续 8 秒（用于发出「任务完成」通知；8 秒内又开始运行就不发）。停下来是因为在等审批或提问时不发 |
 | `attention.requested` | `{ attention: 待处理事项 }`（结构见 5.3） | 出现新的待处理事项 |

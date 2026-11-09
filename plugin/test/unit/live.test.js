@@ -240,6 +240,21 @@ test('会话列表变化：只推送变化的会话；消失的会话推送 sess
   hub.close()
 })
 
+test('refreshSoon：没有 DSH 事件时也重新读取会话列表并推送变化（切换模型后）', async () => {
+  let list = [summary('s1')]
+  const deps = fakeHubDeps({ sessions: () => list })
+  const hub = new LiveHub(deps.dsh, deps.facade, deps.attention, { debounceMs: 1 })
+  /** @type {import('../../src/dsh/live.js').BroadcastEvent[]} */
+  const events = []
+  hub.onEvent((e) => events.push(e))
+  await hub.snapshot('d_abcdefghijkl')
+  list = [summary('s1', { model: { provider: 'p', model: 'm2' } })]
+  hub.refreshSoon()
+  await wait(30)
+  assert.deepEqual(events.map((e) => (e.type === 'session.updated' ? e.session.model : e.type)), [{ provider: 'p', model: 'm2' }])
+  hub.close()
+})
+
 test('待处理事项的变化原样广播', async () => {
   const deps = fakeHubDeps()
   const hub = new LiveHub(deps.dsh, deps.facade, deps.attention, { debounceMs: 1 })

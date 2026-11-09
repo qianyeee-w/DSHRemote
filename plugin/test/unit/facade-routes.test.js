@@ -22,7 +22,7 @@ const keyPem = generatePrivateKeyPem()
 const certPem = issueSelfSignedCertificate(keyPem)
 const fingerprint = spkiFingerprint(certPem)
 
-/** @type {{ home: string, devices: DeviceRegistry, server: import('../../src/server/https.js').LanServer, token: string, deviceId: string, calls: { op: string, args: unknown[] }[], behavior: { error?: unknown }, audit: { event: string, detail?: Record<string, string> }[] }} */
+/** @type {{ home: string, devices: DeviceRegistry, server: import('../../src/server/https.js').LanServer, token: string, deviceId: string, calls: { op: string, args: unknown[] }[], behavior: { error?: unknown }, audit: { event: string, detail?: Record<string, string> }[], changed: string[] }} */
 let env
 
 beforeEach(async () => {
@@ -46,12 +46,15 @@ beforeEach(async () => {
   }))
   /** @type {{ event: string, detail?: Record<string, string> }[]} */
   const audit = []
+  /** @type {string[]} */
+  const changed = []
   const router = createRouter({
     dshStatus: () => ({ version: null, compatible: null }), facade, codes: new PairingCodes(), devices,
     audit: (event, detail) => audit.push({ event, ...(detail ? { detail } : {}) }),
+    sessionChanged: (sessionId) => changed.push(sessionId),
   })
   const server = await startLanServer({ identity: { keyPem, certPem }, host: '127.0.0.1', port: 0, handler: router })
-  env = { home, devices, server, token: registered.token, deviceId: registered.device.deviceId, calls, behavior, audit }
+  env = { home, devices, server, token: registered.token, deviceId: registered.device.deviceId, calls, behavior, audit, changed }
 })
 
 afterEach(async () => {
@@ -161,6 +164,16 @@ test('写接口：调用对应的外观层操作，参数为 deviceId、路径�
   const cancel = await get('/v1/sessions/s1/cancel', { method: 'POST' })
   assert.equal(cancel.status, 200)
   assert.deepEqual(env.calls.at(-1), { op: 'cancel', args: [env.deviceId, 's1'] })
+})
+
+test('切换模型和权限模式成功后通知实时流刷新会话摘要；其他接口和失败时不通知', async () => {
+  for (const [path, , body] of WRITE_ROUTES) await post(path, body)
+  assert.deepEqual(env.changed, ['s1', 's1'])
+
+  env.changed.length = 0
+  env.behavior.error = new FacadeError(400, 'BAD_REQUEST', '这个模型当前不可用')
+  assert.equal((await post('/v1/sessions/s1/model', { provider: 'p', model: 'm' })).status, 400)
+  assert.deepEqual(env.changed, [])
 })
 
 test('回答待处理事项会记入审计日志（只有设备和事项 id，没有回答内容）', async () => {

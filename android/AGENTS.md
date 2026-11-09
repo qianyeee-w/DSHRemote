@@ -80,4 +80,6 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 
 ## 真机
 
-用户提供一台测试真机（Android 17），通过无线调试连接这台开发机：`adb devices` 能看到就直接用；看不到时用 `adb mdns services` 找 `_adb-tls-connect._tcp` 的地址，再 `adb connect <ip>:<端口>`。只对本 App 做安装、卸载、测试和截图，不动手机上的其他 App 和数据。
+用户提供一台测试真机（Android 17），通过无线调试连接这台开发机：`adb devices` 能看到就直接用；看不到时用 `adb mdns services` 找 `_adb-tls-connect._tcp` 的地址，再 `adb connect <ip>:<端口>`（手机锁屏后无线调试会断开，端口会变）。只对本 App 做安装、卸载、测试和截图，不动手机上的其他 App 和数据。
+
+需要人工确认的项目（锁屏通知、切换网络、撤销等）按 `docs/plans/m2-device-verification.md` 走。手机上是中文输入法，`adb shell input text` 打不了字母：要让会话收到消息、模拟 Desktop 处理审批、模拟证书不同的设备时，用 dev-server 的 `send`、`decide`、`impostor` 子命令（见 `plugin/AGENTS.md`）。

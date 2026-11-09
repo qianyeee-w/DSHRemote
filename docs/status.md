@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-09（M2 T7 完成）
+最后更新：2026-11-10（M2 完成）
 
 ## 1. 进度
 
@@ -11,11 +11,13 @@
 | 需求与设计（spec、protocol、security、ADR 0001–0008） | 完成 | `docs/` |
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
-| **M2 Android App** | **进行中**：T1（插件 dev-server）、T2（Android 骨架 + CI）、T3（证书校验层）、T4（主机与凭据存储）、T5（协议客户端）、T6（实时连接）、T7（配对与主机界面）、T8（会话列表与新建会话）、T9（会话详情）、T10（审批与提问）、T11（前台服务与通知）完成，下一步 T12（收尾：真机验证清单） | `docs/plans/m2-android.md` |
+| **M2 Android App** | **完成**（T1–T12，小米 Android 17 真机验证，电脑端用 Linux 的 `dsh web`） | `docs/plans/m2-android.md`（第 6 节验收清单）、`docs/plans/m2-device-verification.md`（真机验证结果） |
 
-**下一步**：按 `docs/plans/m2-android.md` 第 5 节的顺序做 T1–T12，每完成一项汇报一次。
+**下一步**：和用户确认。候选：插件的两个遗留问题（端口被占用时没有提示、首次没有自动打开配对页，见下面「待办（插件）」，先给方案）；可选的 Windows 官方 Desktop + 手机的联合验证（按 `m2-device-verification.md` 再走一遍）。
 
-M2 开发要知道：
+M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 没有工作区，「选择工作区」只有测试覆盖；子代理的事项和独立处理页面只有测试覆盖；Markdown 宽表格的单元格会被截断成「…」；会话标题可能带有 Markdown 的「#」；不做开机自启；App 进程被杀后，旧通知里的令牌失效，点开只进入首页。
+
+M2 的实现要点（以后改 App 时要知道）：
 
 - `android/` 的骨架已建立（T2）：Gradle 版本目录、lint（警告即错误）、ktlint、禁止明文流量的配置及其单元测试、CI（`android.yml`）。命令和约定见 `android/AGENTS.md`。
 - **开发 App 时连接 dev-server**（`cd plugin && npm run dev-server`，T1 完成）：真实的 `dsh web` + 本插件 + 假模型，消息里的关键词决定模型的行为（ASK 提问、SHELL 审批、STREAM 流式、THINK 思考、SLOW 长输出）。默认局域网端口 3290、配对页 3291，**不用 3190 / 3191**：用户的开发服务器上，3190 被用户自己的 `dsh web` 服务占用。数据目录 `~/.cache/dshremote-dev` 保存指纹和已配对设备，重启后手机不需要重新配对。`npm run dev-server -- pair` 打印配对二维码，`restart` 重启 DSH，`revoke` 撤销设备。测试代码一律用 `dsh-runtime.mjs` 的 `freePort()` 找空闲端口。
@@ -28,6 +30,7 @@ M2 开发要知道：
 - **会话详情**（T9）：合并规则在 `android/.../data/chat/ChatTimeline`，本地发出的消息在 `Outbox`，界面在 `ui/chat/`（`ChatViewModel` 通过 `ChatBackend` 访问实时连接和接口）。Markdown 用 `multiplatform-markdown-renderer` 0.46.0（m3 + 代码高亮）。设计要点见 `m2-android.md` 3.4「实现要点」。假模型新增 `MARKDOWN` 关键词（输出标题、列表、长代码块、宽表格和链接）。T10 在会话详情页底部加入审批和提问。
 - **审批与提问**（T10）：`android/.../data/attention/AnswerForm`（本地校验）、`ui/attention/`（卡片、`AttentionHandler`、独立处理页面 `AttentionRoute`）。会话详情页底部显示这个会话的事项，会话列表上方显示不属于任何会话的事项。T11 的通知点开后进入 `AttentionRoute(hostId, attentionId)`。`devServerTest` 里的 `AttentionDevServerTest` 用第二台测试设备模拟 Desktop 先处理。
 - **前台服务与通知**（T11）：`android/.../service/`。`LinkController` 在有主机、通知开关打开并且 App 在前台时启动 `LinkService`，它持有一个 `hold()`，按 `NotificationRules` 发通知和撤回。点通知的入口用进程内的随机令牌（`security.md`「App 端的通知」）。设置页（`ui/settings/`）有通知开关、通知权限、电池优化和小米省电设置的引导。真机上已验证锁屏收到审批通知、点开直接进入处理页面。
+- **真机验证**（T12）：清单和结果在 `docs/plans/m2-device-verification.md`，改了连接、通知、前台服务后按它重走相关项目。dev-server 新增 `send`、`decide`、`impostor` 三个子命令（`plugin/AGENTS.md`），用来在真机验证时发消息、模拟 Desktop 处理审批、模拟证书不同的设备。T12 修了一个问题：改地址后连接重建，会话列表在连上之前是空的；现在 `HostConnection` 沿用上一条连接的状态（标为未连接），收到 `hello` 后整体覆盖。
 - **查看真机上本 App 的通知**：`adb shell cmd notification list | grep dshremote` 只列出本 App 的通知（tag 中有 hostId 和事项 id）。不要用截图看通知栏，会截到其他 App 的通知。
 - **时钟差**：手机和电脑的时钟可能差很多（开发时这台服务器和手机就差了 8 小时），会话的 `updatedAt` 来自电脑。App 用 `/v1/info` 响应的 `Date` 头估算时钟差（`HostLiveState.clockOffsetMillis`），显示「多久以前」时用 `ui/common/ServerClock.kt` 换算。以后显示电脑给的时间都要这样处理。
 - **在真机上发消息做验证**：手机上是中文输入法，`adb shell input text` 打的字母会被输入法吞掉，发不出去。需要让某个会话收到消息时，用一台临时测试设备通过插件接口发送（配对、发送、撤销，配对码和 token 只在内存中），或者请用户在手机上输入。不要为此修改手机的输入法设置。
@@ -77,6 +80,7 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
   - 手机上的 TLS 实现（Conscrypt）和电脑上的 JDK 有差别。例如握手失败后，Conscrypt 的 session 仍然带着对端证书，JDK 的不带。所以 TLS 相关的测试必须在真机上也跑一遍。
   - MockWebServer 服务器端的 WebSocket 不支持 `cancel()`（会抛 NullPointerException）。测试中要模拟「突然断线」，用 `FakePlugin.ServerSide.kill()`（调用 OkHttp 内部的 `failWebSocket`）。
   - Compose UI Test 默认带的 Espresso 3.5 在 Android 15 以上的系统中调用已经删除的 `InputManager.getInstance`，所有界面测试都会失败。`libs.versions.toml` 中显式指定了 Espresso 3.7.0。界面测试还要求手机**解锁**，否则报 `No compose hierarchies found`。`connectedDebugAndroidTest` 跑完默认会卸载 App，手机上的配对随之丢失（电脑上留下一条用不了的设备记录）：要加 `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`。
+  - 小米 Android 17 上，用户关闭本 App 的电池优化后，`specialUse` 前台服务在锁屏 1 小时、深度 Doze（`dumpsys deviceidle` 为 `IDLE`）时仍然在线，审批约 4 秒送达；关掉再打开 Wi-Fi 约 2 秒恢复。无线调试在锁屏后会断开、端口会变，这只影响 adb。
   - JUnit 4 的 `@BeforeClass` / `@Test` 方法必须返回 void：用 `runBlocking` 时写成 `runBlocking<Unit>`，否则最后一行有返回值时整个测试类报 `initializationError`。
 - **DSH 源码**：做接口相关的工作时，需要查看 DSH 的源码。仓库是 `https://github.com/deepseek-ai/deepseek-harness`，标签 `dsh-v0.2.2-rc.1`。可以克隆到项目外的目录中参考，不要放进本仓库。社区项目 dsh-Go 是 AGPL 许可证，**只能看接口名，不能复制代码**。
 

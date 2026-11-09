@@ -13,6 +13,11 @@
  *   npm run dev-server -- stop                停止 dev-server
  *   npm run dev-server -- status [--json]     查看是否在运行
  *
+ * 真机验证用（docs/plans/m2-device-verification.md）。都用一台临时设备完成，做完立即撤销这台设备，不打印 token 和配对码：
+ *   npm run dev-server -- send <文字>          给最近更新的会话发一条消息（手机上的输入法打不了字时用）
+ *   npm run dev-server -- decide allow|reject  处理最早的一个待处理审批，相当于在 Desktop 上点了按钮
+ *   npm run dev-server -- impostor [--port N]  启动一个证书不同的 TLS 服务（默认端口 3292），模拟「这个地址现在是另一台设备」
+ *
  * 前台运行时也可以直接按键：p 生成配对码 · d 列出设备 · r 重启 DSH · q 退出。
  *
  * 数据目录（--home，默认 ~/.cache/dshremote-dev，可用 DSHREMOTE_DEV_HOME 指定）里保存 DSH_HOME、证书和已配对的设备，
@@ -29,14 +34,15 @@ import net from 'node:net'
 import { execFileSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
 import { DEFAULT_CONFIG } from '../src/config.js'
-import { spkiFingerprint } from '../src/tls/certificate.js'
+import { generatePrivateKeyPem, issueSelfSignedCertificate, spkiFingerprint } from '../src/tls/certificate.js'
 import { CERT_FILE } from '../src/tls/identity.js'
 import { buildPairingUri } from '../src/admin/page.js'
 import { lanAddresses } from '../src/admin/addresses.js'
 import { startDshWeb } from '../test/helpers/dsh-runtime.mjs'
+import { collectMessages, pinnedRequest, pinnedWebSocket } from '../test/helpers/pinned-client.js'
 import { startFakeLlm } from '../test/contract/fake-llm.mjs'
 import {
-  defaultHome, startOptions, parseCsrf, parsePairingCode, parseDshState, parseDevices, renderQr, groupFingerprint,
+  defaultHome, startOptions, parseCsrf, parsePairingCode, parseDshState, parseDevices, renderQr, groupFingerprint, parsePort,
 } from './dev-server-lib.mjs'
 
 const STATE_FILE = 'dev-server.json'
@@ -362,6 +368,81 @@ async function cmdStart(home, values) {
   say('dev-server 已停止')
 }
 
+// ---------------------------------------------------------------- 真机验证用的工具
+
+/**
+ * 用一台临时设备调用插件的接口，做完立即撤销这台设备（DELETE /v1/me）。token 只在内存中。
+ * @template T
+ * @param {DevState} state
+ * @param {(call: (method: string, path: string, body?: unknown) => Promise<{ status: number, json: any }>, token: string) => Promise<T>} fn
+ */
+async function withTempDevice(state, fn) {
+  await adminPost(state.adminPort, '/pair-code')
+  const code = parsePairingCode((await admin(state.adminPort, '/')).body)
+  if (!code) throw new Error('配对页上没有显示配对码（配对接口可能被锁定）')
+  const base = { host: '127.0.0.1', port: state.lanPort, fingerprint: state.fingerprint }
+  /** @param {string} method @param {string} path @param {unknown} [body] @param {string} [token] */
+  const raw = async (method, path, body, token) => {
+    const res = await pinnedRequest({
+      ...base,
+      method,
+      path,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    })
+    return { status: res.status, json: res.body ? res.json() : null }
+  }
+  const paired = await raw('POST', '/v1/pair', { code, deviceName: 'dev-server 临时设备', platform: 'android', appVersion: '0.0.0' })
+  if (paired.status !== 200) throw new Error(`临时设备配对失败：HTTP ${paired.status}`)
+  const token = String(paired.json.token)
+  try {
+    return await fn((method, path, body) => raw(method, path, body, token), token)
+  } finally {
+    await raw('DELETE', '/v1/me', undefined, token)
+  }
+}
+
+/** @param {string} home @param {string | undefined} text */
+async function cmdSend(home, text) {
+  if (!text) throw new Error('用法：send <文字>')
+  const state = requireRunning(home)
+  await withTempDevice(state, async (call) => {
+    const { json } = await call('GET', '/v1/sessions')
+    const target = [...json.sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (!target) throw new Error('还没有会话')
+    const res = await call('POST', `/v1/sessions/${target.sessionId}/prompt`, { requestId: `dev-${Date.now()}`, text, mode: 'queue' })
+    say(`已发送到「${target.title ?? '新会话'}」（${target.sessionId}）：HTTP ${res.status}`)
+  })
+}
+
+/** @param {string} home @param {string | undefined} decision */
+async function cmdDecide(home, decision) {
+  if (decision !== 'allow' && decision !== 'reject') throw new Error('用法：decide allow|reject')
+  const state = requireRunning(home)
+  await withTempDevice(state, async (call, token) => {
+    // 待处理事项只在实时流的 hello 里有完整列表
+    const ws = await pinnedWebSocket({ host: '127.0.0.1', port: state.lanPort, fingerprint: state.fingerprint, headers: { authorization: `Bearer ${token}` } })
+    const hello = await collectMessages(ws).waitFor((m) => m.type === 'hello')
+    ws.close()
+    const target = [...hello.attention].filter((a) => a.kind === 'approval').sort((a, b) => a.createdAt - b.createdAt)[0]
+    if (!target) throw new Error('没有待处理的审批')
+    const res = await call('POST', `/v1/attention/${target.attentionId}/answer`, { decision })
+    say(`已${decision === 'allow' ? '允许' : '拒绝'}「${target.approval?.summary ?? target.approval?.toolName}」：HTTP ${res.status}`)
+  })
+}
+
+/** @param {{ port?: string | undefined, bind?: string | undefined }} values */
+async function cmdImpostor(values) {
+  const port = parsePort(values.port, '--port') ?? 3292
+  const keyPem = generatePrivateKeyPem()
+  const certPem = issueSelfSignedCertificate(keyPem)
+  const { createServer } = await import('node:https')
+  const server = createServer({ key: keyPem, cert: certPem, minVersion: 'TLSv1.2' }, (_req, res) => { res.writeHead(404); res.end() })
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, values.bind ?? '0.0.0.0', () => resolve(undefined)) })
+  say(`冒充的 TLS 服务在 ${values.bind ?? '0.0.0.0'}:${port}，指纹 ${spkiFingerprint(certPem)}（和 dev-server 的不同）。按 Ctrl+C 停止`)
+  await new Promise(() => {})
+}
+
 // ---------------------------------------------------------------- 入口
 
 async function main() {
@@ -390,7 +471,10 @@ async function main() {
     case 'restart': return cmdRestart(home)
     case 'stop': return cmdStop(home)
     case 'status': return cmdStatus(home, values)
-    default: throw new Error(`不认识的命令：${command}。可用：start、pair、devices、revoke、restart、stop、status`)
+    case 'send': return cmdSend(home, positionals.slice(1).join(' ') || undefined)
+    case 'decide': return cmdDecide(home, arg)
+    case 'impostor': return cmdImpostor(values)
+    default: throw new Error(`不认识的命令：${command}。可用：start、pair、devices、revoke、restart、stop、status、send、decide、impostor`)
   }
 }
 

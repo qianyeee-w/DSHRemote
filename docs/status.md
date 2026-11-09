@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-10（M2 完成）
+最后更新：2026-11-10（M2 完成；插件遗留问题已处理）
 
 ## 1. 进度
 
@@ -13,7 +13,7 @@
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
 | **M2 Android App** | **完成**（T1–T12，小米 Android 17 真机验证，电脑端用 Linux 的 `dsh web`） | `docs/plans/m2-android.md`（第 6 节验收清单）、`docs/plans/m2-device-verification.md`（真机验证结果） |
 
-**下一步**：和用户确认。候选：插件的两个遗留问题（端口被占用时没有提示、首次没有自动打开配对页，见下面「待办（插件）」，先给方案）；可选的 Windows 官方 Desktop + 手机的联合验证（按 `m2-device-verification.md` 再走一遍）。
+**下一步**：和用户确认。候选：可选的 Windows 官方 Desktop + 手机的联合验证（按 `m2-device-verification.md` 再走一遍，顺便确认端口被占用时 Desktop 的插件列表显示失败）。
 
 M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 没有工作区，「选择工作区」只有测试覆盖；子代理的事项和独立处理页面只有测试覆盖；Markdown 宽表格的单元格会被截断成「…」；会话标题可能带有 Markdown 的「#」；不做开机自启；App 进程被杀后，旧通知里的令牌失效，点开只进入首页。
 
@@ -38,11 +38,10 @@ M2 的实现要点（以后改 App 时要知道）：
 - 插件对外的接口以 `docs/protocol.md` 为准，已经按实现定稿，没有待定项。App 只能使用其中列出的接口。
 - App 端的安全要求在根目录 `AGENTS.md` 的安全红线和 `android/AGENTS.md` 中，尤其是：证书指纹不匹配时直接拒绝，**不提供「仍然继续」**。
 
-### 待办（插件）
+### 插件遗留问题（2026-11-10 已处理）
 
-- **端口被占用时，用户看不到任何提示。** 插件的局域网端口或配对页端口被其他程序占用时，插件会启动失败，但 DSH 仍然显示插件为 active，也不打印错误。T10 在 Windows 上遇到过一次（VS Code 端口转发），交接时在 Linux 服务器上又遇到一次。`npm run load-check` 现在会直接指出端口被占用，但官方 Desktop 的用户仍然什么都看不到。
-  - 建议的改法：局域网端口启动失败时，配对页照常启动，并在页面上显示「端口 X 被占用」以及处理方法。配对页端口也被占用时，至少要让插件进入失败状态，不要显示为 active（需要先确认 DSH 怎么判断插件失败）。
-  - 改之前先和用户确认方案。
+- **端口被占用时没有提示**：插件现在整体失败——DSH 的插件列表显示 dshremote 为失败，诊断信息和日志写明哪个端口被占用、怎么处理（`src/listen-error.js`），DSH 本身继续运行。和用户确认过：局域网端口失败时不单独启动配对页。`npm run load-check` 在真实的 `dsh web` 上覆盖。Windows Desktop 上的显示还没有看过。
+- **首次没有自动打开配对页**：在 Windows 官方 Desktop 上确认 M1 的修复已经生效，不需要改代码（`m1-plugin.md` 第 6 节）。
 
 ## 2. 协作方式（用户的习惯）
 
@@ -64,6 +63,10 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
   - 配对页的 `Referrer-Policy: no-referrer` 让浏览器提交表单时发送 `Origin: null`，结果无法生成配对码。是 Windows 真机验证发现的，单元测试用 Node 客户端手动设置了 Origin，所以测不出来。
 
   所以涉及 DSH 行为的结论，要用契约测试（真实的 `dsh web`）验证；涉及浏览器的，要用真实的浏览器验证（`npm run browser-check`）；涉及手机的，要在真机上验证。
+- **cordis（DSH 0.2.2-rc.1 内置 4.1.0）的插件生命周期**，`plugin/index.js` 的写法依赖这两点：
+  - 只有 `apply` 本身失败（抛出或返回被拒绝的 Promise），插件才会被标记为失败。`ctx.effect(async …)` 里的错误只会被记进日志，插件仍然显示为 active，所以 `apply` 要 `await ctx.effect(...)`。
+  - **`apply` 必须是 `async function`**。普通的 `function` 有 prototype，cordis 把它当构造函数 `new apply(...)` 调用并丢掉返回值；返回的 Promise 被拒绝时成了未处理的拒绝，DSH 的 app-boot 会直接让整个进程退出（`fatal load failure`）。单元测试的假 ctx 测不出这一点，是 load-check 在真实 DSH 上发现的。
+  - DSH 本来的策略是：非必需插件启动失败只打印警告，其他插件照常运行；插件列表（`pluginInventory/list`）给出 `fiberPhase: failed` 和 `diagnostic`（错误的 message）。
 - **DSH 的多客户端行为**：
   - 每条 `$events` 流都算一个独立的客户端。
   - 一个客户端回答了审批，其他客户端会收到 `cancel`。

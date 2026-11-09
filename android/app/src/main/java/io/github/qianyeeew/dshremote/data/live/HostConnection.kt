@@ -70,13 +70,15 @@ class HostConnection internal constructor(
     private val log: (String) -> Unit,
     private val timing: LiveTiming = LiveTiming(),
     private val backoff: Backoff = Backoff(),
+    /** 初始状态：重建连接（例如改了地址）时沿用上一条连接最后的会话和待处理事项，收到 `hello` 后整体覆盖。 */
+    initial: HostLiveState = HostLiveState(),
 ) {
     val hostId: String = host.hostId
 
     @Volatile
     private var host: Host = host
 
-    private val _state = MutableStateFlow(HostLiveState())
+    private val _state = MutableStateFlow(initial)
     val state: StateFlow<HostLiveState> = _state.asStateFlow()
 
     private val sessionEvents = MutableSharedFlow<SessionEvent>(extraBufferCapacity = EVENT_BUFFER)

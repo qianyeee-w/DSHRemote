@@ -113,7 +113,7 @@ class ConnectionManagerTest {
             manager.hold()
             hosts.value = listOf(host("h1", plugin))
             val old = plugin.nextConnection()
-            old.hello()
+            old.hello(sessions = listOf(FakePlugin.session("s1")))
             awaitStatus("h1") { it is LinkStatus.Online }
             val before = manager.connection("h1")
 
@@ -122,8 +122,15 @@ class ConnectionManagerTest {
             try {
                 hosts.update { list -> list.map { it.copy(addresses = listOf(moved.address), lastGoodAddress = null) } }
                 assertEquals(1000, withTimeout(5_000) { old.closedByApp.await() })
-                moved.nextConnection().hello()
-                assertEquals(LinkStatus.Online(moved.address), awaitStatus("h1") { it == LinkStatus.Online(moved.address) }.status)
+                val movedSide = moved.nextConnection()
+                // 新连接收到 hello 之前，界面上继续显示上次的会话（不突然变空）
+                val reconnecting = manager.states.value.getValue("h1")
+                assertTrue(reconnecting.status !is LinkStatus.Online)
+                assertEquals(setOf("s1"), reconnecting.sessions.keys)
+                movedSide.hello(sessions = listOf(FakePlugin.session("s2")))
+                val online = awaitStatus("h1") { it == LinkStatus.Online(moved.address) }
+                // hello 整体覆盖
+                assertEquals(setOf("s2"), online.sessions.keys)
                 assertTrue(manager.connection("h1") !== before)
             } finally {
                 moved.close()

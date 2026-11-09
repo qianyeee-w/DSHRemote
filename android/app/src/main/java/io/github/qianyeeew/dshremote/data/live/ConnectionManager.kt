@@ -116,6 +116,13 @@ class ConnectionManager(
             }
             for (host in list) {
                 if (host.hostId in connections) continue
+                // 地址或凭据变了而重建：界面上继续显示上次的会话（标为未连接），不要突然变空
+                val previous =
+                    toClose
+                        .firstOrNull { it.connection.hostId == host.hostId }
+                        ?.connection
+                        ?.state
+                        ?.value
                 val connection =
                     HostConnection(
                         host = host,
@@ -126,6 +133,7 @@ class ConnectionManager(
                         log = log,
                         timing = timing,
                         backoff = newBackoff(),
+                        initial = previous?.copy(status = LinkStatus.Stopped) ?: HostLiveState(),
                     )
                 val watcher = scope.launch { connection.state.collect { s -> _states.update { it + (host.hostId to s) } } }
                 connections[host.hostId] = Entry(host.connectionKey(), connection, watcher)

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 连接局域网中电脑上的插件（只用 TLS，见下方说明） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!--
       明文流量一律禁止（ADR 0003、安全红线第 4 条）：
       usesCleartextTraffic=false 加上 network_security_config 双重保证，单元测试会检查这两处。

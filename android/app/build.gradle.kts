@@ -15,6 +15,19 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // JVM 单元测试和真机测试共用的测试数据与工具（例如插件生成的证书，用于跨实现的指纹一致性测试）
+    sourceSets {
+        getByName("test") {
+            kotlin.directories.add("src/sharedTest/java")
+            resources.directories.add("src/sharedTest/resources")
+        }
+        getByName("androidTest") {
+            kotlin.directories.add("src/sharedTest/java")
+            resources.directories.add("src/sharedTest/resources")
+        }
     }
 
     buildTypes {
@@ -66,7 +79,17 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.tls)
+    testImplementation(libs.okhttp.mockwebserver)
+
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.okhttp.tls)
+    androidTestImplementation(libs.okhttp.mockwebserver)
 }

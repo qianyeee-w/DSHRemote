@@ -45,10 +45,10 @@ android/
 按 `security.md`「App 端的证书校验」实现：
 
 - `PinnedTrustManager` 和 `PinnedHostnameVerifier` 都比对 SPKI SHA-256（base64url，无填充）和这台主机保存的指纹。比对用恒定时间。
-- 每台主机的 OkHttpClient 由 `ClientFactory.forHost(host)` 创建：设置上面两道检查，只允许 TLS 1.2 及以上，不使用系统的信任链。
+- 每台主机的 OkHttpClient 由 `ClientFactory.forPin(这台主机的指纹)` 创建：设置上面两道检查，只允许 TLS 1.2 及以上，不使用系统的信任链。
 - `res/xml/network_security_config.xml` 禁止明文流量。
 - **配对探测** `PairingProbe`：只用于手动输入地址。它的 TrustManager 记录证书后一定抛出异常、中止握手，返回算好的指纹。探测得到的指纹只用来显示给用户核对，不会被直接保存。
-- **跨实现一致性**：App 计算的指纹必须和插件 `src/tls/fingerprint.js` 的结果完全一致。测试中使用插件生成的证书和插件算出的指纹作为固定数据。
+- **跨实现一致性**：App 计算的指纹必须和插件 `src/tls/certificate.js` 中 `spkiFingerprint` 的结果完全一致。测试中使用插件生成的证书和插件算出的指纹作为固定数据（`app/src/sharedTest/resources/plugin-certs/`），插件也有测试检查同一份数据。
 
 ### 3.2 主机与凭据（`data/host/`）
 

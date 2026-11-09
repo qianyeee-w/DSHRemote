@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'plugin/**'
+      - 'android/app/src/sharedTest/resources/plugin-certs/**'
       - '.github/workflows/plugin.yml'
   pull_request:
     paths:
       - 'plugin/**'
+      - 'android/app/src/sharedTest/resources/plugin-certs/**'
       - '.github/workflows/plugin.yml'
   workflow_dispatch:
 

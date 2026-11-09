@@ -40,6 +40,9 @@ test('指纹正确：能访问 /v1/info（无需认证）', async () => {
   assert.equal(res.status, 200)
   assert.match(String(res.headers['content-type']), /application\/json/)
   assert.equal(res.headers['cache-control'], 'no-store')
+  // App 用 Date 头估算电脑和手机的时钟差（protocol.md 4）
+  const date = Date.parse(String(res.headers.date))
+  assert.ok(Math.abs(date - Date.now()) < 5000, `Date 头不对：${res.headers.date}`)
   const body = res.json()
   assert.equal(body.protocol, PROTOCOL_VERSION)
   assert.equal(typeof body.pluginVersion, 'string')

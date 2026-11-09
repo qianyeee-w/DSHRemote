@@ -34,21 +34,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 
-/** 首页：已配对的电脑和在线状态。 */
-@Composable
-fun HostListScreen(
-    viewModel: HostListViewModel,
-    versionName: String,
-    onOpenHost: (hostId: String) -> Unit,
-    onPair: (manual: Boolean) -> Unit,
-) {
-    val rows by viewModel.rows.collectAsStateWithLifecycle()
-    HostListContent(rows, versionName, onOpenHost, onPair)
-}
-
+/** 首页（没有主机或有多台主机时）：已配对的电脑和在线状态。[rows] 为 null 表示还在读取。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HostListContent(

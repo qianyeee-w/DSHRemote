@@ -123,4 +123,34 @@
     <string name="pair_failed_unreachable">连不上电脑。请确认手机和电脑在同一网络，并且电脑的防火墙放行了插件的端口。</string>
     <string name="pair_failed_app_too_old">电脑上的插件比这个 App 新（协议版本 %1$d），请升级 App。</string>
     <string name="pair_failed_other">配对失败，请稍后再试。如果一直失败，请检查插件和 App 的版本。</string>
+
+    <!-- 会话列表 -->
+    <string name="action_more">更多</string>
+    <string name="time_just_now">刚刚</string>
+    <string name="menu_manage_host">管理这台电脑</string>
+    <string name="sessions_new">新建会话</string>
+    <string name="sessions_empty_title">还没有会话</string>
+    <string name="sessions_empty_body">点「新建会话」开始。在电脑上的 DeepSeek Harness 中新建的会话也会出现在这里。</string>
+    <string name="sessions_untitled">新会话</string>
+    <string name="sessions_stale">不在线，下面是上次连接时的内容。</string>
+    <string name="session_status_waiting">等待你处理</string>
+    <string name="session_status_waiting_count">等待你处理（%1$d）</string>
+    <string name="session_status_running">运行中</string>
+    <string name="session_status_idle">空闲</string>
+    <string name="session_status_unknown">状态未知</string>
+
+    <!-- 新建会话 -->
+    <string name="new_session_title">新建会话</string>
+    <string name="new_session_loading">正在读取工作区……</string>
+    <string name="new_session_choose">选择工作区：</string>
+    <string name="new_session_no_workspace">不指定工作区</string>
+    <string name="new_session_no_workspace_hint">由 DeepSeek Harness 决定工作目录</string>
+    <string name="new_session_creating">正在新建……</string>
+    <string name="new_session_offline">电脑不在线，连上后再试。</string>
+    <string name="new_session_dsh_unavailable">DeepSeek Harness 暂时不可用，请稍后再试。</string>
+    <string name="new_session_needs_pairing">这台手机需要重新配对。</string>
+    <string name="new_session_failed">新建会话失败，请稍后再试。</string>
+
+    <!-- 会话详情（T9 实现，这里只是占位） -->
+    <string name="chat_placeholder">会话详情还在开发中。</string>
 </resources>

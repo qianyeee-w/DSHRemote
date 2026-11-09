@@ -3,6 +3,7 @@ package io.github.qianyeeew.dshremote.data.api
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonContentPolymorphicSerializer
 import kotlinx.serialization.json.JsonElement
@@ -36,6 +37,11 @@ data class PluginInfo(
     val protocol: Int,
     val pluginVersion: String,
     val dsh: DshInfo,
+    /**
+     * 电脑的时钟比手机快多少毫秒（可能为负），由响应的 HTTP `Date` 头估算，精度约 1 秒。不在 JSON 中；没有 `Date` 头时为 null。
+     * 会话的 `updatedAt` 等时间来自电脑的时钟，显示「多久以前」时要用它换算（两边的时钟可能差很多）。
+     */
+    @Transient val clockOffsetMillis: Long? = null,
 )
 
 @Serializable

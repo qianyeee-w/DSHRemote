@@ -1,18 +1,26 @@
 package io.github.qianyeeew.dshremote.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.qianyeeew.dshremote.AppContainer
+import io.github.qianyeeew.dshremote.ui.chat.ChatScreen
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailScreen
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailViewModel
-import io.github.qianyeeew.dshremote.ui.hosts.HostListScreen
+import io.github.qianyeeew.dshremote.ui.hosts.HostListContent
 import io.github.qianyeeew.dshremote.ui.hosts.HostListViewModel
 import io.github.qianyeeew.dshremote.ui.pairing.PairingScreen
 import io.github.qianyeeew.dshremote.ui.pairing.PairingViewModel
+import io.github.qianyeeew.dshremote.ui.sessions.PluginSessionCreator
+import io.github.qianyeeew.dshremote.ui.sessions.SessionListNavigation
+import io.github.qianyeeew.dshremote.ui.sessions.SessionListScreen
+import io.github.qianyeeew.dshremote.ui.sessions.SessionListViewModel
 import kotlinx.serialization.Serializable
 
 /*
@@ -20,9 +28,23 @@ import kotlinx.serialization.Serializable
  * 配对码只保存在 PairingViewModel 的内存中。
  */
 
+/** 首页：没有主机时是配对引导，只有一台时直接是它的会话列表，有多台时是主机列表。 */
 @Serializable
-object HostsRoute
+object HomeRoute
 
+/** 一台主机的会话列表（有多台主机时从主机列表进入）。 */
+@Serializable
+data class SessionsRoute(
+    val hostId: String,
+)
+
+@Serializable
+data class SessionRoute(
+    val hostId: String,
+    val sessionId: String,
+)
+
+/** 主机管理。 */
 @Serializable
 data class HostRoute(
     val hostId: String,
@@ -41,13 +63,31 @@ fun AppNavigation(
     versionName: String,
 ) {
     val nav = rememberNavController()
-    NavHost(nav, startDestination = HostsRoute) {
-        composable<HostsRoute> {
-            HostListScreen(
-                viewModel = viewModel { HostListViewModel(container.hosts.hosts, container.connections.states) },
-                versionName = versionName,
-                onOpenHost = { nav.navigate(HostRoute(it)) },
-                onPair = { manual -> nav.navigate(PairRoute(manual)) },
+    NavHost(nav, startDestination = HomeRoute) {
+        composable<HomeRoute> {
+            val hosts = viewModel { HostListViewModel(container.hosts.hosts, container.connections.states) }
+            val rows by hosts.rows.collectAsStateWithLifecycle()
+            val only = rows?.singleOrNull()
+            if (only != null) {
+                SessionList(container, nav, only.hostId, home = true)
+            } else {
+                HostListContent(
+                    rows = rows,
+                    versionName = versionName,
+                    onOpenHost = { nav.navigate(SessionsRoute(it)) },
+                    onPair = { manual -> nav.navigate(PairRoute(manual)) },
+                )
+            }
+        }
+        composable<SessionsRoute> { entry ->
+            SessionList(container, nav, entry.toRoute<SessionsRoute>().hostId, home = false)
+        }
+        composable<SessionRoute> { entry ->
+            val route = entry.toRoute<SessionRoute>()
+            val states by container.connections.states.collectAsStateWithLifecycle()
+            ChatScreen(
+                title = states[route.hostId]?.sessions?.get(route.sessionId)?.title,
+                onBack = { nav.popBackStack() },
             )
         }
         composable<HostRoute> { entry ->
@@ -77,4 +117,34 @@ fun AppNavigation(
             )
         }
     }
+}
+
+@Composable
+private fun SessionList(
+    container: AppContainer,
+    nav: NavController,
+    hostId: String,
+    home: Boolean,
+) {
+    SessionListScreen(
+        // 首页上的会话列表跟着唯一的主机变化，所以按 hostId 区分 ViewModel
+        viewModel =
+            viewModel(key = "sessions:$hostId") {
+                SessionListViewModel(
+                    hostId = hostId,
+                    hosts = container.hosts.hosts,
+                    states = container.connections.states,
+                    creator = PluginSessionCreator { container.connections.api(hostId) },
+                )
+            },
+        navigation =
+            SessionListNavigation(
+                onBack = if (home) null else ({ nav.popBackStack() }),
+                onOpenSession = { nav.navigate(SessionRoute(hostId, it)) },
+                onManageHost = { nav.navigate(HostRoute(hostId)) },
+                onAddHost = if (home) ({ manual -> nav.navigate(PairRoute(manual)) }) else null,
+                onRepair = { manual -> nav.navigate(PairRoute(manual, hostId)) },
+                onRetry = { container.connections.retry(hostId) },
+            ),
+    )
 }

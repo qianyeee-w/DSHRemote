@@ -89,6 +89,38 @@ class HostConnectionTest {
         }
 
     @Test
+    fun apiIsAvailableOnlyWhileOnlineAndUsesTheOnlineAddress() =
+        runBlocking<Unit> {
+            val connection = connection(host())
+            assertNull("还没连接时没有客户端", connection.api())
+            connection.start()
+            val server = plugin.nextConnection()
+            assertNull("收到 hello 之前没有客户端", connection.api())
+            server.hello()
+            connection.awaitStatus { it is LinkStatus.Online }
+
+            plugin.routes = { if (it.url.encodedPath == "/v1/workspaces") FakePlugin.json("""{"workspaces":[]}""") else null }
+            assertTrue(connection.api()!!.workspaces().isEmpty())
+            val request = plugin.requests.last { it.url.encodedPath == "/v1/workspaces" }
+            assertEquals("Bearer $tokenText", request.headers["Authorization"])
+
+            server.kill()
+            connection.awaitStatus { it !is LinkStatus.Online }
+            assertNull("断开后没有客户端", connection.api())
+        }
+
+    @Test
+    fun clockOffsetFromInfoIsPublishedWithHello() =
+        runBlocking<Unit> {
+            plugin.infoDate = System.currentTimeMillis() - 3_600_000
+            val connection = connection(host())
+            connection.start()
+            plugin.nextConnection().hello()
+            val offset = connection.awaitStatus { it is LinkStatus.Online }.clockOffsetMillis
+            assertTrue("offset=$offset", offset in -3_602_000L..-3_599_000L)
+        }
+
+    @Test
     fun eventsBeforeHelloAreIgnored() =
         runBlocking<Unit> {
             val connection = connection(host())

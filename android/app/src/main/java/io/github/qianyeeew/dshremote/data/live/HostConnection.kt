@@ -90,6 +90,9 @@ class HostConnection internal constructor(
     private val subscriptions = HashMap<String, Int>()
     private var ready: WebSocket? = null
 
+    /** 最近一次 `/v1/info` 估算的时钟差，收到 `hello` 时写进状态。只在连接协程中访问。 */
+    private var clockOffsetMillis = 0L
+
     /** 只在连接协程中访问。 */
     private val recentEvents = RecentIds()
 
@@ -154,6 +157,16 @@ class HostConnection internal constructor(
     internal fun updateHost(newHost: Host) {
         require(newHost.hostId == hostId)
         host = newHost
+    }
+
+    /**
+     * 调用 REST 接口（新建会话、读取历史、发消息等）用的客户端。只在在线时可用：地址是这条连接正在用的、
+     * 已经通过指纹校验的地址，客户端同样固定这台主机的指纹。不在线时返回 null。
+     */
+    fun api(): PluginApi? {
+        val address = (_state.value.status as? LinkStatus.Online)?.address ?: return null
+        val credentials = host.credentials ?: return null
+        return PluginApi(clientFor(credentials.fingerprint), address, credentials.token)
     }
 
     // ---------------------------------------------------------------- 订阅
@@ -237,6 +250,7 @@ class HostConnection internal constructor(
                 is Probe.Failed -> return Outcome.Retry(picked.reason)
             }
         if (info.protocol != PluginApi.PROTOCOL) return Outcome.Stop(LinkStatus.AppTooOld(info.protocol))
+        clockOffsetMillis = info.clockOffsetMillis ?: 0
         if (info.dsh.compatible == false) {
             return Outcome.Retry(OfflineReason.DSH_UNAVAILABLE, dshIncompatible = LinkStatus.DshIncompatible(info.dsh.version))
         }
@@ -383,6 +397,7 @@ class HostConnection internal constructor(
                 status = LinkStatus.Online(address),
                 sessions = hello.sessions.associateBy { it.sessionId },
                 attention = hello.attention.associateBy { it.attentionId },
+                clockOffsetMillis = clockOffsetMillis,
             )
         // 重新订阅所有正在收集的会话，并让它们重新读取最新一页历史
         val resubscribed =

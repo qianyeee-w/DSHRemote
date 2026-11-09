@@ -91,6 +91,11 @@ data class HostLiveState(
     val status: LinkStatus = LinkStatus.Stopped,
     val sessions: Map<String, SessionSummary> = emptyMap(),
     val attention: Map<String, Attention> = emptyMap(),
+    /**
+     * 电脑的时钟比手机快多少毫秒（连接时由 `/v1/info` 的 `Date` 头估算）。会话的 `updatedAt` 等时间来自电脑，
+     * 显示「多久以前」时用它换算，见 [io.github.qianyeeew.dshremote.ui.common.serverNow]。
+     */
+    val clockOffsetMillis: Long = 0,
 )
 
 /** 实时流中需要通知或界面处理的事件（不包括已经反映在 [HostLiveState] 中的状态变化）。 */

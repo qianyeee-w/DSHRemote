@@ -51,7 +51,10 @@ class LiveDevServerTest {
     fun t1_streamDeliversStateAndMessages() =
         runBlocking<Unit> {
             awaitStatus { it is LinkStatus.Online }
-            val created = api.createSession()
+            // 用实时连接提供的客户端（界面新建会话时也是这样）：地址是连接正在用的地址
+            val live = checkNotNull(manager.api(HOST_ID)) { "在线时应该有客户端" }
+            live.workspaces()
+            val created = live.createSession()
             sessionId = created
             // 新会话通过 session.updated 出现在状态中
             awaitState("新会话出现在状态中") { created in it.sessions }

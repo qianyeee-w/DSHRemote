@@ -42,7 +42,7 @@ import io.github.qianyeeew.dshremote.ui.common.BackTopBar
 import io.github.qianyeeew.dshremote.ui.common.FingerprintText
 import io.github.qianyeeew.dshremote.ui.common.MessageDialog
 
-/** 主机管理页面（T8 起从会话列表进入；T7 中点主机列表的一行进入）。 */
+/** 主机管理页面，从会话列表的菜单进入。 */
 @Composable
 fun HostDetailScreen(
     viewModel: HostDetailViewModel,

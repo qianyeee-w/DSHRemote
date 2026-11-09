@@ -28,6 +28,10 @@ internal class FakePlugin(
     @Volatile
     var info: String = info()
 
+    /** `/v1/info` 响应的 `Date` 头（电脑的时钟，毫秒），为 null 时不发送。 */
+    @Volatile
+    var infoDate: Long? = null
+
     /** 每次 WebSocket 握手调用一次：返回 null 表示升级为 WebSocket，否则返回这个错误响应。 */
     @Volatile
     var handshake: () -> MockResponse? = { null }
@@ -49,7 +53,13 @@ internal class FakePlugin(
                     override fun dispatch(request: RecordedRequest): MockResponse {
                         requests += request
                         return when (request.url.encodedPath) {
-                            "/v1/info" -> json(info)
+                            "/v1/info" ->
+                                infoDate?.let {
+                                    json(info)
+                                        .newBuilder()
+                                        .addHeader("Date", httpDate(it))
+                                        .build()
+                                } ?: json(info)
                             "/v1/stream" ->
                                 handshake() ?: ServerSide(request).let { side ->
                                     connections.trySend(side)
@@ -201,6 +211,15 @@ internal class FakePlugin(
             id: String,
             text: String,
         ): String = """{"id":"$id","role":"assistant","parts":[{"type":"text","text":"$text"}],"createdAt":1794107669094}"""
+
+        /** HTTP 的 `Date` 头格式（RFC 1123）。MockResponse 的 addHeader(name, Date) 用的是 Date.toString()，格式不对。 */
+        fun httpDate(millis: Long): String =
+            java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
+                .format(
+                    java.time.Instant
+                        .ofEpochMilli(millis)
+                        .atZone(java.time.ZoneOffset.UTC),
+                )
 
         fun json(body: String) =
             MockResponse

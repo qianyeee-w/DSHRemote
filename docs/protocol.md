@@ -84,7 +84,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 
 | 方法 | 路径 | 认证 | 说明 |
 |---|---|---|---|
-| GET | `/v1/info` | 无需认证 | `{ protocol: 1, pluginVersion, dsh: { baseline, version, compatible } }`，用于显示在线状态和检查版本。插件读不到 DSH 版本时，`version` 和 `compatible` 为 `null` |
+| GET | `/v1/info` | 无需认证 | `{ protocol: 1, pluginVersion, dsh: { baseline, version, compatible } }`，用于显示在线状态和检查版本。插件读不到 DSH 版本时，`version` 和 `compatible` 为 `null`。响应带标准的 HTTP `Date` 头，App 用它估算电脑和手机的时钟差（会话的 `updatedAt` 等时间来自电脑的时钟） |
 | POST | `/v1/pair` | 无需认证 | 见 2.4 |
 | GET | `/v1/me` | 需要 | 当前设备的信息：`{ deviceId, name, platform, createdAt }` |
 | DELETE | `/v1/me` | 需要 | 设备自行取消配对，成功返回 `204`，之后 token 立即失效 |

@@ -2,7 +2,7 @@
 
 Kotlin + Jetpack Compose。先读根目录的 `AGENTS.md`，M2 的实施方案见 `docs/plans/m2-android.md`。
 
-> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）、协议客户端（T5）、实时连接（T6）、配对与主机界面（T7）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
+> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）、协议客户端（T5）、实时连接（T6）、配对与主机界面（T7）、会话列表与新建会话（T8）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
 
 ## 基线（ADR 0004、0011）
 
@@ -15,7 +15,9 @@ cd android
 ./gradlew test                     # JVM 单元测试（CI 也跑）
 ./gradlew lint ktlintCheck         # lint（CI 也跑）
 ./gradlew assembleDebug            # 构建 debug APK（CI 也跑）
-./gradlew connectedDebugAndroidTest  # 在已连接的真机上跑测试（只在本地跑）：src/sharedTest 的证书校验测试、androidTest 的 Keystore 测试，以及之后的界面测试
+./gradlew connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
+                                   # 在已连接、已解锁的真机上跑测试（只在本地跑）：src/sharedTest 的证书校验测试、androidTest 的 Keystore 测试和界面测试。
+                                   # 不加这个参数时，跑完会卸载 App，手机上的配对也跟着丢失
 ./gradlew devServerTest            # 对插件的 dev-server 跑集成测试（只在本地跑）：先在 plugin/ 下 npm run dev-server。会重启 dev-server 中的 DSH
 ```
 
@@ -55,8 +57,9 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 │   ├── live/       # （T6 已完成）ConnectionManager、HostConnection：每台主机一条 /v1/stream 连接，选地址、重连、hello、订阅、事件分发
 │   └── pairing/    # （T7 已完成）PairingService：探测指纹、配对、重新配对、取消配对（DELETE /v1/me）
 ├── service/        # 前台服务、通知
-├── ui/             # 各页面。T7：AppNavigation（路由）、hosts/（主机列表、主机管理）、pairing/（扫码、手动输入、指纹核对）、common/
-│                   # 之后：会话列表、会话详情、审批与提问、设置
+├── ui/             # 各页面。AppNavigation（路由）、hosts/（主机列表、主机管理）、pairing/（扫码、手动输入、指纹核对）、
+│                   # sessions/（会话列表、新建会话）、chat/（会话详情，T9）、common/
+│                   # 之后：审批与提问、设置
 ├── DshRemoteApp.kt # Application：AppContainer 手动创建 HostRepository、ConnectionManager、PairingService，注册 NetworkMonitor
 └── MainActivity.kt # 唯一的 Activity；可见时（onStart 到 onStop）持有 ConnectionManager.hold()
 ```

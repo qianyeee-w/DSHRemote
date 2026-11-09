@@ -58,10 +58,32 @@ class PluginApiTest {
         runBlocking<Unit> {
             respond("""{"protocol":1,"pluginVersion":"0.1.0","dsh":{"baseline":"0.2.2-rc.1","version":null,"compatible":null},"extra":1}""")
             val info = PluginApi(client, address, token = null).info()
-            assertEquals(PluginInfo(1, "0.1.0", DshInfo("0.2.2-rc.1", null, null)), info)
+            // 没有 Date 头时不知道时钟差
+            assertEquals(PluginInfo(1, "0.1.0", DshInfo("0.2.2-rc.1", null, null), clockOffsetMillis = null), info)
             val request = server.takeRequest()
             assertEquals("/v1/info", request.url.encodedPath)
             assertNull(request.headers["Authorization"])
+        }
+
+    @Test
+    fun infoEstimatesClockOffsetFromDateHeader() =
+        runBlocking<Unit> {
+            // 电脑的时钟比手机快 8 小时
+            val eightHours = 8 * 3_600_000L
+            server.enqueue(
+                MockResponse
+                    .Builder()
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader(
+                        "Date",
+                        io.github.qianyeeew.dshremote.data.live.FakePlugin
+                            .httpDate(System.currentTimeMillis() + eightHours),
+                    ).body("""{"protocol":1,"pluginVersion":"0.1.0","dsh":{"baseline":"0.2.2-rc.1"}}""")
+                    .build(),
+            )
+            val offset = PluginApi(client, address, token = null).info().clockOffsetMillis!!
+            // Date 头只精确到秒
+            assertTrue("offset=$offset", offset in eightHours - 2_000..eightHours + 1_000)
         }
 
     @Test

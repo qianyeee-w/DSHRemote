@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.data.live
 
+import io.github.qianyeeew.dshremote.data.api.PluginApi
 import io.github.qianyeeew.dshremote.data.host.Credentials
 import io.github.qianyeeew.dshremote.data.host.Host
 import io.github.qianyeeew.dshremote.data.host.HostAddress
@@ -55,6 +56,9 @@ class ConnectionManager(
     }
 
     fun connection(hostId: String): HostConnection? = synchronized(lock) { connections[hostId]?.connection }
+
+    /** 这台主机在线时调用 REST 接口用的客户端，见 [HostConnection.api]。 */
+    fun api(hostId: String): PluginApi? = connection(hostId)?.api()
 
     /** 需要保持连接时持有，不再需要时调用 [Hold.release]（可以重复调用，只生效一次）。 */
     fun hold(): Hold {

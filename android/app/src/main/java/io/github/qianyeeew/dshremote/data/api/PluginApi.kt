@@ -49,8 +49,19 @@ class PluginApi(
 
     // ---------------------------------------------------------------- 无需认证
 
-    /** `GET /v1/info`：在线状态和版本检查。 */
-    suspend fun info(): PluginInfo = get(listOf("info"), PluginInfo.serializer(), auth = false)
+    /** `GET /v1/info`：在线状态和版本检查，同时用响应的 `Date` 头估算两边时钟的差（[PluginInfo.clockOffsetMillis]）。 */
+    suspend fun info(): PluginInfo {
+        var offset: Long? = null
+        val info =
+            send("GET", listOf("info"), auth = false, onResponse = { response ->
+                offset =
+                    response.headers
+                        .getDate("Date")
+                        ?.time
+                        ?.let { it - System.currentTimeMillis() }
+            }) { decode(PluginInfo.serializer(), it) }
+        return info.copy(clockOffsetMillis = offset)
+    }
 
     /**
      * `POST /v1/pair`：用配对码换取设备 token（protocol.md 2.4）。
@@ -191,6 +202,8 @@ class PluginApi(
         query: Map<String, String> = emptyMap(),
         body: RequestBody? = null,
         auth: Boolean = true,
+        /** 成功的响应到达时调用（读取响应头）。 */
+        onResponse: (Response) -> Unit = {},
         parse: (String) -> T,
     ): T {
         val url =
@@ -228,6 +241,7 @@ class PluginApi(
                         throw ApiException.Network(e)
                     }
                 if (!it.isSuccessful) throw httpError(it, text)
+                onResponse(it)
                 parse(text)
             }
         }

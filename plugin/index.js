@@ -20,6 +20,7 @@ import { AttentionTracker } from './src/dsh/attention.js'
 import { LiveHub } from './src/dsh/live.js'
 import { attachStream } from './src/server/stream.js'
 import { dshVersionStatus } from './src/dsh/versions.js'
+import { listenError } from './src/listen-error.js'
 import { readFileSync } from 'node:fs'
 
 export const name = 'dshremote'
@@ -32,11 +33,21 @@ const PLUGIN_VERSION = String(JSON.parse(readFileSync(new URL('./package.json', 
 const STATE_FILE = 'state.json'
 
 /**
+ * 配置非法、启动失败（例如端口被占用）时，返回的 Promise 被拒绝，DSH 把插件标记为失败（插件列表中显示错误信息），
+ * DSH 本身继续运行。
+ *
+ * 两处 cordis 的行为决定了这里的写法（DSH 0.2.2-rc.1 内置的 cordis 4.1.0）：
+ * - 只有 apply 本身失败，插件才会被标记为失败。`ctx.effect` 里的异步错误只会被记进日志，插件仍然显示为 active，
+ *   所以要等 effect 启动完成（类型声明中，async effect 返回的清理函数可以 await）。
+ * - **apply 必须是 async 函数**。普通的 `function` 有 prototype，cordis 会把它当构造函数 `new apply(...)` 调用并丢掉返回值，
+ *   返回的 Promise 被拒绝时就成了未处理的拒绝，DSH 会因此直接退出（app-boot 的 fail-loud）。
+ *
  * @param {any} ctx Cordis 插件上下文
  * @param {unknown} [rawConfig] cordis.patch.yml 中的配置
+ * @returns {Promise<void>}
  */
-export function apply(ctx, rawConfig) {
-  // 配置非法时直接抛出：DSH 会把插件标记为加载失败，用户能在插件列表里看到
+export async function apply(ctx, rawConfig) {
+  // 配置非法时直接抛出（Promise 被拒绝）：DSH 会把插件标记为加载失败，用户能在插件列表里看到
   const config = parseConfig(rawConfig)
   /** @param {'info' | 'warn' | 'error'} level @param {string} message */
   const log = (level, message) => ctx.logger?.[level]?.(`${LOG_PREFIX} ${message}`)
@@ -46,7 +57,16 @@ export function apply(ctx, rawConfig) {
     return
   }
 
-  ctx.effect(async () => {
+  await start(ctx, config, log)
+}
+
+/**
+ * @param {any} ctx
+ * @param {import('./src/config.js').PluginConfig} config
+ * @param {(level: 'info' | 'warn' | 'error', message: string) => void} log
+ */
+async function start(ctx, config, log) {
+  await ctx.effect(async () => {
     const storage = await openStorage()
     const identity = await loadOrCreateIdentity(storage)
     if (identity.status === 'created') log('warn', '已生成新的 TLS 身份。之前配对过的手机需要重新配对')
@@ -87,11 +107,12 @@ export function apply(ctx, rawConfig) {
     try {
       lan = await startLanServer({ identity, host: config.lanBind, port: config.lanPort, handler: router })
     } catch (error) {
-      const code = /** @type {NodeJS.ErrnoException} */ (error).code
-      const hint = code === 'EADDRINUSE' ? `端口 ${config.lanPort} 已被占用，请在配置中修改 lanPort` : String(error)
-      log('error', `局域网服务启动失败：${hint}`)
+      hub.close()
+      attention.close()
       dsh.close()
-      throw error
+      const failure = listenError('lan', config.lanPort, error)
+      log('error', failure.message)
+      throw failure
     }
     const stream = attachStream({ server: lan.server, devices, hub, audit })
     let admin
@@ -112,12 +133,12 @@ export function apply(ctx, rawConfig) {
     } catch (error) {
       stream.close()
       hub.close()
+      attention.close()
       await lan.close()
       dsh.close()
-      const code = /** @type {NodeJS.ErrnoException} */ (error).code
-      const hint = code === 'EADDRINUSE' ? `端口 ${config.adminPort} 已被占用，请在配置中修改 adminPort` : String(error)
-      log('error', `配对页启动失败：${hint}`)
-      throw error
+      const failure = listenError('admin', config.adminPort, error)
+      log('error', failure.message)
+      throw failure
     }
     log('info', `已加载。局域网 HTTPS：${config.lanBind}:${lan.port()}，证书指纹：${identity.fingerprint}，配对页：${admin.url}`)
 

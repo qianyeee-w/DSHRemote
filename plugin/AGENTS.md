@@ -11,7 +11,8 @@ npm run lint         # ESLint
 npm run typecheck    # tsc --noEmit（checkJs，严格模式）
 npm test             # 单元测试：node --test test/unit
 npm run check        # 以上三项一起跑。提交前必须通过
-npm run load-check   # 把插件装进真实的 dsh web（基线版本），确认插件被加载且处于 active 状态
+npm run load-check   # 把插件装进真实的 dsh web（基线版本），确认插件被加载且处于 active 状态；
+                     # 再占住局域网端口重启 DSH，确认插件被标记为 failed、插件列表给出端口被占用的说明、DSH 本身不退出
                      # DSH_VERSION=0.2.3 指定其他版本；DSH_BIN=<dsh 的 JS 入口> 复用已安装的 DSH
                      # DSH_INSTALL_DIR=<目录> 把 DSH 装在固定目录并复用，避免每次重新安装
                      # 同时检查插件已通过适配层连上 DSH（配对页显示「已连接」，/v1/info 报告正确的 DSH 版本）

@@ -2,6 +2,7 @@
 /**
  * 加载检查：把插件装进真实的 `dsh web`，确认 DSH 加载了它并且处于运行状态，
  * 并且局域网 HTTPS 端口能按证书指纹访问 /v1/info。
+ * 然后占住插件的局域网端口、重启 DSH，确认 DSH 把插件标记为失败，并在插件列表中给出端口被占用的说明。
  *
  * 用法：
  *   npm run load-check                     # 使用基线版本（src/dsh/versions.js）
@@ -42,12 +43,16 @@ function request(launch, path, options = {}) {
   })
 }
 
-/** @returns {Promise<{ ok: boolean, detail: string, phase?: string | null }>} */
-async function checkLoaded(/** @type {URL} */ launch) {
+/**
+ * 读取 DSH 插件列表（pluginInventory/list）中的 dshremote 一行。
+ * @param {URL} launch
+ * @returns {Promise<{ entry?: { moduleName: string, enabled: boolean, fiberPhase: string | null, diagnostic?: string }, error?: string }>}
+ */
+async function readEntry(launch) {
   const login = /** @type {{ headers: import('node:http').IncomingHttpHeaders }} */ (
     await request(launch, `/?token=${launch.searchParams.get('token')}`))
   const cookie = login.headers['set-cookie']?.[0]?.split(';')[0]
-  if (!cookie) return { ok: false, detail: '无法用启动 token 登录 DSH' }
+  if (!cookie) return { error: '无法用启动 token 登录 DSH' }
   const endpoint = 'pluginInventory/list'
   const res = /** @type {{ body: string }} */ (await request(launch, `/api/${endpoint}`, {
     method: 'POST',
@@ -55,11 +60,17 @@ async function checkLoaded(/** @type {URL} */ launch) {
     body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method: endpoint, payload: { args: {} } }),
   }))
   const result = JSON.parse(res.body).result
-  if (!result?.ok) return { ok: false, detail: `${endpoint} 调用失败：${JSON.stringify(result?.error)}` }
-  /** @type {{ moduleName: string, enabled: boolean, fiberPhase: string | null }[]} */
+  if (!result?.ok) return { error: `${endpoint} 调用失败：${JSON.stringify(result?.error)}` }
+  /** @type {{ moduleName: string, enabled: boolean, fiberPhase: string | null, diagnostic?: string }[]} */
   const entries = result.value.entries
   const entry = entries.find((e) => e.moduleName === 'dshremote')
-  if (!entry) return { ok: false, detail: 'DSH 的插件列表中没有 dshremote' }
+  return entry ? { entry } : { error: 'DSH 的插件列表中没有 dshremote' }
+}
+
+/** @returns {Promise<{ ok: boolean, detail: string, phase?: string | null }>} */
+async function checkLoaded(/** @type {URL} */ launch) {
+  const { entry, error } = await readEntry(launch)
+  if (!entry) return { ok: false, detail: String(error) }
   const ok = entry.enabled === true && entry.fiberPhase === 'active'
   return { ok, phase: entry.fiberPhase, detail: ok ? '已加载并处于 active 状态' : `插件状态异常：enabled=${entry.enabled} fiberPhase=${entry.fiberPhase}` }
 }
@@ -120,12 +131,44 @@ async function checkAdminPage(dshHome) {
   }
 }
 
+/**
+ * 局域网端口被其他程序占用时，DSH 把插件标记为失败，插件列表中的诊断信息指出是哪个端口；配对页也不会启动。
+ * @param {URL} launch
+ * @returns {Promise<{ ok: boolean, detail: string }>}
+ */
+async function checkPortConflictReported(launch) {
+  /** @type {Awaited<ReturnType<typeof readEntry>>} */
+  let read = {}
+  // 插件启动是异步的，等它从 pending / loading 变成 failed
+  for (let attempt = 0; attempt < 40; attempt++) {
+    read = await readEntry(launch)
+    if (read.entry?.fiberPhase === 'failed') break
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  const entry = read.entry
+  if (!entry) return { ok: false, detail: String(read.error) }
+  if (entry.fiberPhase !== 'failed') return { ok: false, detail: `端口被占用时插件状态应为 failed，实际为 ${entry.fiberPhase}` }
+  const expected = `局域网端口 ${ports.lan} 已被其他程序占用`
+  if (!entry.diagnostic?.includes(expected)) return { ok: false, detail: `插件列表的诊断信息中没有「${expected}」：${JSON.stringify(entry.diagnostic)}` }
+  if (await portBusyHint(ports.admin, '127.0.0.1')) return { ok: false, detail: '局域网端口失败时配对页不应启动' }
+  return { ok: true, detail: `插件被标记为 failed，诊断信息：${entry.diagnostic}` }
+}
+
+/** @param {number} port @param {string} host @returns {Promise<net.Server>} */
+function occupy(port, host) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen(port, host, () => resolve(server))
+  })
+}
+
 /** 插件这次使用的端口（main 中选定） */
 const ports = { lan: 0, admin: 0 }
 
 /**
- * 插件的端口被其他程序占用时，插件会启动失败，但 DSH 仍然把它显示为 active，也不打印错误。
- * 检查失败时试着绑定一下端口，把「被占用」直接告诉用户。
+ * 插件的端口被其他程序占用时，插件会启动失败（DSH 把它标记为 failed）。
+ * 检查失败时试着绑定一下端口，把「被占用」和查看占用程序的命令直接告诉用户。
  * @param {number} port @param {string} host
  * @returns {Promise<string>} 空字符串表示端口空闲
  */
@@ -161,8 +204,26 @@ async function main() {
     const loaded = await checkLoaded(web.launch)
     const lan = loaded.ok ? await withPortHint(await checkLanInfo(web.dshHome), ports.lan, DEFAULT_CONFIG.lanBind) : { ok: false, detail: '插件未加载，跳过局域网检查' }
     const admin = loaded.ok ? await checkAdminPage(web.dshHome) : { ok: false, detail: '插件未加载，跳过配对页检查' }
-    const ok = loaded.ok && lan.ok && admin.ok
-    console.log(JSON.stringify({ check: 'load', dshVersion: web.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin }))
+    // 占住插件的局域网端口，沿用同一个 DSH_HOME 和插件配置重启 DSH
+    /** @type {{ ok: boolean, detail: string }} */
+    let conflict = { ok: false, detail: '插件未正常加载，跳过端口占用检查' }
+    if (loaded.ok && lan.ok && admin.ok) {
+      await web.stop({ keepFiles: true })
+      const blocker = await occupy(ports.lan, DEFAULT_CONFIG.lanBind)
+      try {
+        web = await startDshWeb({ withPlugin: true, reuse: web.work })
+        // 插件启动失败只能让插件自己失败，不能让整个 DSH 退出
+        const exited = web.exited.then((code) => ({ ok: false, detail: `DSH 退出了（code=${code}）：插件启动失败让整个 DSH 退出了，apply 是不是 async 函数？` }))
+        conflict = await Promise.race([
+          checkPortConflictReported(web.launch).catch((error) => ({ ok: false, detail: String(error instanceof Error ? error.message : error) })),
+          exited,
+        ])
+      } finally {
+        await new Promise((r) => blocker.close(r))
+      }
+    }
+    const ok = loaded.ok && lan.ok && admin.ok && conflict.ok
+    console.log(JSON.stringify({ check: 'load', dshVersion: web.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin, conflict }))
     process.exitCode = ok ? 0 : 1
   } catch (error) {
     console.log(JSON.stringify({ check: 'load', dshVersion: DSH_VERSION, platform: process.platform, ok: false, detail: String(error instanceof Error ? error.message : error) }))

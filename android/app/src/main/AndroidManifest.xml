@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 监听网络变化，换网络后立即重连（data/live/NetworkMonitor） -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 扫描配对二维码（只在扫码页面申请）。没有相机的设备也能安装，改用手动输入 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <!--
       明文流量一律禁止（ADR 0003、安全红线第 4 条）：
@@ -12,6 +17,7 @@
       allowBackup=false：凭据不进入系统备份。
     -->
     <application
+        android:name=".DshRemoteApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

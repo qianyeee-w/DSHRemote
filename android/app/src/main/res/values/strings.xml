@@ -1,7 +1,126 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">DSHRemote</string>
-    <string name="skeleton_title">DSHRemote</string>
-    <string name="skeleton_body">用手机安全地操控电脑上的 DeepSeek Harness。\n\n这是工程骨架（M2 T2），配对等功能将在后续任务中加入。</string>
-    <string name="skeleton_version">版本 %1$s</string>
+
+    <!-- 通用 -->
+    <string name="action_back">返回</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_save">保存</string>
+    <string name="action_done">完成</string>
+    <string name="action_retry">重试</string>
+    <string name="action_delete">删除</string>
+
+    <!-- 主机列表 -->
+    <string name="hosts_title">我的电脑</string>
+    <string name="hosts_add">添加电脑</string>
+    <string name="hosts_empty_title">还没有配对的电脑</string>
+    <string name="hosts_empty_body">在电脑上安装 DSHRemote 插件并启动 DeepSeek Harness，用浏览器打开插件的配对页（http://127.0.0.1:3191），生成配对码后用手机扫码。</string>
+    <string name="hosts_version">版本 %1$s</string>
+
+    <!-- 配对方式 -->
+    <string name="pair_method_title">添加电脑</string>
+    <string name="pair_method_scan">扫码配对</string>
+    <string name="pair_method_manual">手动输入地址</string>
+    <string name="repair_method_title">重新配对</string>
+
+    <!-- 连接状态 -->
+    <string name="status_online">在线</string>
+    <string name="status_connecting">连接中</string>
+    <string name="status_stopped">未连接</string>
+    <string name="status_offline">离线</string>
+    <string name="status_dsh_incompatible">DSH 版本不兼容</string>
+    <string name="status_needs_pairing">需要重新配对</string>
+    <string name="status_fingerprint_mismatch">证书指纹不一致</string>
+    <string name="status_app_too_old">需要升级 App</string>
+
+    <string name="status_detail_online">已连接到 %1$s。</string>
+    <string name="status_detail_connecting">正在连接这台电脑……</string>
+    <string name="status_detail_stopped">App 在后台时不保持连接。</string>
+    <string name="status_detail_offline_unreachable">所有地址都连不上：电脑可能关机了、手机和电脑不在同一网络，或者防火墙没有放行插件的端口。会自动重试。</string>
+    <string name="status_detail_offline_dsh">插件在运行，但 DeepSeek Harness 暂时不可用（可能正在重启）。会自动重试。</string>
+    <string name="status_detail_offline_too_many">这台手机在电脑上的连接数达到上限，通常是切换网络后旧连接还没有被清理。会自动重试。</string>
+    <string name="status_detail_offline_disconnected">连接断开了。会自动重试。</string>
+    <string name="status_detail_offline_protocol">插件的回应不符合约定，可能是 App 和插件的版本不匹配。会自动重试。</string>
+    <string name="status_detail_dsh_incompatible">电脑上的 DeepSeek Harness 版本（%1$s）不受插件支持。升级 DSH 或插件后会自动恢复。</string>
+    <string name="status_detail_dsh_unknown_version">未知</string>
+    <string name="status_detail_revoked">这台手机已经在电脑上被撤销，需要重新配对。</string>
+    <string name="status_detail_credentials_lost">这台手机上保存的连接凭据无法读取（例如重装过 App），需要重新配对。</string>
+    <string name="status_detail_fingerprint_mismatch">电脑证书的指纹和配对时保存的不一致，已拒绝连接。\n\n可能是这个地址现在是另一台设备（例如换了网络），也可能是电脑上的插件重新生成了证书。换回原来的网络后会自动再试；如果插件重新生成了证书，请重新配对。</string>
+    <string name="status_detail_app_too_old">电脑上的插件比这个 App 新（协议版本 %1$d），请升级 App。</string>
+
+    <!-- 主机管理 -->
+    <string name="host_section_name">名称</string>
+    <string name="host_section_addresses">地址</string>
+    <string name="host_section_fingerprint">证书指纹</string>
+    <string name="host_addresses_hint">地址只用来找到电脑，修改地址不需要重新配对；安全由证书指纹保证。可以添加多个地址（例如局域网和 Tailscale），连接时会自动选择能用的。</string>
+    <string name="host_address_last_good">最近使用</string>
+    <string name="host_address_add">添加地址</string>
+    <string name="host_address_edit_title">修改地址</string>
+    <string name="host_address_add_title">添加地址</string>
+    <string name="host_address_label">地址:端口</string>
+    <string name="host_address_example">例如 192.168.1.5:3190、my-pc.example.ts.net:3190 或 [fd7a::1]:3190</string>
+    <string name="host_address_invalid">格式不对，应为「地址:端口」</string>
+    <string name="host_address_duplicate">这个地址已经在列表中</string>
+    <string name="host_address_too_many">最多 %1$d 个地址</string>
+    <string name="host_address_remove">删除地址 %1$s</string>
+    <string name="host_address_edit">修改地址 %1$s</string>
+    <string name="host_rename">重命名</string>
+    <string name="host_rename_title">重命名</string>
+    <string name="host_rename_invalid">名称不能为空</string>
+    <string name="host_fingerprint_unavailable">无法读取（需要重新配对）</string>
+    <string name="host_retry">立即重试</string>
+    <string name="host_repair">重新配对</string>
+    <string name="host_remove">删除这台电脑</string>
+    <string name="host_remove_title">删除 %1$s？</string>
+    <string name="host_remove_body">删除后，这台手机不能再连接这台电脑。电脑在线时会同时在电脑上撤销这台手机；不在线时，请到电脑的配对页上手动撤销。</string>
+    <string name="host_removing">正在删除……</string>
+    <string name="host_removed_not_revoked_title">已删除</string>
+    <string name="host_removed_not_revoked_body">没能连上电脑确认撤销。请在电脑上打开配对页，撤销这台手机。</string>
+
+    <!-- 配对 -->
+    <string name="pair_title">添加电脑</string>
+    <string name="repair_title">重新配对</string>
+    <string name="pair_scan_hint">在电脑上打开配对页（http://127.0.0.1:3191），点「生成配对码」，然后扫描页面上的二维码。</string>
+    <string name="pair_scan_invalid">这不是 DSHRemote 的配对二维码</string>
+    <string name="pair_scan_switch_manual">扫不了码？手动输入</string>
+    <string name="pair_camera_needed">扫码需要相机权限。</string>
+    <string name="pair_camera_grant">允许使用相机</string>
+    <string name="pair_camera_settings">打开系统设置</string>
+    <string name="pair_camera_denied">相机权限已被拒绝。可以在系统设置中允许，或者手动输入地址。</string>
+    <string name="pair_camera_unavailable">无法打开相机。可以手动输入地址。</string>
+    <string name="pair_manual_hint">配对页的「手动输入」一栏有电脑的地址、端口和配对码。</string>
+    <string name="pair_manual_host">电脑地址</string>
+    <string name="pair_manual_host_example">例如 192.168.1.5</string>
+    <string name="pair_manual_host_invalid">地址格式不对</string>
+    <string name="pair_manual_port">端口</string>
+    <string name="pair_manual_port_invalid">端口应为 1–65535</string>
+    <string name="pair_manual_code">配对码</string>
+    <string name="pair_manual_code_example">8 位，不区分大小写</string>
+    <string name="pair_manual_code_invalid">配对码是 8 位字母和数字</string>
+    <string name="pair_manual_next">下一步：核对指纹</string>
+    <string name="pair_probe_unreachable">连不上这个地址。请确认手机和电脑在同一网络、地址和端口正确，并且电脑的防火墙放行了这个端口。</string>
+    <string name="pair_probe_timeout">连接超时。请确认地址和端口正确，并且电脑的防火墙放行了这个端口。</string>
+    <string name="pair_probe_not_tls">这个地址上的服务不是 DSHRemote 插件。请检查端口。</string>
+    <string name="pair_probing">正在连接 %1$s……</string>
+    <string name="pair_confirm_title">核对证书指纹</string>
+    <string name="pair_confirm_body">请确认下面 8 个字符和电脑配对页上「证书指纹」加粗的前 8 位完全一致：</string>
+    <string name="pair_confirm_full">完整指纹：%1$s</string>
+    <string name="pair_confirm_match">一致，配对</string>
+    <string name="pair_confirm_mismatch">不一致</string>
+    <string name="pair_rejected_title">已取消配对</string>
+    <string name="pair_rejected_body">指纹不一致，说明这个地址上的可能不是你的电脑。配对码没有发出。\n\n请确认地址是否正确，或者在电脑旁边扫码配对。</string>
+    <string name="pair_reenter">重新输入</string>
+    <string name="pair_start_over">重新开始</string>
+    <string name="pair_in_progress">正在配对……</string>
+    <string name="pair_done">已配对「%1$s」</string>
+    <string name="pair_done_replaced">已重新配对「%1$s」</string>
+    <string name="pair_failed_title">配对失败</string>
+    <string name="pair_failed_code">配对码不对、已过期或已经用过。请在电脑的配对页上重新生成配对码。</string>
+    <string name="pair_failed_locked">尝试次数太多，配对暂时锁定，请 %1$d 秒后再试。在电脑上重新生成配对码可以立即解除锁定。</string>
+    <string name="pair_failed_locked_unknown">尝试次数太多，配对暂时锁定，请稍后再试。在电脑上重新生成配对码可以立即解除锁定。</string>
+    <string name="pair_failed_device_limit">电脑上已配对的设备达到上限。请在配对页上撤销不用的设备后再试。</string>
+    <string name="pair_failed_fingerprint">电脑证书的指纹和预期的不一致，已拒绝连接，配对码没有发出。\n\n请确认是在自己电脑的配对页上操作，并且手机和电脑在同一网络。</string>
+    <string name="pair_failed_unreachable">连不上电脑。请确认手机和电脑在同一网络，并且电脑的防火墙放行了插件的端口。</string>
+    <string name="pair_failed_app_too_old">电脑上的插件比这个 App 新（协议版本 %1$d），请升级 App。</string>
+    <string name="pair_failed_other">配对失败，请稍后再试。如果一直失败，请检查插件和 App 的版本。</string>
 </resources>

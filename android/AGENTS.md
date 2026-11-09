@@ -2,7 +2,7 @@
 
 Kotlin + Jetpack Compose。先读根目录的 `AGENTS.md`，M2 的实施方案见 `docs/plans/m2-android.md`。
 
-> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）、协议客户端（T5）、实时连接（T6）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
+> 状态：骨架（M2 T2）、证书校验层（T3）、主机与凭据存储（T4）、协议客户端（T5）、实时连接（T6）、配对与主机界面（T7）已完成。目录中的 `data/`、`service/` 等在后续任务中逐步加入；如有调整，同步更新本文件。
 
 ## 基线（ADR 0004、0011）
 
@@ -39,6 +39,7 @@ cd android
 | 依赖注入 | 暂不引入框架，手动注入；规模变大后再考虑 Hilt |
 | 本地存储 | DataStore。敏感数据（token、指纹）用 Android Keystore 中的 AES-GCM 密钥加密后再存。不使用已废弃的 `androidx.security:security-crypto` |
 | Markdown | `com.mikepenz:multiplatform-markdown-renderer`（纯 Compose，带代码高亮模块） |
+| 导航 | Navigation Compose（类型安全的路由；路由参数会进入 SavedState，只放 id 之类的非秘密信息） |
 | 扫码 | CameraX + ZXing core（不用 ML Kit：它依赖 Google Play 服务，很多国产手机没有） |
 | 后台 | 前台服务（`specialUse` 类型，ADR 0009）+ 本地通知 |
 | 测试 | JUnit、OkHttp MockWebServer（含 `okhttp-tls` 生成自签证书）、kotlinx-coroutines-test；界面测试用 Compose UI Test |
@@ -51,9 +52,13 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 │   ├── net/        # 唯一的证书校验点（T3 已完成）：Fingerprint、PinnedTls（两道检查）、ClientFactory、PairingProbe
 │   ├── host/       # （T4 已完成）Host、HostAddress、DeviceToken、PairUri（二维码解析）、SecretBox（Keystore AES-GCM）、HostRepository
 │   ├── api/        # （T5 已完成）PluginApi：protocol.md 的 REST 接口、数据结构、错误码（外观层，不是 DSH 的协议）
-│   └── live/       # （T6 已完成）ConnectionManager、HostConnection：每台主机一条 /v1/stream 连接，选地址、重连、hello、订阅、事件分发
+│   ├── live/       # （T6 已完成）ConnectionManager、HostConnection：每台主机一条 /v1/stream 连接，选地址、重连、hello、订阅、事件分发
+│   └── pairing/    # （T7 已完成）PairingService：探测指纹、配对、重新配对、取消配对（DELETE /v1/me）
 ├── service/        # 前台服务、通知
-└── ui/             # 各页面：主机列表与配对、会话列表、会话详情、审批与提问、设置
+├── ui/             # 各页面。T7：AppNavigation（路由）、hosts/（主机列表、主机管理）、pairing/（扫码、手动输入、指纹核对）、common/
+│                   # 之后：会话列表、会话详情、审批与提问、设置
+├── DshRemoteApp.kt # Application：AppContainer 手动创建 HostRepository、ConnectionManager、PairingService，注册 NetworkMonitor
+└── MainActivity.kt # 唯一的 Activity；可见时（onStart 到 onStop）持有 ConnectionManager.hold()
 ```
 
 ## 约定
@@ -62,7 +67,9 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 - 指纹校验必须有单元测试，至少覆盖：指纹正确时通过、指纹错误时拒绝、没有证书时拒绝，以及 TrustManager 和 HostnameVerifier 各自单独都能拦住错误的指纹。
 - token 和指纹只能存在 Keystore 加密的存储里，不允许写进 SharedPreferences 明文或日志。持有 token 的类型不得在 `toString()` 中输出 token；OkHttp 不加会记录请求头的日志拦截器。
 - 只调用 `docs/protocol.md` 中列出的接口；WebSocket 握手不发送 `Origin`。
-- 字符串放进 `strings.xml`，不要硬编码，为第二版的中英文界面做准备。
+- 字符串放进 `strings.xml`，不要硬编码，为第二版的中英文界面做准备。lint 的 `UnusedResources` 也算错误，删掉界面时记得删掉不再使用的字符串。
+- 页面拆成两层：`XxxScreen` 连接 ViewModel，`XxxContent` 只接收状态和回调。界面测试（`androidTest`）直接渲染 `XxxContent`，不需要网络和真实数据。
+- 界面测试要在**解锁的**手机上跑：锁屏时测试用的 Activity 不会显示，Compose 测试报 `No compose hierarchies found`。
 - 开发界面时连接插件的 dev-server（`cd plugin && npm run dev-server`，M2 的 T1），不需要每次都配置真的模型。
 
 ## 真机

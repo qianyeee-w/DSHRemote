@@ -32,6 +32,10 @@ internal class FakePlugin(
     @Volatile
     var handshake: () -> MockResponse? = { null }
 
+    /** 其他接口（例如 `/v1/pair`、`/v1/me`）的响应：返回 null 时按 404 处理。 */
+    @Volatile
+    var routes: (RecordedRequest) -> MockResponse? = { null }
+
     /** 收到的所有 HTTP 请求（包括 WebSocket 握手）。 */
     val requests = CopyOnWriteArrayList<RecordedRequest>()
 
@@ -51,7 +55,7 @@ internal class FakePlugin(
                                     connections.trySend(side)
                                     MockResponse.Builder().webSocketUpgrade(side).build()
                                 }
-                            else -> MockResponse.Builder().code(404).build()
+                            else -> routes(request) ?: MockResponse.Builder().code(404).build()
                         }
                     }
                 }
@@ -198,7 +202,7 @@ internal class FakePlugin(
             text: String,
         ): String = """{"id":"$id","role":"assistant","parts":[{"type":"text","text":"$text"}],"createdAt":1794107669094}"""
 
-        private fun json(body: String) =
+        fun json(body: String) =
             MockResponse
                 .Builder()
                 .addHeader("Content-Type", "application/json")

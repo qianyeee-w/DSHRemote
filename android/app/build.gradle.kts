@@ -5,6 +5,33 @@ plugins {
     alias(libs.plugins.ktlint)
 }
 
+/**
+ * 版本号只在 gradle.properties 的 dshremote.version 中定义（m3-release.md T2），App 和插件共用，发布时 CI 检查它和标签一致。
+ * 格式 X.Y.Z 或 X.Y.Z-rc.N（Y、Z ≤ 99，N 为 1–98）。
+ * versionCode = X * 1000000 + Y * 10000 + Z * 100 + (rc 的 N，正式版为 99)：rc 早于正式版，正式版早于下一个版本。
+ */
+fun releaseVersionCode(version: String): Int {
+    val match =
+        Regex("""^(0|[1-9]\d*)\.(0|[1-9]\d?)\.(0|[1-9]\d?)(?:-rc\.([1-9]\d?))?$""").matchEntire(version)
+            ?: throw GradleException("dshremote.version 格式不对：$version，应为 X.Y.Z 或 X.Y.Z-rc.N（Y、Z ≤ 99）")
+    val (major, minor, patch, rc) = match.destructured
+    val build = if (rc.isEmpty()) 99 else rc.toInt()
+    if (build > 98 && rc.isNotEmpty()) throw GradleException("dshremote.version 的 rc 编号最大为 98：$version")
+    if (major.toInt() > 2000) throw GradleException("dshremote.version 的主版本号太大：$version")
+    return major.toInt() * 1_000_000 + minor.toInt() * 10_000 + patch.toInt() * 100 + build
+}
+
+val releaseVersion = providers.gradleProperty("dshremote.version").get()
+
+/**
+ * release 包的签名（m3-release.md T2）：只从环境变量读取，密钥文件和密码不进仓库。
+ * 密钥是 PKCS12 格式，密钥密码和密钥库密码相同。缺少任何一项时，打包 release 直接失败（见 checkReleaseSigning），
+ * 不会悄悄生成未签名或用调试密钥签名的包。
+ */
+val releaseSigningEnv = listOf("DSHREMOTE_KEYSTORE", "DSHREMOTE_KEYSTORE_PASSWORD", "DSHREMOTE_KEY_ALIAS")
+val releaseSigning = releaseSigningEnv.associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotBlank) }
+val missingReleaseSigning = releaseSigning.filterValues { it == null }.keys.toList()
+
 android {
     namespace = "io.github.qianyeeew.dshremote"
     // ADR 0011：compileSdk 37（AndroidX 要求），targetSdk 35（决定运行时行为）
@@ -14,8 +41,8 @@ android {
         applicationId = "io.github.qianyeeew.dshremote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = releaseVersionCode(releaseVersion)
+        versionName = releaseVersion
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -31,10 +58,28 @@ android {
         }
     }
 
+    signingConfigs {
+        if (missingReleaseSigning.isEmpty()) {
+            create("release") {
+                storeFile = file(releaseSigning.getValue("DSHREMOTE_KEYSTORE")!!)
+                storeType = "pkcs12"
+                storePassword = releaseSigning.getValue("DSHREMOTE_KEYSTORE_PASSWORD")
+                keyAlias = releaseSigning.getValue("DSHREMOTE_KEY_ALIAS")
+                keyPassword = releaseSigning.getValue("DSHREMOTE_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            // 和 release 包同时装在手机上，互不覆盖；应用名见 src/debug/res（「DSHRemote 调试」）
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
-            // release 签名和发布不在 M2 范围内（m2-android.md 第 7 节）
+            // 不开启 R8（m3-release.md 第 1 节）：避免破坏依赖反射的代码，v1 不在意包的大小
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
@@ -83,6 +128,25 @@ tasks.register<Test>("devServerTest") {
     systemProperty("dshremote.pluginDir", rootProject.projectDir.resolve("../plugin").canonicalPath)
     // 结果取决于外部的 dev-server，每次都要真的运行
     outputs.upToDateWhen { false }
+}
+
+// 打包 release 之前检查签名配置齐全。只挂在打包任务上，test、lint 等其他任务不受影响
+val checkReleaseSigning =
+    tasks.register("checkReleaseSigning") {
+        description = "检查 release 签名所需的环境变量"
+        group = "verification"
+        val missing = missingReleaseSigning
+        doLast {
+            if (missing.isNotEmpty()) {
+                throw GradleException(
+                    "缺少 release 签名所需的环境变量：${missing.joinToString()}。" +
+                        "release 包只能用正式发布密钥签名，见 docs/plans/m3-release.md T2",
+                )
+            }
+        }
+    }
+tasks.matching { it.name == "packageRelease" || it.name == "packageReleaseBundle" }.configureEach {
+    dependsOn(checkReleaseSigning)
 }
 
 kotlin {

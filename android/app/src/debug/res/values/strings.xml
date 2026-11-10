@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- debug 包和 release 包可以同时安装（applicationId 后缀 .debug），用名称区分 -->
+    <string name="app_name">DSHRemote 调试</string>
+</resources>

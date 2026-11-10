@@ -6,7 +6,9 @@ Kotlin + Jetpack Compose。先读根目录的 `AGENTS.md`，M2 的实施方案�
 
 ## 基线（ADR 0004、0011）
 
-applicationId `io.github.qianyeeew.dshremote`；minSdk 26；compileSdk 37（SDK 包 `platforms;android-37.0`）；targetSdk 35；用 JDK 21 构建，编译目标 Java 17。依赖版本全部固定在 `gradle/libs.versions.toml`。
+applicationId `io.github.qianyeeew.dshremote`（debug 包为 `io.github.qianyeeew.dshremote.debug`，应用名「DSHRemote 调试」，可以和 release 包同时安装）；minSdk 26；compileSdk 37（SDK 包 `platforms;android-37.0`）；targetSdk 35；用 JDK 21 构建，编译目标 Java 17。依赖版本全部固定在 `gradle/libs.versions.toml`。
+
+**版本号和签名（ADR 0012）**：版本号只在 `gradle.properties` 的 `dshremote.version` 中定义（App 和插件共用），versionCode 由它算出（`VersionTest` 检查公式）。release 包只能用正式发布密钥签名，签名信息只从环境变量 `DSHREMOTE_KEYSTORE`、`DSHREMOTE_KEYSTORE_PASSWORD`、`DSHREMOTE_KEY_ALIAS` 读取，缺少时 `assembleRelease` 直接失败。密钥由用户运行 `scripts/create-release-key.sh` 生成，**agent 不要运行这个脚本，也不要接触密钥和密码**；证书指纹在 `release-cert.sha256`。不开启 R8。
 
 ## 命令
 
@@ -14,7 +16,7 @@ applicationId `io.github.qianyeeew.dshremote`；minSdk 26；compileSdk 37（SDK 
 cd android
 ./gradlew test                     # JVM 单元测试（CI 也跑）
 ./gradlew lint ktlintCheck         # lint（CI 也跑）
-./gradlew assembleDebug            # 构建 debug APK（CI 也跑）
+./gradlew assembleDebug            # 构建 debug APK（CI 也跑），包名带 .debug 后缀
 ./gradlew connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
                                    # 在已连接、已解锁的真机上跑测试（只在本地跑）：src/sharedTest 的证书校验测试、androidTest 的 Keystore 测试和界面测试。
                                    # 不加这个参数时，跑完会卸载 App，手机上的配对也跟着丢失

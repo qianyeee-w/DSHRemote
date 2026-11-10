@@ -38,7 +38,7 @@ Android App ──HTTPS / WSS（证书指纹固定 + 设备 token）──> 电�
 - DSH：`0.2.2-rc.1`（Session V3）。只使用 DSH 的公开服务接口，**不修改 DSH 的内部字段**。
 - Node：≥ 20。
 - 插件运行平台：Windows、Linux。v1 不适配 macOS。
-- Android：minSdk 26（Android 8.0），compileSdk 37，targetSdk 35，applicationId `io.github.qianyeeew.dshremote`，Kotlin + Jetpack Compose（ADR 0004、0011）。
+- Android：minSdk 26（Android 8.0），compileSdk 37，targetSdk 35，applicationId `io.github.qianyeeew.dshremote`（debug 包加后缀 `.debug`，ADR 0012），Kotlin + Jetpack Compose（ADR 0004、0011）。
 
 升级任何基线版本都要单独提交，并在 `docs/decisions/` 中记录。
 

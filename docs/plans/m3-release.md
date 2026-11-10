@@ -55,18 +55,22 @@
 
 - `android/app/build.gradle.kts`：
   - release 的签名配置从环境变量读取：`DSHREMOTE_KEYSTORE`（文件路径）、`DSHREMOTE_KEYSTORE_PASSWORD`、`DSHREMOTE_KEY_ALIAS`。没有这些变量时，`assembleRelease` 直接失败并说明原因，不会悄悄生成未签名或用调试密钥签名的包。
-  - `versionName` 和 `versionCode` 从版本号生成：`versionCode = X * 10000 + Y * 100 + Z`。版本号只在一个地方定义（`android/gradle.properties` 的 `dshremote.version`），发布时由 CI 检查它和标签一致。
-  - debug 包：`applicationIdSuffix = ".debug"`，应用名「DSHRemote 调试」。
+  - `versionName` 和 `versionCode` 从版本号生成：`versionCode = X * 1000000 + Y * 10000 + Z * 100 + N`（`X.Y.Z-rc.N`，正式版 N 取 99，这样 T4 的预发布标签 `v0.1.0-rc.1` 也有正确的顺序）。版本号只在一个地方定义（`android/gradle.properties` 的 `dshremote.version`），发布时由 CI 检查它和标签一致。
+  - 签名检查只挂在打包任务（`packageRelease`、`packageReleaseBundle`）上，`test`、`lint` 不需要签名信息。
+  - debug 包：`applicationIdSuffix = ".debug"`，`versionNameSuffix = "-debug"`（配对页的设备列表能看出是哪个包），应用名「DSHRemote 调试」（`src/debug/res`）。
+  - 决策记录在 ADR 0012。
 - 密钥由**用户自己生成**（PKCS12，RSA 4096，有效期 30 年）：用户在自己打开的终端里（例如 SSH 到开发服务器，那里已有 `keytool` 和 `gh`）运行脚本，不经过 agent。密码只在这个终端里输入，不出现在对话、仓库和日志中。步骤写在 `docs/release.md`（T6）里，并提供脚本 `android/scripts/create-release-key.sh`：
-  1. 用 `keytool` 生成密钥，密码由 keytool 交互输入；
-  2. 用 `gh secret set` 上传三个 Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`（交互输入）、`ANDROID_KEY_ALIAS`；
+  1. 脚本用 `read -s` 读取密码（输两次，至少 12 个字符），通过环境变量交给 `keytool`（`-storepass:env`），不出现在命令行参数中；
+  2. 用 `gh secret set` 从标准输入上传三个 Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`。仓库里已有发布密钥的 Secrets 时拒绝运行，防止换掉密钥；
   3. 打印证书的 SHA-256 指纹（公开信息），写进仓库的 `android/release-cert.sha256`；
   4. 提醒用户把密钥文件和密码备份到密码管理器，然后删除本地的密钥文件。
-- `.gitignore` 增加 `*.p12`、`*.jks`、`*.keystore`（已有 `*.pem`、`*.key`）。
+- `.gitignore` 增加 `*.p12`（已有 `*.jks`、`*.keystore`、`*.pem`、`*.key`）。
 
 **怎么测试**
 
-- 单元测试或 Gradle 检查：版本号到 `versionCode` 的换算；缺少签名环境变量时 `assembleRelease` 失败。
+- JVM 单元测试 `VersionTest`：用独立的实现检查 versionCode 的公式和顺序，debug 包的包名和版本后缀。AGP 9 默认只跑 debug 变体的单元测试，release 包由 `aapt2 dump badging` 检查。
+- 反向用例（手动跑 Gradle）：版本号格式不对（`0.1`、`0.100.0`、`0.1.0-rc.99`、`0.1.0-beta.1`、`01.1.0`）时构建失败；缺少签名环境变量时 `assembleRelease` 失败。
+- 生成密钥的脚本：用一个假的 `gh`（只记录 Secret 的名称和长度）在 scratchpad 里跑通，并验证四个反向用例：已有 Secrets、两次密码不一致、密码太短、密钥文件已存在。
 - 本地用一个临时生成的测试密钥（只放在 scratchpad，用完删除）跑 `assembleRelease`，用 `apksigner verify --print-certs` 确认签名正确、`debuggable` 为 false。
 - 真机：装上 debug 包（新的 `.debug` 包名）后跑 `connectedDebugAndroidTest`，确认改包名没有破坏测试。
 

@@ -32,6 +32,10 @@ npm run dev-server-check  # 用临时目录和空闲端口把 dev-server 的功�
                      # dev-server 的工作目录会被 git init 成独立的空仓库：DSH 每一轮结束时会把工作目录所在的整个 git 仓库快照到 /tmp
 node scripts/verify.mjs   # 真机验证：检查装在官方 Desktop（或 dsh web）里的插件，模拟手机走一遍对外接口
                      # 用法见 docs/plans/m1-windows-verification.md；输出的 JSON 不含 token 和配对码
+node scripts/dsh-compat.mjs run --version 0.2.3 --out <目录>  # DSH 新版本兼容性检测（M3 T1）：用指定版本依次跑 load-check、contract、e2e，
+                     # 结果写成 JSON。candidates 列出要检测的版本，report 为失败的版本开 issue（--dry-run 只打印）。
+                     # 由 .github/workflows/dsh-compat.yml 每天调用，用法见脚本开头；三个检测脚本的 stdout 最后一行
+                     # 都必须是带 results 数组的 JSON（{ check, ok, results: [{ name, ok, detail }] }），改这些脚本时不要破坏
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
                      # 转换器（transcript.js、facade.js）的单元测试只用录制的数据，不手写 DSH 的格式
 ```
@@ -79,7 +83,9 @@ plugin/
 ├── scripts/
 │   ├── verify.mjs        # 真机验证脚本（M1 T10），复用 test/helpers/pinned-client.js
 │   ├── dev-server.mjs    # 给 App 开发用的服务器（M2 T1）：复用 dsh-runtime.mjs 和 fake-llm.mjs，不改插件代码
-│   └── dev-server-lib.mjs# dev-server 的纯函数（参数、读取配对页、终端二维码），有单元测试
+│   ├── dev-server-lib.mjs# dev-server 的纯函数（参数、读取配对页、终端二维码），有单元测试
+│   ├── dsh-compat.mjs    # DSH 新版本兼容性检测的命令行入口（M3 T1），由 dsh-compat.yml 调用
+│   └── dsh-compat-lib.mjs# 兼容性检测的纯函数（选版本、解析检测结果、issue 内容），有单元测试
 └── test/
     ├── unit/             # 单元测试（*.test.js）
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）

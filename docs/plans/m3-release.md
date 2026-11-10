@@ -35,10 +35,12 @@
   - 第二步：对每个版本跑 `load-check`、`contract`、`e2e`（`DSH_VERSION=<版本>`）。
   - 第三步：失败时开 issue，标题「DSH <版本> 兼容性检测失败」。同一个版本只开一次（已有同名 issue 时不再开，关闭了的也算）。
     - issue 正文包括：版本号、发布时间、是否在 `SUPPORTED_DSH_RANGE` 之内、每项检测的结果（三个检测脚本最后一行 JSON 中的 `name`、`ok`、`detail`，截断）、DSH 升级指南的链接、这次运行的链接。
-    - 正文只用检测结果中的字段，这些字段本来就不含 token 等秘密（安全红线 5）。
-  - 通过时不开 issue。同一个版本、同一份插件代码通过后用缓存记下来，之后几天不再重复测试。
-- 版本选择、issue 内容的生成逻辑放在 `plugin/scripts/dsh-compat.mjs`，导出纯函数，便于单元测试。工作流只负责调用。
-- 工作流的权限：`contents: read`、`issues: write`。
+    - 正文只用检测结果中的字段，这些字段本来就不含 token 等秘密（安全红线 5）。另外再兜底：32 个字符以上的 base64url 串一律替换为「[已隐去]」。
+  - 通过时不开 issue。同一个版本、同一份插件代码通过后用缓存记下来，之后不再重复测试。
+  - 定时运行时，**已经开过 issue 的版本也跳过**，否则同一个失败会每天重跑、每天发失败通知邮件。手动触发总是检测。
+- 版本选择、issue 内容的生成逻辑放在 `plugin/scripts/dsh-compat-lib.mjs`（纯函数，有单元测试），命令行入口是 `plugin/scripts/dsh-compat.mjs`。工作流只负责调用。
+- `load-check` 的输出增加 `results` 数组，和 `contract`、`e2e` 的格式一致，三项检测用同一种方式解析。
+- 工作流的权限：默认 `contents: read`；选择版本的 job 加 `issues: read`，开 issue 的 job 加 `issues: write`。
 
 **怎么测试**
 

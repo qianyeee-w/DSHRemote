@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-10（M2 完成；插件遗留问题已处理）
+最后更新：2026-11-11（M3 进行中：T1 完成）
 
 ## 1. 进度
 
@@ -12,8 +12,12 @@
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
 | **M2 Android App** | **完成**（T1–T12，小米 Android 17 真机验证，电脑端用 Linux 的 `dsh web`） | `docs/plans/m2-android.md`（第 6 节验收清单）、`docs/plans/m2-device-verification.md`（真机验证结果） |
+| **M3 v1 发布** | **进行中**（T1 完成） | `docs/plans/m3-release.md` |
 
-**下一步**：和用户确认。候选：可选的 Windows 官方 Desktop + 手机的联合验证（按 `m2-device-verification.md` 再走一遍，顺便确认端口被占用时 Desktop 的插件列表显示失败）。
+**下一步**：M3 T2（release 构建和签名）。M3 的范围：v1 目前只给用户自己用，仓库保持私有，文档按「以后可能开源」的标准写，只有中文。
+
+M3 已完成：
+- T1：DSH 新版本兼容性检测（`.github/workflows/dsh-compat.yml`，脚本 `plugin/scripts/dsh-compat.mjs`）。每天北京时间 9 点检查 npm 上 latest、next、alpha 中比基线新的版本，跑 load-check、contract、e2e，失败时开 issue「DSH <版本> 兼容性检测失败」。定时运行时跳过已经通过的版本和已经开过 issue 的版本；要重新检测某个版本，在 Actions 页面手动触发并填写版本号。收到这类 issue 后，按 issue 中「怎么处理」一节适配。
 
 M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 没有工作区，「选择工作区」只有测试覆盖；子代理的事项和独立处理页面只有测试覆盖；Markdown 宽表格的单元格会被截断成「…」；会话标题可能带有 Markdown 的「#」；不做开机自启；App 进程被杀后，旧通知里的令牌失效，点开只进入首页。
 

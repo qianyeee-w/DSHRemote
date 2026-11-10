@@ -223,10 +223,18 @@ async function main() {
       }
     }
     const ok = loaded.ok && lan.ok && admin.ok && conflict.ok
-    console.log(JSON.stringify({ check: 'load', dshVersion: web.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin, conflict }))
+    // results 和 contract、e2e 的格式一致，供兼容性检测（scripts/dsh-compat.mjs）统一解析
+    const results = [
+      { name: '插件加载', ok: loaded.ok, detail: `phase=${loaded.phase} ${loaded.detail ?? ''}`.trim() },
+      { name: '局域网接口', ...lan },
+      { name: '配对页', ...admin },
+      { name: '端口被占用时插件显示为失败', ...conflict },
+    ]
+    console.log(JSON.stringify({ check: 'load', dshVersion: web.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin, conflict, results }))
     process.exitCode = ok ? 0 : 1
   } catch (error) {
-    console.log(JSON.stringify({ check: 'load', dshVersion: DSH_VERSION, platform: process.platform, ok: false, detail: String(error instanceof Error ? error.message : error) }))
+    const detail = String(error instanceof Error ? error.message : error)
+    console.log(JSON.stringify({ check: 'load', dshVersion: DSH_VERSION, platform: process.platform, ok: false, detail, results: [{ name: '运行加载检查', ok: false, detail }] }))
     process.exitCode = 1
   } finally {
     await web?.stop()

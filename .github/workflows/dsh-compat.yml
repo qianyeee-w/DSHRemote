@@ -1,0 +1,163 @@
+name: dsh-compat
+
+# DSH 新版本兼容性检测（M3 T1，roadmap.md 第 1 节）：
+# 每天检查 npm 上 @deepseek-ai/dsh 的 latest、next、alpha，有比基线新的版本就跑 load-check、contract、e2e，
+# 失败时开 issue（同一个版本只开一次）。不会改代码，适配由人决定什么时候做。逻辑在 plugin/scripts/dsh-compat.mjs。
+
+on:
+  schedule:
+    - cron: '0 1 * * *' # 每天北京时间 9:00
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 要检测的 DSH 版本，例如 0.2.3 或 0.2.3-rc.1（留空则检测 npm 上比基线新的版本）
+        required: false
+        default: ''
+      os:
+        description: 平台
+        type: choice
+        options: [ubuntu-latest, windows-latest, both]
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsh-compat
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: plugin
+    shell: bash
+
+jobs:
+  plan:
+    name: 选择要检测的版本
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      versions: ${{ steps.pick.outputs.versions }}
+      os: ${{ steps.pick.outputs.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_OS: ${{ inputs.os }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          args=()
+          if [ -n "$INPUT_VERSION" ]; then args+=(--version "$INPUT_VERSION"); fi
+          # 定时运行时跳过已经开过 issue 的版本，避免同一个失败每天重跑；手动触发总是检测
+          if [ "$EVENT" = schedule ]; then args+=(--skip-reported); fi
+          versions=$(node scripts/dsh-compat.mjs candidates "${args[@]}")
+          case "$INPUT_OS" in
+            both) os='["ubuntu-latest","windows-latest"]' ;;
+            windows-latest) os='["windows-latest"]' ;;
+            *) os='["ubuntu-latest"]' ;;
+          esac
+          echo "要检测的版本：$versions，平台：$os"
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+          echo "os=$os" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: DSH ${{ matrix.version }} (${{ matrix.os }})
+    needs: plan
+    if: needs.plan.outputs.versions != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.plan.outputs.versions) }}
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      # 定时运行时，同一个版本、同一份插件代码通过过就不再重复检测
+      - name: 是否已经通过
+        id: passed
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: plugin/.dsh-compat-pass
+          key: dsh-compat-pass-${{ runner.os }}-${{ matrix.version }}-${{ hashFiles('plugin/index.js', 'plugin/src/**', 'plugin/test/**', 'plugin/scripts/dsh-compat*.mjs', 'plugin/package-lock.json') }}
+          lookup-only: true
+      - if: steps.passed.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - if: steps.passed.outputs.cache-hit != 'true'
+        run: npm ci
+      # npm 版的 dsh 安装插件时会调用 pnpm
+      - if: steps.passed.outputs.cache-hit != 'true'
+        run: npm install -g pnpm@10
+      - name: Cache DSH install
+        if: steps.passed.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/dsh-install
+          key: dsh-${{ runner.os }}-node22-${{ matrix.version }}
+      - name: 检测
+        id: run
+        if: steps.passed.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          DSH_COMPAT_VERSION: ${{ matrix.version }}
+          DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
+        run: node scripts/dsh-compat.mjs run --version "$DSH_COMPAT_VERSION" --out "$RUNNER_TEMP/dsh-compat"
+      - if: steps.run.outcome == 'success' || steps.run.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsh-compat-${{ matrix.version }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/dsh-compat/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: 记下通过
+        if: steps.run.outcome == 'success'
+        run: mkdir -p .dsh-compat-pass && echo ok > .dsh-compat-pass/ok
+      - if: steps.run.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: plugin/.dsh-compat-pass
+          key: dsh-compat-pass-${{ runner.os }}-${{ matrix.version }}-${{ hashFiles('plugin/index.js', 'plugin/src/**', 'plugin/test/**', 'plugin/scripts/dsh-compat*.mjs', 'plugin/package-lock.json') }}
+      # 让失败在 Actions 页面上显示为红色；issue 由 report 开
+      - name: 检测失败
+        if: steps.run.outcome == 'failure'
+        run: exit 1
+
+  report:
+    name: 为失败的版本开 issue
+    needs: [plan, check]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.versions != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # 所有版本都因为缓存跳过、或者检测前就失败时没有结果文件，不算错误
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          pattern: dsh-compat-*
+          path: ${{ runner.temp }}/results
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/results"
+          node scripts/dsh-compat.mjs report --results "$RUNNER_TEMP/results" --run-url "$RUN_URL"

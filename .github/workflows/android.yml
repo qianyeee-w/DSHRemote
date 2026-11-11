@@ -11,6 +11,8 @@ on:
       - 'android/**'
       - '.github/workflows/android.yml'
   workflow_dispatch:
+  # 发布工作流（release.yml）在打包前调用，发布的版本必须通过同样的检查
+  workflow_call:
 
 permissions:
   contents: read

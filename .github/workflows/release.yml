@@ -1,0 +1,165 @@
+# 发布 v1（M3 T4，ADR 0012）。步骤和注意事项见 docs/release.md。
+#
+# - 推送标签 vX.Y.Z 或 vX.Y.Z-rc.N：检查、构建、签名，然后创建 GitHub Release（rc 版标为预发布）。
+# - 手动触发（Actions 页面，可以选任意分支）：试运行，只构建和检查，不创建 Release。产物在这次运行的 artifacts 中保留 3 天。
+#
+# 安全（m3-release.md 第 3 节）：
+# - 密钥只在 build job 中还原到 runner 的临时目录，用完删除；这个 job 不写 Gradle 缓存。
+# - 签名证书的指纹必须和仓库中的 android/release-cert.sha256 一致，防止 Secrets 被换成别的密钥。
+# - 只有 publish job 有 contents: write。
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: 版本号和更新说明
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - id: version
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: node plugin/scripts/release.mjs check-version ${TAG:+--tag "$TAG"}
+      # 只发布已经合入 main 的代码
+      - if: github.ref_type == 'tag'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::标签 $GITHUB_REF_NAME 指向的提交不在 main 上"; exit 1; }
+      # 提前检查 CHANGELOG.md 中有这个版本的说明，免得构建完才失败
+      - run: node plugin/scripts/release.mjs notes --version "${{ steps.version.outputs.version }}" --out "$RUNNER_TEMP/notes.md"
+
+  android:
+    needs: version
+    uses: ./.github/workflows/android.yml
+
+  plugin:
+    needs: version
+    uses: ./.github/workflows/plugin.yml
+
+  build:
+    name: 构建、签名和检查
+    needs: [version, android, plugin]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      DIST: ${{ github.workspace }}/dist
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      # 只读缓存：签名构建的产物不写进 GitHub 的缓存
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+      - name: Install Android SDK platform 37
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - name: 还原发布密钥
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          [ -n "$KEYSTORE_BASE64" ] || { echo "::error::缺少 Secret ANDROID_KEYSTORE_BASE64"; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+      - name: assembleRelease
+        working-directory: android
+        env:
+          DSHREMOTE_KEYSTORE: ${{ runner.temp }}/release.p12
+          DSHREMOTE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          DSHREMOTE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: ./gradlew --no-daemon --no-configuration-cache assembleRelease
+      - name: 删除密钥
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12"
+
+      - name: 检查 APK 的签名证书、包名和版本
+        run: node plugin/scripts/release.mjs check-apk --apk android/app/build/outputs/apk/release/app-release.apk --version "$VERSION"
+
+      - name: 打插件安装包
+        working-directory: plugin
+        run: |
+          npm ci
+          npm run pack -- --out "$DIST"
+
+      - name: 整理产物和校验和
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk "$DIST/dshremote-$VERSION.apk"
+          cd "$DIST"
+          for f in "dshremote-$VERSION.apk" "dshremote-plugin-$VERSION.tgz"; do
+            [ -f "$f" ] || { echo "::error::缺少 $f"; exit 1; }
+            sha256sum "$f" > "$f.sha256"
+          done
+          node "$GITHUB_WORKSPACE/plugin/scripts/release.mjs" notes --version "$VERSION" --out "$RUNNER_TEMP/notes.md"
+          {
+            cat "$RUNNER_TEMP/notes.md"
+            echo
+            echo '## 文件'
+            echo
+            echo '| 文件 | SHA-256 |'
+            echo '|---|---|'
+            for f in *.sha256; do read -r sum name < "$f"; echo "| \`$name\` | \`$sum\` |"; done
+            echo
+            echo "App 签名证书的 SHA-256：\`$(cat "$GITHUB_WORKSPACE/android/release-cert.sha256")\`"
+          } > release-notes.md
+          ls -l
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ needs.version.outputs.version }}
+          path: dist/
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    name: 创建 GitHub Release
+    needs: [version, build]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ needs.version.outputs.version }}
+          path: dist
+      - name: gh release create
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          flag=--latest
+          [ "$PRERELEASE" = true ] && flag=--prerelease
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag $flag \
+            --title "DSHRemote $VERSION" --notes-file release-notes.md \
+            "dshremote-$VERSION.apk" "dshremote-$VERSION.apk.sha256" \
+            "dshremote-plugin-$VERSION.tgz" "dshremote-plugin-$VERSION.tgz.sha256"

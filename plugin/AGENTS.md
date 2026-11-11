@@ -39,6 +39,8 @@ node scripts/dsh-compat.mjs run --version 0.2.3 --out <目录>  # DSH 新版本�
 npm run pack         # 生成插件安装包 dist/dshremote-plugin-<版本>.tgz（M3 T3），ws 打包在内；--out <目录> 改输出位置
                      # 打包后检查内容（不能有 test/、scripts/、开发依赖、密钥和证书）。把它装进 dsh web 检查：
                      # DSHREMOTE_PLUGIN_PACKAGE=dist/dshremote-plugin-<版本>.tgz npm run load-check
+node scripts/release.mjs bump|check-version|notes|check-apk  # 发布用（M3 T4）：统一修改版本号、检查版本一致、
+                     # 从 CHANGELOG.md 取更新说明、检查 release APK 的签名证书和版本。由 release.yml 调用，用法见脚本开头
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
                      # 转换器（transcript.js、facade.js）的单元测试只用录制的数据，不手写 DSH 的格式
 ```
@@ -90,7 +92,9 @@ plugin/
 │   ├── dsh-compat.mjs    # DSH 新版本兼容性检测的命令行入口（M3 T1），由 dsh-compat.yml 调用
 │   ├── dsh-compat-lib.mjs# 兼容性检测的纯函数（选版本、解析检测结果、issue 内容），有单元测试
 │   ├── pack.mjs          # 生成插件安装包（M3 T3）
-│   └── pack-lib.mjs      # 安装包的纯函数（文件名、包里的 package.json、内容检查），有单元测试
+│   ├── pack-lib.mjs      # 安装包的纯函数（文件名、包里的 package.json、内容检查），有单元测试
+│   ├── release.mjs       # 发布用的命令（M3 T4），由 .github/workflows/release.yml 调用
+│   └── release-lib.mjs   # 发布的纯函数（版本号、更新说明、APK 检查），有单元测试
 └── test/
     ├── unit/             # 单元测试（*.test.js）
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）

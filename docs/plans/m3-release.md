@@ -105,23 +105,53 @@
 
 **做什么**
 
-- 新的工作流 `.github/workflows/release.yml`，推送 `v*` 标签时运行：
-  1. 检查标签和 `dshremote.version`、`plugin/package.json` 的版本一致；
-  2. 跑一遍 android 和 plugin 的检查（复用现有的命令）；
-  3. 从 Secrets 还原密钥到 runner 的临时目录，`assembleRelease`，然后删除密钥文件；
-  4. 用 `apksigner` 检查 APK 的签名证书指纹和 `android/release-cert.sha256` 一致，不一致就失败（防止 Secrets 被换成别的密钥）；
-  5. 打插件安装包（T3）；
-  6. 创建 GitHub Release，上传 `dshremote-X.Y.Z.apk`、`dshremote-plugin-X.Y.Z.tgz` 和两者的 SHA-256 校验文件；更新说明取自 `CHANGELOG.md` 中对应版本的一节。
-- 新增 `CHANGELOG.md`，从 `0.1.0` 开始记录。
-- 工作流的权限：只在创建 Release 的步骤需要 `contents: write`。
+- 新的工作流 `.github/workflows/release.yml`：
+  - 推送 `v*` 标签时：检查、构建、签名，然后创建 GitHub Release；
+  - 手动触发（可以选任意分支）时：只是试运行，构建和检查都做，但不创建 Release，产物保留在这次运行的 artifacts 中。
+- 各 job 的步骤：
+  1. `version`：
+     - 检查标签、`dshremote.version`、`plugin/package.json`、`plugin/package-lock.json` 四处版本一致；
+     - 检查标签指向的提交在 `main` 上；
+     - 检查 `CHANGELOG.md` 中有这个版本的说明。
+  2. `android`、`plugin`：直接调用现有的 `android.yml` 和 `plugin.yml`（为此给它们加上 `workflow_call`）。检查和平时完全一样，包括 Windows 上的 load-check 和用安装包的 load-check。
+  3. `build`：
+     - 从 Secrets 还原密钥到 runner 的临时目录，运行 `assembleRelease`（`--no-daemon --no-configuration-cache`），无论成败都删除密钥文件；
+     - Gradle 缓存只读，签名构建的产物不写进 GitHub 缓存；
+     - 用 `apksigner` 和 `aapt2` 检查 APK：
+       - 签名证书和 `android/release-cert.sha256` 一致，只有一个签名者，用了 v2 签名；
+       - 包名、versionName、versionCode 正确，不可调试；
+     - 打插件安装包，生成 `.sha256` 校验文件。更新说明取自 `CHANGELOG.md`，后面附上文件的 SHA-256 和 App 签名证书的指纹。
+  4. `publish`：只在推送标签时运行，只有这个 job 有 `contents: write`。`gh release create --verify-tag`，rc 版标为预发布。
+- 版本号检查、更新说明、APK 检查都在 `plugin/scripts/release-lib.mjs` 中（纯函数，有单元测试），命令行入口是 `plugin/scripts/release.mjs`。`bump <版本>` 一次改好三个文件中的版本号。
+  - 版本号的规则和 `build.gradle.kts` 用同一个正则；
+  - `pack-lib.mjs` 也改用这个规则。
+- 新增 `CHANGELOG.md`，从 `0.1.0` 开始记录。每一节的标题是 `## X.Y.Z`；rc 版没有单独的一节时，用对应正式版的一节。
+- 发版步骤：
+  1. `node plugin/scripts/release.mjs bump X.Y.Z[-rc.N]`；
+  2. 更新 `CHANGELOG.md`，提交，推送到 `main`；
+  3. 推送标签 `vX.Y.Z[-rc.N]`。
+  
+  详细说明写进 `docs/release.md`（T6）。
 
 **怎么测试**
 
-- 先推一个预发布标签（例如 `v0.1.0-rc.1`），Release 标为预发布。确认：
+- 单元测试 `test/unit/release.test.js`（16 个）：
+  - 版本号的解析和 versionCode，拒绝的版本号和 Gradle 一致；
+  - 版本号不一致（标签、三个文件）的反向用例；
+  - 更新说明的提取（rc 版回退到正式版，找不到时失败）；
+  - apksigner、aapt2 的输出解析，格式取自 build-tools 37.0.0 的真实输出；
+  - APK 检查的反向用例：证书不一致、多个签名者、校验失败、debug 包、版本不对、可调试。
+- 本地：
+  - 对 debug 包运行 `check-apk`，四项问题都能报出来（证书、包名、versionName、可调试）；
+  - `bump` 改过去再改回来，文件没有变化。
+- 在 `main` 上手动触发试运行，确认：
+  - 签名、检查都通过；
   - 产物齐全，校验和正确；
-  - 日志中没有密钥和密码；
+  - 日志中没有密钥和密码。
+- 反向用例：在测试分支上把 `release-cert.sha256` 改成错误的值，手动触发，确认在「检查 APK」一步失败。测试分支用完删除。
+- 推送预发布标签 `v0.1.0-rc.1`：
+  - Release 标为预发布，产物和校验和正确；
   - 下载的 APK 能装到手机上（见 T7）。
-- 反向用例：在测试分支上把 `release-cert.sha256` 改成错误的值，确认工作流失败。
 
 ### T5 修复会话标题中的「#」
 

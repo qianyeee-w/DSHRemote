@@ -9,13 +9,15 @@
  *   DSH_VERSION=0.2.3 npm run load-check   # 测试其他版本
  *   DSH_BIN=/path/to/dsh-entry.js npm run load-check   # 使用已安装的 DSH（指向 JS 入口文件）
  *   DSH_INSTALL_DIR=/path/to/dir npm run load-check    # 把 DSH 装在这个目录并复用（CI 用它做缓存）
+ *   DSHREMOTE_PLUGIN_PACKAGE=dist/dshremote-plugin-X.Y.Z.tgz npm run load-check
+ *                                          # 用安装包（npm run pack）离线安装，额外检查装进去的是安装包的副本
  *
  * 前置条件：PATH 上要有 pnpm。npm 版的 dsh 安装插件时会调用 pnpm。
  *
  * 输出一行 JSON 结果（stdout 最后一行），退出码 0 表示通过。
  * 跨平台：Windows 和 Linux 上都直接用 node 运行 DSH 的 JS 入口，不依赖 shell 和 .cmd 包装。
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, lstatSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import http from 'node:http'
 import net from 'node:net'
@@ -24,7 +26,7 @@ import { DEFAULT_CONFIG } from '../../src/config.js'
 import { spkiFingerprint } from '../../src/tls/certificate.js'
 import { CERT_FILE } from '../../src/tls/identity.js'
 import { pinnedRequest } from '../helpers/pinned-client.js'
-import { startDshWeb, DSH_VERSION, freePort } from '../helpers/dsh-runtime.mjs'
+import { startDshWeb, DSH_VERSION, freePort, PLUGIN_DIR, PLUGIN_SOURCE } from '../helpers/dsh-runtime.mjs'
 
 /** @param {URL} launch @param {string} path @param {{ method?: string, headers?: Record<string,string>, body?: string }} [options] */
 function request(launch, path, options = {}) {
@@ -192,15 +194,31 @@ async function withPortHint(result, port, host) {
   return hint ? { ...result, detail: `${result.detail}。${hint}` } : result
 }
 
+/**
+ * 用安装包安装时：profile 里的插件应该是安装包的副本（不是指向源码的链接），版本一致，运行时依赖在包里。
+ * @param {string} dshHome
+ * @returns {{ ok: boolean, detail: string }}
+ */
+function checkInstalledFromPackage(dshHome) {
+  const installed = join(dshHome, 'profiles', 'web', 'node_modules', 'dshremote')
+  if (!existsSync(join(installed, 'package.json'))) return { ok: false, detail: `profile 中没有 dshremote：${installed}` }
+  if (lstatSync(installed).isSymbolicLink()) return { ok: false, detail: 'profile 中的 dshremote 是符号链接，不是安装包的副本' }
+  const version = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')).version
+  const expected = JSON.parse(readFileSync(join(PLUGIN_DIR, 'package.json'), 'utf8')).version
+  if (version !== expected) return { ok: false, detail: `装进去的版本是 ${version}，源码中是 ${expected}` }
+  if (!existsSync(join(installed, 'node_modules', 'ws', 'package.json'))) return { ok: false, detail: '安装包中没有打包运行时依赖 ws' }
+  return { ok: true, detail: `安装包的副本，版本 ${version}，ws 打包在内` }
+}
+
 async function main() {
   /** @type {import('../helpers/dsh-runtime.mjs').DshWeb | undefined} */
   let web
   try {
-    // 关掉「第一次启动时自动打开浏览器」，其余配置用默认值
     // 端口用临时找到的空闲端口，其余配置用默认值；关掉「第一次启动时自动打开浏览器」
     ports.lan = await freePort()
     ports.admin = await freePort()
     web = await startDshWeb({ withPlugin: true, pluginConfig: { ...DEFAULT_CONFIG, lanPort: ports.lan, adminPort: ports.admin, openAdminOnFirstRun: false } })
+    const installedFrom = PLUGIN_SOURCE !== PLUGIN_DIR ? checkInstalledFromPackage(web.dshHome) : { ok: true, detail: '源码目录' }
     const loaded = await checkLoaded(web.launch)
     const lan = loaded.ok ? await withPortHint(await checkLanInfo(web.dshHome), ports.lan, DEFAULT_CONFIG.lanBind) : { ok: false, detail: '插件未加载，跳过局域网检查' }
     const admin = loaded.ok ? await checkAdminPage(web.dshHome) : { ok: false, detail: '插件未加载，跳过配对页检查' }
@@ -222,7 +240,6 @@ async function main() {
         await new Promise((r) => blocker.close(r))
       }
     }
-    const ok = loaded.ok && lan.ok && admin.ok && conflict.ok
     // results 和 contract、e2e 的格式一致，供兼容性检测（scripts/dsh-compat.mjs）统一解析
     const results = [
       { name: '插件加载', ok: loaded.ok, detail: `phase=${loaded.phase} ${loaded.detail ?? ''}`.trim() },
@@ -230,6 +247,8 @@ async function main() {
       { name: '配对页', ...admin },
       { name: '端口被占用时插件显示为失败', ...conflict },
     ]
+    if (PLUGIN_SOURCE !== PLUGIN_DIR) results.unshift({ name: '从安装包安装', ...installedFrom })
+    const ok = results.every((r) => r.ok)
     console.log(JSON.stringify({ check: 'load', dshVersion: web.version, platform: process.platform, ok, phase: loaded.phase, detail: loaded.detail, lan, admin, conflict, results }))
     process.exitCode = ok ? 0 : 1
   } catch (error) {

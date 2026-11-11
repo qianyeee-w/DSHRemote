@@ -24,3 +24,6 @@ Thumbs.db
 
 # 个人的本机环境说明（Claude Code 会自动读取，但不提交）
 CLAUDE.local.md
+
+# 插件安装包（npm run pack 的输出）
+plugin/dist/

@@ -7,6 +7,8 @@
  *   DSH_VERSION      要测试的 DSH 版本，默认为基线版本（src/dsh/versions.js）
  *   DSH_BIN          已安装的 DSH 的 JS 入口，设置后不再安装
  *   DSH_INSTALL_DIR  DSH 的安装目录，已有同版本时直接复用（CI 用它做缓存）
+ *   DSHREMOTE_PLUGIN_PACKAGE  插件安装包（npm run pack 生成的 .tgz）的路径。设置后用它安装插件（离线，
+ *                    验证运行时依赖确实打包在里面），不再链接源码目录
  *
  * 跨平台：一律用 node 直接运行 DSH 的 JS 入口，不依赖 shell 和 .cmd 包装。
  */
@@ -20,6 +22,8 @@ import { DSH_BASELINE_VERSION } from '../../src/dsh/versions.js'
 
 export const PLUGIN_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 export const DSH_VERSION = process.env.DSH_VERSION || DSH_BASELINE_VERSION
+/** 要安装的插件：安装包的绝对路径，或者源码目录 */
+export const PLUGIN_SOURCE = process.env.DSHREMOTE_PLUGIN_PACKAGE ? resolve(process.env.DSHREMOTE_PLUGIN_PACKAGE) : PLUGIN_DIR
 const STARTUP_TIMEOUT_MS = 120_000
 
 /** @param {string} message */
@@ -161,8 +165,10 @@ export async function startDshWeb(options) {
 
   try {
     if (installPlugin) {
-      log(`DSH ${dsh.version}，把插件装进 web profile ...`)
-      execFileSync(process.execPath, [dsh.entry, 'plugin', '--profile', 'web', 'add', '-w', PLUGIN_DIR], { env, cwd: workspace, stdio: ['ignore', 'inherit', 'inherit'] })
+      const fromPackage = PLUGIN_SOURCE !== PLUGIN_DIR
+      log(`DSH ${dsh.version}，把插件${fromPackage ? `安装包 ${basename(PLUGIN_SOURCE)}（离线）` : '源码目录'}装进 web profile ...`)
+      const addArgs = ['plugin', '--profile', 'web', 'add', '-w', ...(fromPackage ? ['--offline'] : []), PLUGIN_SOURCE]
+      execFileSync(process.execPath, [dsh.entry, ...addArgs], { env, cwd: workspace, stdio: ['ignore', 'inherit', 'inherit'] })
       if (persistent) writeFileSync(join(work, PLUGIN_INSTALLED_MARKER), `${dsh.version}\n`)
     }
     if (writeConfig && options.pluginConfig) {

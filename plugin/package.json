@@ -36,7 +36,8 @@
     "e2e": "node test/e2e/e2e.mjs",
     "browser-check": "node test/browser/admin-page.mjs",
     "dev-server": "node scripts/dev-server.mjs",
-    "dev-server-check": "node test/dev-server/dev-server-check.mjs"
+    "dev-server-check": "node test/dev-server/dev-server-check.mjs",
+    "pack": "node scripts/pack.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

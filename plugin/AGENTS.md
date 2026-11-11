@@ -36,6 +36,9 @@ node scripts/dsh-compat.mjs run --version 0.2.3 --out <目录>  # DSH 新版本�
                      # 结果写成 JSON。candidates 列出要检测的版本，report 为失败的版本开 issue（--dry-run 只打印）。
                      # 由 .github/workflows/dsh-compat.yml 每天调用，用法见脚本开头；三个检测脚本的 stdout 最后一行
                      # 都必须是带 results 数组的 JSON（{ check, ok, results: [{ name, ok, detail }] }），改这些脚本时不要破坏
+npm run pack         # 生成插件安装包 dist/dshremote-plugin-<版本>.tgz（M3 T3），ws 打包在内；--out <目录> 改输出位置
+                     # 打包后检查内容（不能有 test/、scripts/、开发依赖、密钥和证书）。把它装进 dsh web 检查：
+                     # DSHREMOTE_PLUGIN_PACKAGE=dist/dshremote-plugin-<版本>.tgz npm run load-check
 npm run capture-fixtures  # 从真实 dsh web 重新录制单元测试用的数据，写到 test/fixtures/dsh-<版本>/
                      # 转换器（transcript.js、facade.js）的单元测试只用录制的数据，不手写 DSH 的格式
 ```
@@ -85,12 +88,15 @@ plugin/
 │   ├── dev-server.mjs    # 给 App 开发用的服务器（M2 T1）：复用 dsh-runtime.mjs 和 fake-llm.mjs，不改插件代码
 │   ├── dev-server-lib.mjs# dev-server 的纯函数（参数、读取配对页、终端二维码），有单元测试
 │   ├── dsh-compat.mjs    # DSH 新版本兼容性检测的命令行入口（M3 T1），由 dsh-compat.yml 调用
-│   └── dsh-compat-lib.mjs# 兼容性检测的纯函数（选版本、解析检测结果、issue 内容），有单元测试
+│   ├── dsh-compat-lib.mjs# 兼容性检测的纯函数（选版本、解析检测结果、issue 内容），有单元测试
+│   ├── pack.mjs          # 生成插件安装包（M3 T3）
+│   └── pack-lib.mjs      # 安装包的纯函数（文件名、包里的 package.json、内容检查），有单元测试
 └── test/
     ├── unit/             # 单元测试（*.test.js）
     ├── helpers/          # 测试辅助：pinned-client.js（按指纹固定证书的客户端，校验方式与 App 一致）
     │                     #   fake-dsh.js（模拟 DSH 的 HTTP + mux，单元测试用）
-    │                     #   dsh-runtime.mjs（安装并启动真实 dsh web，load-check 和 contract 共用）
+    │                     #   dsh-runtime.mjs（安装并启动真实 dsh web，load-check 和 contract 共用；
+    │                     #   设置 DSHREMOTE_PLUGIN_PACKAGE 时从安装包安装插件）
     │                     #   pinned-client.js 也提供 pinnedWebSocket（按指纹连接 /v1/stream）
     │                     #   stub-facade.js（不涉及 DSH 的路由测试用）
     ├── fixtures/         # 从真实 DSH 录制的数据（npm run capture-fixtures），按 DSH 版本分目录
@@ -124,8 +130,12 @@ plugin/
 
 ## 安装方式
 
-- **官方 Desktop**：先在插件目录下运行 `npm install --omit=dev`，再在 Desktop 中打开「插件 → 安装第三方插件」，填写插件目录的绝对路径。npm 版的 `dsh` 命令不允许管理 `desktop` profile。
-- **`dsh web`**：`dsh plugin --profile web add -w <插件目录的绝对路径>`（需要 PATH 上有 pnpm）
+详细的行为和依据见 `docs/research/dsh-plugin-install.md`。
+
+- **安装包（用户使用这种方式）**：在 Desktop 的「插件 → 添加插件」中填 `dshremote-plugin-<版本>.tgz` 的绝对路径；`dsh web` 用 `dsh plugin --profile web add <tgz 的绝对路径>`。插件会被复制进 profile。安装后 `.tgz` **不能删除或移动**，profile 以后的 pnpm 操作还会读取它。
+- **源码目录（开发用）**：先在插件目录下运行 `npm install --omit=dev`（DSH 只链接目录，不安装依赖），再在 Desktop 中填写插件目录的绝对路径；`dsh web` 用 `dsh plugin --profile web add -w <插件目录的绝对路径>`（需要 PATH 上有 pnpm）。
+- npm 版的 `dsh` 命令不允许管理 `desktop` profile，Desktop 上只能通过界面安装。
+- 升级：直接安装新版本，或先卸载再安装。插件数据在 `<DSH_HOME>/dshremote/`，配对不受影响。
 
 ## 可复用的参考实现
 

@@ -29,7 +29,7 @@ Android App ──HTTPS / WSS（证书指纹固定 + 设备 token）──> 电�
 | `docs/security.md` | 威胁模型与安全红线 |
 | `docs/decisions/` | 已确定的架构决策（ADR）；要推翻某条决策，先新写一条 ADR，不要直接改代码 |
 | `docs/roadmap.md` | 后续优化方向，以及 **v1 必须遵守的预留设计** |
-| `docs/research/` | 调研记录。`dsh-session-api.md` 记录了 DSH 0.2.2-rc.1 接口的实测结论，**写插件的 DSH 适配层之前必读** |
+| `docs/research/` | 调研记录。`dsh-session-api.md` 记录了 DSH 0.2.2-rc.1 接口的实测结论，**写插件的 DSH 适配层之前必读**；`dsh-plugin-install.md` 记录了 DSH 安装第三方插件的方式（安装包格式的依据） |
 
 各子项目自己的命令和约定写在 `plugin/AGENTS.md` 和 `android/AGENTS.md` 里。
 

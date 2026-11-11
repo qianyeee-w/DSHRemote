@@ -78,14 +78,27 @@
 
 **做什么**
 
-- 先确认官方 Desktop「安装第三方插件」的行为：是引用原目录还是复制一份；会不会自己安装依赖（npm 版的 `dsh` 安装插件时会调用 pnpm）。结论记录在 `docs/research/`。
-- 根据结论，脚本 `plugin/scripts/pack.mjs` 生成 `dshremote-plugin-X.Y.Z.zip`：内容是 `package.json` 中 `files` 列出的文件、`LICENSE`、`README`。需要时再加上只含运行时依赖的 `node_modules`（`ws`），不包含测试和开发依赖。
-- 插件的数据（证书、已配对设备、`state.json`）存放在 `~/.dsh/` 下，和插件目录无关。所以升级插件只要用新版本覆盖插件目录，配对不会丢失。这一点要实际验证。
+- 先确认官方 Desktop「添加插件」的行为：是引用原目录还是复制一份，会不会自己安装依赖。结论记录在 [`docs/research/dsh-plugin-install.md`](../research/dsh-plugin-install.md)：
+  - 「添加插件」接受包名、Git 地址、本地目录和本地 `.tgz` 的绝对路径，内部运行 `pnpm add`；
+  - **本地目录只做链接，不安装依赖**；**`.tgz` 会复制进 profile**，依赖从 npm 源下载，已打包在 `.tgz` 中的依赖直接使用；
+  - 两种方式下原文件都**不能删除或移动**，否则这个 profile 以后的 pnpm 操作（包括安装其他插件）都会失败；
+  - 直接安装新版本的 `.tgz`，或者先卸载再安装，都能升级。插件数据（`<DSH_HOME>/dshremote/`）和 profile 中的插件配置都保留，配对不丢。
+- 所以安装包改用 **`.tgz`**，不用原计划的 zip：脚本 `plugin/scripts/pack.mjs`（`npm run pack`）生成 `plugin/dist/dshremote-plugin-X.Y.Z.tgz`。
+  - 内容：`package.json` 中 `files` 列出的文件（含 `LICENSE`）、`README.md`、打包的运行时依赖 `ws`（`bundleDependencies`，安装时不需要联网）；
+  - 包里的 `package.json` 去掉开发依赖和脚本；
+  - 打包后检查包里的文件（`scripts/pack-lib.mjs`），不通过时删除安装包并失败。
+- 新增 `plugin/README.md`：DSH 的插件详情页会显示它。内容包括安装、升级、配置和数据位置，并提醒用户 `.tgz` 不能删除。
+- `test/helpers/dsh-runtime.mjs` 支持环境变量 `DSHREMOTE_PLUGIN_PACKAGE`：设置后用 `dsh plugin add --offline <tgz>` 安装插件，不再链接源码目录。
 
 **怎么测试**
 
-- 自动：解压安装包，用 `dsh plugin add` 装进真实的 `dsh web`，跑 load-check。加进 `plugin.yml`，Linux 和 Windows 都跑。
-- 自动：安装包里不包含 `test/`、`scripts/`、开发依赖、`*.pem`、`*.key`。
+- 单元测试 `test/unit/pack.test.js`（11 个）：
+  - 文件名、版本号格式；
+  - 包里的 `package.json` 保留 DSH 需要的字段；
+  - 反向用例：包含 `test/`、`scripts/`、开发依赖、`*.pem`、`*.key`、`*.p12`、`.env` 等文件，或者缺少必需文件、缺少 `ws` 时，检查都不通过。
+- 自动：`plugin.yml` 的 load job（Linux 和 Windows）打包后，用安装包离线装进 `dsh web`，再跑一遍 load-check。额外检查：插件是安装包的副本（不是链接）、版本一致、`ws` 在包里。
+- 反向用例：用没有打包 `ws` 的 `.tgz` 安装时，load-check 失败。pnpm 本机缓存里有 `ws` 时 `--offline` 也会安装成功，只能靠这项检查发现。
+- 同样的源码两次打包，SHA-256 相同。
 - 用户在 Windows 上验证（T7）：用安装包安装和升级插件。
 
 ### T4 发布工作流
@@ -98,7 +111,7 @@
   3. 从 Secrets 还原密钥到 runner 的临时目录，`assembleRelease`，然后删除密钥文件；
   4. 用 `apksigner` 检查 APK 的签名证书指纹和 `android/release-cert.sha256` 一致，不一致就失败（防止 Secrets 被换成别的密钥）；
   5. 打插件安装包（T3）；
-  6. 创建 GitHub Release，上传 `dshremote-X.Y.Z.apk`、`dshremote-plugin-X.Y.Z.zip` 和两者的 SHA-256 校验文件；更新说明取自 `CHANGELOG.md` 中对应版本的一节。
+  6. 创建 GitHub Release，上传 `dshremote-X.Y.Z.apk`、`dshremote-plugin-X.Y.Z.tgz` 和两者的 SHA-256 校验文件；更新说明取自 `CHANGELOG.md` 中对应版本的一节。
 - 新增 `CHANGELOG.md`，从 `0.1.0` 开始记录。
 - 工作流的权限：只在创建 Release 的步骤需要 `contents: write`。
 

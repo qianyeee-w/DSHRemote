@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-11（创建／导入项目与 Android 视觉改版已实现并通过自动化验证；已同步 M3 T2）
+最后更新：2026-11-11（创建／导入项目与 Android 视觉改版已实现并通过自动化验证；M3 进行中：T1–T3 完成）
 
 ## 1. 进度
 
@@ -12,9 +12,9 @@
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
 | **M2 Android App** | **完成**（T1–T12，小米 Android 17 真机验证，电脑端用 Linux 的 `dsh web`） | `docs/plans/m2-android.md`（第 6 节验收清单）、`docs/plans/m2-device-verification.md`（真机验证结果） |
-| **M3 v1 发布** | **进行中**（T1、T2 完成） | `docs/plans/m3-release.md` |
+| **M3 v1 发布** | **进行中**（T1–T3 完成） | `docs/plans/m3-release.md` |
 
-**当前进度**：创建／导入项目已实现，方案与验证结果见 [`plans/project-create-import.md`](plans/project-create-import.md)。Android 内容优先视觉改版已整合首页和项目流程，方案与验证结果见 [`plans/android-visual-refresh.md`](plans/android-visual-refresh.md)。插件和 Android 自动化检查均通过；Windows Desktop 手动走查及 Linux `dsh web` 验收仍待完成。M3 T1、T2 已同步远端，后续从 T3（插件安装包）继续。M3 的范围仍是自用、私有仓库、中文文档。
+**当前进度**：创建／导入项目已实现，方案与验证结果见 [`plans/project-create-import.md`](plans/project-create-import.md)。Android 内容优先视觉改版已整合首页和项目流程，方案与验证结果见 [`plans/android-visual-refresh.md`](plans/android-visual-refresh.md)。插件和 Android 自动化检查均通过；Windows Desktop 手动走查及 Linux `dsh web` 验收仍待完成。M3 T1–T3 已完成，后续从 T4（发布工作流）继续。M3 的范围仍是自用、私有仓库、中文文档。
 
 **后续范围确认（2026-11-10）**：用户确认下一阶段纳入通知操作按钮和云推送；**锁屏时不能提交审批，必须先解锁，并在提交前重新校验事项状态**。前面讨论的可靠性、Diff、会话定位、计划／目标、终端、完整文件管理和 Git 操作纳入后续设计，图片附件为备选，语音不纳入本阶段，中转与自动穿透暂不考虑。创建／导入项目已获实现方案确认，优先于 M3 剩余任务、完整文件管理和远程终端。桌面端用量、缓存命中、对话分支、过程折叠及截图中的其他统计已做源码与录制样本调研，见 [`DSH 接口调研`](research/dsh-session-api.md) 第 9 节；尚未实测新增统计接口或确认这些统计功能的排期。完整范围及设计约束见 [`roadmap.md`](roadmap.md) 第 3 节。
 
@@ -24,6 +24,8 @@
 
 M3 已完成：
 - T1：DSH 新版本兼容性检测（`.github/workflows/dsh-compat.yml`，脚本 `plugin/scripts/dsh-compat.mjs`）。每天北京时间 9 点检查 npm 上 latest、next、alpha 中比基线新的版本，跑 load-check、contract、e2e，失败时开 issue「DSH <版本> 兼容性检测失败」。定时运行时跳过已经通过的版本和已经开过 issue 的版本；要重新检测某个版本，在 Actions 页面手动触发并填写版本号。收到这类 issue 后，按 issue 中「怎么处理」一节适配。
+- T2：release 构建和签名（ADR 0012）。版本号只在 `android/gradle.properties` 的 `dshremote.version`；release 签名信息只从环境变量读取，缺少时打包失败；debug 包加 `.debug` 后缀。发布密钥由用户生成，在 GitHub Secrets 和用户的离线备份中，agent 不接触；证书指纹在 `android/release-cert.sha256`。
+- T3：插件安装包 `dshremote-plugin-X.Y.Z.tgz`（`npm run pack`，`ws` 打包在内）。在 Desktop「添加插件」中填它的绝对路径即可安装；装好后 `.tgz` 不能删除或移动（`docs/research/dsh-plugin-install.md`）。CI 用安装包离线装进 `dsh web` 跑 load-check。
 
 M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 默认没有预置工作区；子代理的事项和独立处理页面只有测试覆盖；Markdown 宽表格的单元格会被截断成「…」；会话标题可能带有 Markdown 的「#」；不做开机自启；App 进程被杀后，旧通知里的令牌失效，点开只进入首页。
 

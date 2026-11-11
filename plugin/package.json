@@ -1,6 +1,6 @@
 {
   "name": "dshremote",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "description": "DSHRemote 电脑端插件：让 Android 手机通过局域网安全地操控 DeepSeek Harness。",
   "license": "MIT",
   "private": true,

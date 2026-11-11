@@ -18,7 +18,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-${{ github.ref }}
+  # 被 release.yml 调用时 github.workflow 是 release：和推送 main 触发的运行分开，互不取消
+  group: android-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:

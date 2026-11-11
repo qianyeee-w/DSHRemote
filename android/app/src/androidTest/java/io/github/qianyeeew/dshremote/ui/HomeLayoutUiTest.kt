@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -61,6 +62,14 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("waiting:waiting").assertIsDisplayed()
     }
 
+    /** M3 T5：会话标题开头的 Markdown 标记不显示。 */
+    @Test fun sessionTitleDropsLeadingMarkdownMarkers() {
+        render()
+        compose.onNodeWithTag("home-list").performScrollToNode(hasText("解释 Markdown 渲染流程"))
+        compose.onNodeWithText("解释 Markdown 渲染流程").assertIsDisplayed()
+        compose.onNodeWithText("## 解释 Markdown 渲染流程").assertDoesNotExist()
+    }
+
     private fun render(
         offline: Boolean = false,
         onSession: (String) -> Unit = {},
@@ -74,7 +83,7 @@ class HomeLayoutUiTest {
                 listOf(
                     SessionSummary("waiting", workspaceId = "p1", title = "确认测试命令", status = SessionStatus.WAITING, updatedAt = 0),
                     SessionSummary("working", workspaceId = "p1", title = "整理重连逻辑", updatedAt = 0),
-                    SessionSummary("recent", title = "解释 Markdown 渲染流程", updatedAt = 0),
+                    SessionSummary("recent", title = "## 解释 Markdown 渲染流程", updatedAt = 0),
                 ),
             )
         compose.setContent {

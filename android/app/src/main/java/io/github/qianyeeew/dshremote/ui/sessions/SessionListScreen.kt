@@ -57,6 +57,7 @@ import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.ui.common.relativeTime
 import io.github.qianyeeew.dshremote.ui.common.serverNow
+import io.github.qianyeeew.dshremote.ui.common.sessionTitleText
 import io.github.qianyeeew.dshremote.ui.hosts.PairMethodDialog
 import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
 import io.github.qianyeeew.dshremote.ui.hosts.offersRepair
@@ -278,7 +279,7 @@ private fun SessionRow(
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    session.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.sessions_untitled),
+                    sessionTitleText(session.title),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

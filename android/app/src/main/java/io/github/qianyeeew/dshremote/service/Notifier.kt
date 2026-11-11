@@ -16,6 +16,7 @@ import io.github.qianyeeew.dshremote.MainActivity
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
+import io.github.qianyeeew.dshremote.ui.common.sessionDisplayTitle
 import java.util.UUID
 
 /** 点通知后要打开的页面。 */
@@ -132,7 +133,7 @@ class Notifier(
             .Builder(context, CHANNEL_TASK_DONE)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(withHost(context.getString(R.string.notification_task_done), action.hostId))
-            .setContentText(action.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.sessions_untitled))
+            .setContentText(sessionDisplayTitle(action.title) ?: context.getString(R.string.sessions_untitled))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setAutoCancel(true)

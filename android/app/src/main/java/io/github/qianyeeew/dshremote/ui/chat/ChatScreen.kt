@@ -75,6 +75,7 @@ import io.github.qianyeeew.dshremote.ui.attention.Resolution
 import io.github.qianyeeew.dshremote.ui.common.DesignTopBar
 import io.github.qianyeeew.dshremote.ui.common.RoundIconButton
 import io.github.qianyeeew.dshremote.ui.common.chatGrid
+import io.github.qianyeeew.dshremote.ui.common.sessionTitleText
 import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -196,7 +197,7 @@ private fun ChatTopBar(
 ) {
     var menu by remember { mutableStateOf(false) }
     DesignTopBar(
-        title = state.session?.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.sessions_untitled),
+        title = sessionTitleText(state.session?.title),
         navigation = { RoundIconButton(R.drawable.ic_arrow_back, stringResource(R.string.action_back), actions.onBack) },
         subtitle = {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {

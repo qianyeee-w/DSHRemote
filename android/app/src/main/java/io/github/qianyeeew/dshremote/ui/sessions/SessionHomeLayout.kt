@@ -60,6 +60,7 @@ import io.github.qianyeeew.dshremote.ui.common.DesignTopBar
 import io.github.qianyeeew.dshremote.ui.common.RoundIconButton
 import io.github.qianyeeew.dshremote.ui.common.relativeTime
 import io.github.qianyeeew.dshremote.ui.common.serverNow
+import io.github.qianyeeew.dshremote.ui.common.sessionTitleText
 import io.github.qianyeeew.dshremote.ui.hosts.HostRow
 import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
 
@@ -324,7 +325,7 @@ private fun HomeSessionRow(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            session.title?.takeIf(String::isNotBlank) ?: stringResource(R.string.sessions_untitled),
+            sessionTitleText(session.title),
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,

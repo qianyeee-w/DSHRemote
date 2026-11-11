@@ -1,6 +1,10 @@
 # 创建／导入项目
 
-- 状态：已实现，Windows 自动化检查和 Android 自动化测试通过；Windows Desktop 手动流程与 Linux 环境验收待完成。
+- 状态：已实现。Windows 和 Linux 的自动化检查、Android 自动化测试都已通过；Windows Desktop 上的手动流程并入 M3 T7 的走查。
+- Linux 验证（2026-11-11）：
+  - 在 Linux 开发服务器的 dev-server（真实的 `dsh web` 加本插件）上跑 `devServerTest`，20 项通过。其中 `createsAndImportsProjectThenStartsSessionInThatWorkspace` 在临时目录中创建、导入项目，再开始会话，测试结束后删除临时目录。
+  - 小米 Android 17 的 `connectedDebugAndroidTest` 60 项通过。
+  - 插件 CI（Linux 和 Windows）通过。
 - 范围：目录选择、新建单个项目目录、登记已有目录、在选定工作区开始会话；优先于 M3 剩余任务、完整文件管理与终端。
 - 决策：ADR 0013；接口以 protocol.md「创建／导入项目」为准。
 

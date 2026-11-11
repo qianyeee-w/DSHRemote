@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-12（M3 进行中：T1–T4 完成，`v0.1.0-rc.1` 已发布；新增开发优先级建议）
+最后更新：2026-11-12（M3 进行中：T1–T5 完成，`v0.1.0-rc.1` 已发布；新增开发优先级建议）
 
 ## 1. 进度
 
@@ -12,12 +12,11 @@
 | DSH 接口调研 | 完成 | `docs/research/dsh-session-api.md` |
 | **M1 电脑端插件** | **完成**（T1–T10，Windows 官方 Desktop 已真机验证） | `docs/plans/m1-plugin.md`（第 6 节是验收结果和遗留问题） |
 | **M2 Android App** | **完成**（T1–T12，小米 Android 17 真机验证，电脑端用 Linux 的 `dsh web`） | `docs/plans/m2-android.md`（第 6 节验收清单）、`docs/plans/m2-device-verification.md`（真机验证结果） |
-| **M3 v1 发布** | **进行中**（T1–T4 完成，`v0.1.0-rc.1` 已发布） | `docs/plans/m3-release.md` |
+| **M3 v1 发布** | **进行中**（T1–T5 完成，`v0.1.0-rc.1` 已发布） | `docs/plans/m3-release.md` |
 
-**当前进度**：M3 T1–T4 已完成，预发布版 [`v0.1.0-rc.1`](https://github.com/qianyeee-w/DSHRemote/releases/tag/v0.1.0-rc.1) 已发布。下一步：
+**当前进度**：M3 T1–T5 已完成，预发布版 [`v0.1.0-rc.1`](https://github.com/qianyeee-w/DSHRemote/releases/tag/v0.1.0-rc.1) 已发布。下一步：
 
-- agent 做 T5（会话标题去掉「#」）；
-- 用户同时用 rc.1 在 Windows 官方 Desktop 和手机上走查（T7 的主要内容）。走查中发现的问题修进 rc.2；
+- 用户用 rc.1 在 Windows 官方 Desktop 和手机上走查（T7 的主要内容）。走查中发现的问题修进 rc.2；
 - 然后做 T6（用户文档），发布 `v0.1.0`，验证从 rc 覆盖升级。
 
 创建／导入项目（[`plans/project-create-import.md`](plans/project-create-import.md)）和 Android 视觉改版（[`plans/android-visual-refresh.md`](plans/android-visual-refresh.md)）已实现，自动化检查都通过。还差的人工验证并入 M3：Windows Desktop 上创建／导入的手动流程并入 T7；视觉改版的人工走查和截图并入 T6。M3 的范围仍是自用、私有仓库、中文文档。
@@ -35,8 +34,9 @@ M3 已完成：
 - T2：release 构建和签名（ADR 0012）。版本号只在 `android/gradle.properties` 的 `dshremote.version`；release 签名信息只从环境变量读取，缺少时打包失败；debug 包加 `.debug` 后缀。发布密钥由用户生成，在 GitHub Secrets 和用户的离线备份中，agent 不接触；证书指纹在 `android/release-cert.sha256`。
 - T3：插件安装包 `dshremote-plugin-X.Y.Z.tgz`（`npm run pack`，`ws` 打包在内）。在 Desktop「添加插件」中填它的绝对路径即可安装；装好后 `.tgz` 不能删除或移动（`docs/research/dsh-plugin-install.md`）。CI 用安装包离线装进 `dsh web` 跑 load-check。
 - T4：发布工作流 `.github/workflows/release.yml`。推送 `vX.Y.Z[-rc.N]` 标签时检查、构建、签名并创建 GitHub Release（rc 版标为预发布）；手动触发时只试运行。签名证书指纹必须和 `android/release-cert.sha256` 一致。版本号用 `node plugin/scripts/release.mjs bump <版本>` 一次改好三处，更新说明取自根目录的 `CHANGELOG.md`。release APK 有 34 MB（中文字体约 30 MB，没开 R8）。
+- T5：会话标题去掉开头的 Markdown 标记（`ui/common/SessionTitle.kt`），只改显示。以后新的地方显示会话标题时，用 `sessionTitleText()` 或 `sessionDisplayTitle()`。
 
-M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 默认没有预置工作区；子代理的事项和独立处理页面只有测试覆盖；Markdown 宽表格的单元格会被截断成「…」；会话标题可能带有 Markdown 的「#」；不做开机自启；App 进程被杀后，旧通知里的令牌失效，点开只进入首页。
+M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 默认没有预置工作区；子代理的事项和独立处理页面只有测试覆盖；Markdown 宽表格的单元格会被截断成「…」；不做开机自启；App 进程被杀后，旧通知里的令牌失效，点开只进入首页。
 
 M2 的实现要点（以后改 App 时要知道）：
 

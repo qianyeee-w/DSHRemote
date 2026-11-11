@@ -173,6 +173,20 @@ DSH 用第一条消息生成会话标题，消息以 Markdown 标题开头时，
 
 - JVM 单元测试：各种前缀、只有符号、正文中间的「#」不受影响。
 
+**结果（2026-11-12 完成）**
+
+- DSH 生成标题时会把第一条消息压成一行（`dsh-session-title` 的 `fallbackSessionTitle`），所以只需要处理开头。
+- `ui/common/SessionTitle.kt` 的 `sessionDisplayTitle()` 去掉开头的这些标记，可以叠加：
+  - 标题 `#`–`######`；
+  - 引用 `>`；
+  - 无序列表 `-` `*` `+`；
+  - 任务框 `[ ]` `[x]`。
+- 按 CommonMark 的规则，`#123`、`*强调*`、`---`、`1.` 不算标记，原样保留。只有标记的标题显示为「未命名会话」。
+- 用在四处：首页会话列表、旧的会话列表、会话详情页的标题栏、「任务完成」通知。
+- 测试：
+  - JVM：`SessionTitleTest`（5 个）；全部 253 个通过，`lint`、`ktlintCheck`、`assembleDebug` 通过。
+  - 真机：`HomeLayoutUiTest` 新增一项，检查首页显示的标题不带「##」；小米 Android 17 上 `connectedDebugAndroidTest` 61 项通过。
+
 ### T6 用户文档
 
 **做什么**
@@ -230,7 +244,7 @@ DSH 用第一条消息生成会话标题，消息以 Markdown 标题开头时，
 - [ ] release 包和 debug 包可以同时安装在手机上
 - [ ] 插件安装包在 Linux 的 `dsh web` 和 Windows 的官方 Desktop 上都能安装；覆盖升级后配对保留（Linux 和 Windows 上的 `dsh web` 已由 CI 覆盖；Windows Desktop 和覆盖升级待 T7）
 - [ ] `README.md`、`docs/user-guide.md`、`docs/release.md` 完成，用户按用户手册从头安装成功
-- [ ] 会话标题不再出现「#」
+- [x] 会话标题不再出现「#」（T5）
 - [ ] 在 Windows 官方 Desktop 上，用 release 包走通 `spec-v1.md` 的验收场景 1–7
 - [ ] 记录了不关闭电池优化时的通知表现
 - [ ] 发布 `v0.1.0`

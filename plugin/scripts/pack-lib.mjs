@@ -4,6 +4,8 @@
  * 结论和理由见 docs/research/dsh-plugin-install.md。
  */
 
+import { parseVersion } from './release-lib.mjs'
+
 /** 安装包的文件名前缀，完整文件名为 dshremote-plugin-<版本>.tgz */
 export const PACKAGE_PREFIX = 'dshremote-plugin'
 
@@ -15,7 +17,7 @@ const SECRET_FILE = /(^|\/)(\.env(\..*)?|[^/]*\.(pem|key|p12|pfx|jks|keystore))$
 
 /** @param {string} version */
 export function packageFileName(version) {
-  if (!/^\d+\.\d+\.\d+(-rc\.\d+)?$/.test(version)) throw new Error(`版本号格式不对：${JSON.stringify(version)}，应为 X.Y.Z 或 X.Y.Z-rc.N`)
+  parseVersion(version)
   return `${PACKAGE_PREFIX}-${version}.tgz`
 }
 

@@ -53,7 +53,7 @@ jobs:
           BROWSER_CHANNEL: msedge
 
   load:
-    name: load + contract + e2e + dev-server in real dsh web (${{ matrix.os }})
+    name: load (source + package) + contract + e2e + dev-server in real dsh web (${{ matrix.os }})
     needs: check
     strategy:
       fail-fast: false
@@ -79,6 +79,13 @@ jobs:
       - run: npm run load-check
         env:
           DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
+      # 插件安装包（M3 T3）：打包并检查内容，再用它离线装进 dsh web 跑一遍加载检查
+      - id: pack
+        run: npm run pack -- --out "${{ runner.temp }}/plugin-package"
+      - run: npm run load-check
+        env:
+          DSH_INSTALL_DIR: ${{ runner.temp }}/dsh-install
+          DSHREMOTE_PLUGIN_PACKAGE: ${{ steps.pack.outputs.package }}
       # DSH 接口契约测试：假模型驱动真实 dsh web，逐项验证适配层依赖的接口
       - run: npm run contract
         env:

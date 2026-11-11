@@ -2,38 +2,28 @@ package io.github.qianyeeew.dshremote.ui.common
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.net.Fingerprint
+import io.github.qianyeeew.dshremote.ui.CodeFontFamily
 
 /** 带返回按钮的标题栏。 */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackTopBar(
     title: String,
     onBack: () -> Unit,
 ) {
-    TopAppBar(
-        title = { Text(title) },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = stringResource(R.string.action_back))
-            }
-        },
+    DesignTopBar(
+        title = title,
+        navigation = { RoundIconButton(R.drawable.ic_arrow_back, stringResource(R.string.action_back), onBack) },
     )
 }
 
@@ -54,7 +44,7 @@ fun FingerprintText(fingerprint: Fingerprint) {
             withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(fingerprintPrefix(fingerprint)) }
             append(fingerprint.value.drop(FINGERPRINT_PREFIX))
         },
-        fontFamily = FontFamily.Monospace,
+        fontFamily = CodeFontFamily,
         style = MaterialTheme.typography.bodyMedium,
     )
 }

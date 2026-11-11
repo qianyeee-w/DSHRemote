@@ -86,6 +86,7 @@ fun SessionListScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val newSession by viewModel.newSession.collectAsStateWithLifecycle()
+    val project by viewModel.projects.state.collectAsStateWithLifecycle()
     LaunchedEffect(newSession) {
         (newSession as? NewSession.Created)?.let {
             navigation.onOpenSession(it.sessionId)
@@ -100,7 +101,22 @@ fun SessionListScreen(
         onNewSession = viewModel::startNewSession,
         onChooseWorkspace = viewModel::create,
         onDismissNewSession = viewModel::dismissNewSession,
+        onProject = { mode ->
+            viewModel.dismissNewSession()
+            viewModel.projects.open(mode)
+        },
     )
+    project?.let { selection ->
+        ProjectPickerDialog(
+            state = selection,
+            hostName = current.hostName,
+            onBrowse = viewModel.projects::browse,
+            onName = viewModel.projects::name,
+            onSubmit = viewModel.projects::submit,
+            onDismiss = viewModel.projects::dismiss,
+            onStartSession = { selection.workspace?.let(viewModel::startProjectSession) },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,6 +128,7 @@ fun SessionListContent(
     onNewSession: () -> Unit,
     onChooseWorkspace: (workspaceId: String?) -> Unit,
     onDismissNewSession: () -> Unit,
+    onProject: (ProjectMode) -> Unit = {},
 ) {
     var choosingRepair by remember { mutableStateOf(false) }
     var choosingAdd by remember { mutableStateOf(false) }
@@ -164,7 +181,7 @@ fun SessionListContent(
         }
     }
     if (newSession != NewSession.Closed && newSession !is NewSession.Created) {
-        NewSessionDialog(newSession, onChooseWorkspace, onRetry = onNewSession, onDismiss = onDismissNewSession)
+        NewSessionDialog(newSession, onChooseWorkspace, onRetry = onNewSession, onDismiss = onDismissNewSession, onProject = onProject)
     }
     if (choosingAdd) {
         PairMethodDialog(
@@ -369,6 +386,7 @@ private fun NewSessionDialog(
     onChoose: (workspaceId: String?) -> Unit,
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
+    onProject: (ProjectMode) -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -379,6 +397,8 @@ private fun NewSessionDialog(
                 NewSession.Creating -> Progress(stringResource(R.string.new_session_creating))
                 is NewSession.Choose ->
                     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                        TextButton(onClick = { onProject(ProjectMode.CREATE) }) { Text(stringResource(R.string.project_create)) }
+                        TextButton(onClick = { onProject(ProjectMode.IMPORT) }) { Text(stringResource(R.string.project_import)) }
                         Text(stringResource(R.string.new_session_choose), style = MaterialTheme.typography.bodyMedium)
                         state.workspaces.forEach { workspace ->
                             ListItem(

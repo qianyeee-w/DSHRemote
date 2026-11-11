@@ -132,6 +132,8 @@ async function main() {
     web = await startDshWeb({ withPlugin: true, pluginConfig, env })
     version = web.version
     const home = web.dshHome
+    const projectParent = web.workspace
+    let projectId = ''
     phone.fingerprint = spkiFingerprint(await until(() => { try { return readFileSync(join(home, 'dshremote', CERT_FILE), 'utf8') } catch { return undefined } }, '插件生成证书'))
     await until(async () => (await admin('/')).status === 200 && (await admin('/')).body.includes('data-state="ready"'), '插件连上 DSH')
 
@@ -146,6 +148,21 @@ async function main() {
       if ((await api('POST', '/v1/pair', { code, deviceName: 'x', platform: 'android', appVersion: '0' })).status !== 400) throw new Error('配对码应当只能用一次')
     })) throw new Error('配对失败，后续步骤跳过')
 
+    await step('创建／导入项目：目录选择、同名冲突、幂等登记', async () => {
+      const listing = await api('GET', `/v1/directories?path=${encodeURIComponent(projectParent)}`)
+      if (listing.status !== 200 || !Array.isArray(listing.json().entries)) throw new Error('无法浏览父目录')
+      const created = await api('POST', '/v1/directories', { path: listing.json().path, name: '手机 # 项目' })
+      if (created.status !== 200) throw new Error(`创建目录失败：${created.status}`)
+      const first = await api('POST', '/v1/workspaces', { path: created.json().path })
+      const again = await api('POST', '/v1/workspaces', { path: created.json().path })
+      if (first.status !== 200 || again.status !== 200 || !first.json().created || again.json().created) throw new Error('工作区登记未正确去重')
+      projectId = first.json().workspace.workspaceId
+      if (projectId !== again.json().workspace.workspaceId) throw new Error('重复导入生成了不同工作区')
+      if ((await api('POST', '/v1/directories', { path: projectParent, name: '手机 # 项目' })).status !== 409) throw new Error('同名目录应被拒绝')
+      if ((await api('POST', '/v1/directories', { path: projectParent, name: '../escape' })).status !== 400) throw new Error('非法名称应被拒绝')
+      if ((await api('POST', '/v1/workspaces', { path: join(projectParent, 'absent') })).status !== 422) throw new Error('不存在的目录应被拒绝')
+    })
+
     stream = await openStream()
     const s = stream
     await step('实时流：连接后先收到 hello', async () => {
@@ -157,11 +174,12 @@ async function main() {
     /** @type {string} */
     let sessionId = ''
     await step('新建会话，出现在会话列表和实时流中', async () => {
-      const created = await api('POST', '/v1/sessions', {})
+      const created = await api('POST', '/v1/sessions', { workspaceId: projectId })
       if (created.status !== 200) throw new Error(`新建会话失败：${created.status}`)
       sessionId = created.json().sessionId
       const list = (await api('GET', '/v1/sessions')).json().sessions
       if (!list.some((/** @type {any} */ x) => x.sessionId === sessionId)) throw new Error('会话列表中没有新会话')
+      if (!list.some((/** @type {any} */ x) => x.sessionId === sessionId && x.workspaceId === projectId)) throw new Error('会话没有关联导入的工作区')
       await s.inbox.waitFor((m) => m.type === 'session.updated' && m.session.sessionId === sessionId)
     })
     const sid = sessionId
@@ -232,6 +250,7 @@ async function main() {
       if (!hello.sessions.some((/** @type {any} */ x) => x.sessionId === sid)) throw new Error('hello 中没有原来的会话')
       const page = (await api('GET', `/v1/sessions/${sid}/messages`)).json()
       if (!JSON.stringify(page.messages).includes(STREAM_REPLY)) throw new Error('重启后读不到历史')
+      if (!(await api('GET', '/v1/workspaces')).json().workspaces.some((/** @type {any} */ w) => w.workspaceId === projectId)) throw new Error('重启后工作区丢失')
       return `DSH 端口 ${oldPort} → ${web.launch.port}`
     })
 
@@ -243,6 +262,9 @@ async function main() {
       if (closed.code !== 4401) throw new Error(`关闭码应为 4401：${closed.code}`)
       if ((await api('GET', '/v1/me')).status !== 401) throw new Error('/v1/me 应当 401')
       if ((await api('GET', '/v1/sessions')).status !== 401) throw new Error('/v1/sessions 应当 401')
+      if ((await api('GET', '/v1/directories')).status !== 401) throw new Error('撤销后不应能浏览目录')
+      if ((await api('POST', '/v1/directories', { path: projectParent, name: 'revoked' })).status !== 401) throw new Error('撤销后不应能创建目录')
+      if ((await api('POST', '/v1/workspaces', { path: projectParent })).status !== 401) throw new Error('撤销后不应能登记工作区')
       try { await openStream(); throw new Error('不应当还能连接实时流') } catch (error) {
         if (/** @type {any} */ (error).status !== 401) throw error
       }

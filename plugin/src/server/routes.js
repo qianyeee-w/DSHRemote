@@ -63,6 +63,7 @@ export function sendError(res, status, code, message, headers = {}) {
 /**
  * 路由用到的外观层操作。第一个参数都是调用方的 deviceId。
  * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages'
+ *   | 'directories' | 'createDirectory' | 'registerWorkspace'
  *   | 'createSession' | 'prompt' | 'cancel' | 'selectModel' | 'setPermissionPreset' | 'answerAttention'>} FacadeApi
  */
 
@@ -172,6 +173,30 @@ export const ROUTES = Object.freeze([
     auth: true,
     async handle(_req, res, ctx, auth) {
       sendJson(res, 200, await ctx.facade.workspaces(deviceIdOf(auth)))
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/directories',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.directories(deviceIdOf(auth), auth.query.get('path') ?? undefined))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/directories',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.createDirectory(deviceIdOf(auth), await readJsonBody(req)))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/workspaces',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.registerWorkspace(deviceIdOf(auth), await readJsonBody(req)))
     },
   },
   {

@@ -196,7 +196,7 @@ class SessionListViewModelTest {
         assertEquals("/home/me", shortPath("/home/me"))
     }
 
-    private fun viewModel() = SessionListViewModel("h1", hosts, states, creator)
+    private fun viewModel() = SessionListViewModel("h1", hosts, states, creator, PluginProjectBackend { null })
 
     private fun session(
         id: String,

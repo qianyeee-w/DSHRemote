@@ -19,3 +19,4 @@
 | [0010](0010-android-build-baseline.md) | Android 构建基线：targetSdk 35，applicationId `io.github.qianyeeew.dshremote` | 已被 0011 取代 |
 | [0011](0011-android-compile-sdk-37.md) | Android 构建基线：compileSdk 37，targetSdk 仍为 35 | 已接受 |
 | [0012](0012-v1-release.md) | v1 的发布方式：GitHub Releases + CI 签名，App 和插件共用版本号，不开 R8 | 已接受 |
+| [0013](0013-project-directory-operations.md) | 手机创建／导入项目的目录操作 | 已接受 |

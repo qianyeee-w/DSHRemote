@@ -7,6 +7,7 @@
  */
 import { DshUnavailableError } from './connection.js'
 import { convertPage } from './transcript.js'
+import { canonicalDirectory, createDirectory, DirectoryError, listDirectories } from '../directories.js'
 
 /** 历史消息分页：默认条数和上限 */
 export const MESSAGES_DEFAULT_LIMIT = 50
@@ -179,6 +180,7 @@ export function convertPermissionPresets(catalog) {
 const DSH_ERRORS = {
   'session/not-found': [404, 'NOT_FOUND', '会话不存在'],
   'workspace/not-found': [404, 'NOT_FOUND', '工作区不存在'],
+  'workspace/invalid-path': [422, 'DIRECTORY_UNAVAILABLE', 'DSH 无法使用这个目录作为工作区'],
   'session/model-unavailable': [400, 'BAD_REQUEST', '这个模型当前不可用'],
   'gateway/bad-request': [400, 'BAD_REQUEST', 'DSH 拒绝了这个请求，请检查内容'],
 }
@@ -210,6 +212,14 @@ function assertSessionId(sessionId) {
 }
 /** @param {string} message */
 const badRequest = (message) => new FacadeError(400, 'BAD_REQUEST', message)
+
+/** 目录异常在外观层转换，不把系统错误带到路由或日志。 @template T @param {() => Promise<T>} action */
+async function directoryOperation(action) {
+  try { return await action() } catch (error) {
+    if (error instanceof DirectoryError) throw new FacadeError(error.status, error.code, error.message)
+    throw error
+  }
+}
 
 export class Facade {
   #dsh
@@ -268,6 +278,30 @@ export class Facade {
   async workspaces(actor) {
     const state = await this.#workspaceState(actor)
     return { workspaces: state.items.map(({ workspaceId, title, path }) => ({ workspaceId, title, path })) }
+  }
+
+  /** @param {string} _actor @param {unknown} [path] */
+  async directories(_actor, path) {
+    return directoryOperation(() => listDirectories(path))
+  }
+
+  /** @param {string} _actor @param {unknown} body */
+  async createDirectory(_actor, body) {
+    const b = isObject(body) ? body : {}
+    return directoryOperation(() => createDirectory(b.path, b.name))
+  }
+
+  /** 登记实际目录；重复调用由官方接口按路径解析到已有工作区。 @param {string} actor @param {unknown} body */
+  async registerWorkspace(actor, body) {
+    const b = isObject(body) ? body : {}
+    const path = await directoryOperation(() => canonicalDirectory(b.path))
+    const value = unwrap(await this.#dsh.call('workspace/create', { request: { path } }, { actor }))
+    const workspace = isObject(value) && isObject(value.workspace) ? value.workspace : undefined
+    if (!isObject(value) || !workspace || typeof workspace.workspaceId !== 'string' || typeof workspace.title !== 'string'
+      || typeof workspace.path !== 'string' || typeof value.created !== 'boolean') {
+      throw new FacadeError(502, 'DSH_ERROR', 'DSH 没有返回有效的工作区')
+    }
+    return { workspace: { workspaceId: workspace.workspaceId, title: workspace.title, path: workspace.path }, created: value.created }
   }
 
   /** @param {string} actor */

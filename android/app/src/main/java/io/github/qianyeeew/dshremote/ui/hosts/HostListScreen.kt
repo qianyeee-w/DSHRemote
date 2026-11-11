@@ -8,24 +8,22 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,9 +36,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
+import io.github.qianyeeew.dshremote.ui.CodeFontFamily
+import io.github.qianyeeew.dshremote.ui.common.DesignRow
+import io.github.qianyeeew.dshremote.ui.common.DesignTopBar
+import io.github.qianyeeew.dshremote.ui.common.RoundIconButton
 
-/** 首页（没有主机或有多台主机时）：已配对的电脑和在线状态。[rows] 为 null 表示还在读取。 */
-@OptIn(ExperimentalMaterial3Api::class)
+/** 已配对电脑的分组列表；[onBack] 用于从会话首页进入管理列表。 */
 @Composable
 fun HostListContent(
     rows: List<HostRow>?,
@@ -49,18 +50,19 @@ fun HostListContent(
     onPair: (manual: Boolean) -> Unit,
     onOpenSettings: () -> Unit = {},
     hint: (@Composable () -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
 ) {
     var choosing by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.hosts_title)) },
+            DesignTopBar(
+                title = stringResource(if (onBack == null) R.string.hosts_title else R.string.design_manage_hosts),
+                navigation = { onBack?.let { RoundIconButton(R.drawable.ic_arrow_back, stringResource(R.string.action_back), it) } },
                 actions = {
+                    RoundIconButton(R.drawable.ic_add, stringResource(R.string.hosts_add), { choosing = true })
                     Box {
-                        IconButton(onClick = { menu = true }) {
-                            Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.action_more))
-                        }
+                        RoundIconButton(R.drawable.ic_more_vert, stringResource(R.string.action_more), { menu = true })
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = {
                                 menu = false
@@ -71,27 +73,63 @@ fun HostListContent(
                 },
             )
         },
-        floatingActionButton = {
-            if (!rows.isNullOrEmpty()) {
-                ExtendedFloatingActionButton(
-                    onClick = { choosing = true },
-                    icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
-                    text = { Text(stringResource(R.string.hosts_add)) },
-                )
-            }
-        },
     ) { padding ->
         when {
             rows == null -> Unit
             rows.isEmpty() -> EmptyHosts(versionName, onPair, Modifier.padding(padding))
             else ->
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(padding),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp),
+                    modifier = Modifier.padding(padding).fillMaxSize(),
                 ) {
+                    item(key = "intro") {
+                        Text(
+                            stringResource(R.string.design_hosts_intro),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 24.dp),
+                        )
+                    }
                     hint?.let { item(key = "hint") { it() } }
-                    items(rows, key = { it.hostId }) { row -> HostCard(row) { onOpenHost(row.hostId) } }
+                    item(key = "host-heading") {
+                        Text(
+                            stringResource(R.string.design_paired_hosts),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
+                    items(rows, key = { it.hostId }) { row -> HostRowView(row) { onOpenHost(row.hostId) } }
+                    item(key = "pair-actions") {
+                        Text(
+                            stringResource(R.string.design_connection_management),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 28.dp, bottom = 8.dp),
+                        )
+                        DesignRow(
+                            stringResource(
+                                R.string.pair_method_scan,
+                            ),
+                            R.drawable.ic_dsh_scan,
+                            stringResource(R.string.design_scan_hint),
+                            onClick = {
+                                onPair(false)
+                            },
+                            trailing = { HostChevron() },
+                        )
+                        DesignRow(
+                            stringResource(
+                                R.string.pair_method_manual,
+                            ),
+                            R.drawable.ic_dsh_keyboard,
+                            stringResource(R.string.design_manual_hint),
+                            onClick = {
+                                onPair(true)
+                            },
+                            trailing = { HostChevron() },
+                        )
+                    }
                 }
         }
     }
@@ -108,29 +146,42 @@ fun HostListContent(
 }
 
 @Composable
-private fun HostCard(
+private fun HostRowView(
     row: HostRow,
     onClick: () -> Unit,
 ) {
-    Card(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-    ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(row.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 80.dp)
+                .clickable(onClick = onClick)
+                .padding(vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(painterResource(R.drawable.ic_dsh_computer), null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(row.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 row.address?.let {
                     Text(
                         it.toString(),
+                        fontFamily = CodeFontFamily,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                StatusBadge(row.status)
             }
-            StatusBadge(row.status, Modifier.padding(start = 12.dp))
+            HostChevron()
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
+}
+
+@Composable
+private fun HostChevron() {
+    Icon(painterResource(R.drawable.ic_dsh_chevron_right), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

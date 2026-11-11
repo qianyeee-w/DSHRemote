@@ -241,6 +241,19 @@ async function main() {
 
     // ---- 外观层（只读）：通过 Facade 读取，检查转换结果
     const facade = new Facade(conn)
+    await step('外观层：创建目录、登记工作区、重复登记和错误恢复', async () => {
+      if (!web) throw new Error('测试运行时不存在')
+      const created = await facade.createDirectory(ACTOR, { path: web.workspace, name: '手机 项目' })
+      const first = await facade.registerWorkspace(ACTOR, { path: created.path })
+      const again = await facade.registerWorkspace(ACTOR, { path: created.path })
+      if (!first.created || again.created || first.workspace.workspaceId !== again.workspace.workspaceId) throw new Error('重复登记没有复用工作区')
+      if (!(await facade.workspaces(ACTOR)).workspaces.some((w) => w.workspaceId === first.workspace.workspaceId)) throw new Error('工作区列表未更新')
+      const session = await facade.createSession(ACTOR, { workspaceId: first.workspace.workspaceId })
+      const summary = (await facade.sessions(ACTOR)).sessions.find((s) => s.sessionId === session.sessionId)
+      if (summary?.workspaceId !== first.workspace.workspaceId || summary.cwd !== first.workspace.path) throw new Error('会话没有采用项目目录')
+      try { await facade.registerWorkspace(ACTOR, { path: join(created.path, 'absent') }); throw new Error('应拒绝不存在的目录') }
+      catch (error) { if (!(error instanceof FacadeError) || error.code !== 'DIRECTORY_UNAVAILABLE') throw error }
+    })
     await step('外观层：工作区与会话列表', async () => {
       const workspace = valueOf(await conn.call('workspace/create', { request: { path: web?.workspace } }, { actor: ACTOR })).workspace
       const inWorkspace = valueOf(await conn.call('session/create', { request: { workspaceId: workspace.workspaceId } }, { actor: ACTOR })).sessionId

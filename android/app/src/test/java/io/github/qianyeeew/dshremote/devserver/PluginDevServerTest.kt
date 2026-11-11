@@ -32,6 +32,36 @@ import org.junit.Test
  */
 class PluginDevServerTest {
     @Test
+    fun createsAndImportsProjectThenStartsSessionInThatWorkspace() =
+        runBlocking<Unit> {
+            val root =
+                java.nio.file.Files
+                    .createTempDirectory("dshremote-project-api-")
+                    .toFile()
+                    .canonicalFile
+            try {
+                val listing = api.directories(root.path)
+                val path = api.createDirectory(listing.path, "手机 # 项目")
+                val first = api.registerWorkspace(path)
+                val again = api.registerWorkspace(path)
+                assertTrue(first.created)
+                assertEquals(false, again.created)
+                assertEquals(first.workspace.workspaceId, again.workspace.workspaceId)
+                assertTrue(api.workspaces().any { it.workspaceId == first.workspace.workspaceId })
+                val sessionId = api.createSession(first.workspace.workspaceId)
+                val session = api.sessions().first { it.sessionId == sessionId }
+                assertEquals(first.workspace.workspaceId, session.workspaceId)
+                assertEquals(first.workspace.path, session.cwd)
+                assertEquals(ErrorCode.DIRECTORY_EXISTS, expect<ApiException.Http> { api.createDirectory(listing.path, "手机 # 项目") }.code)
+                assertEquals(ErrorCode.DIRECTORY_INVALID, expect<ApiException.Http> { api.createDirectory(listing.path, "../escape") }.code)
+            } finally {
+                // 只清理由本测试创建的空目录；不递归删除，也不通过 App 开放删除接口。
+                java.io.File(root, "手机 # 项目").delete()
+                root.delete()
+            }
+        }
+
+    @Test
     fun probeSeesSameFingerprintAsPlugin() =
         runBlocking<Unit> {
             // 端到端的跨实现检查：App 握手时算出的指纹 = 插件自己算出的指纹

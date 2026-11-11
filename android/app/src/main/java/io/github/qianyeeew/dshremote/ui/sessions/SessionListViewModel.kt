@@ -99,7 +99,17 @@ class SessionListViewModel(
     hosts: Flow<List<Host>>,
     states: Flow<Map<String, HostLiveState>>,
     private val creator: SessionCreator,
+    projectBackend: ProjectBackend,
 ) : ViewModel() {
+    val projects = ProjectFlow(viewModelScope, projectBackend)
+
+    fun startProjectSession(workspace: Workspace) {
+        if (projects.state.value?.workspace != workspace) return
+        projects.dismiss()
+        _newSession.value = NewSession.Choose(listOf(workspace))
+        create(workspace.workspaceId)
+    }
+
     /** null 表示还在读取，或者主机已经不存在。 */
     val state: StateFlow<SessionListState?> =
         combine(hosts, states) { list, live ->

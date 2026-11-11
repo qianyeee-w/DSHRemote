@@ -75,6 +75,39 @@ internal data class WorkspaceList(
 )
 
 @Serializable
+data class DirectoryEntry(
+    val name: String,
+    val path: String,
+    val hidden: Boolean,
+)
+
+@Serializable
+data class DirectoryListing(
+    val path: String,
+    val home: String,
+    val parent: String? = null,
+    val entries: List<DirectoryEntry>,
+    val truncated: Boolean,
+)
+
+@Serializable
+data class WorkspaceRegistration(
+    val workspace: Workspace,
+    val created: Boolean,
+)
+
+@Serializable
+internal data class DirectoryPath(
+    val path: String,
+)
+
+@Serializable
+internal data class CreateDirectoryRequest(
+    val path: String,
+    val name: String,
+)
+
+@Serializable
 enum class SessionStatus {
     @SerialName("running")
     RUNNING,

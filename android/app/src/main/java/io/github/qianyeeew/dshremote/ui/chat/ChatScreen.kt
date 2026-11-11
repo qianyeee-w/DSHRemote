@@ -4,12 +4,13 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -25,24 +26,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -50,17 +43,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,10 +67,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
+import io.github.qianyeeew.dshremote.ui.LocalStatusColors
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCard
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
 import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
 import io.github.qianyeeew.dshremote.ui.attention.Resolution
+import io.github.qianyeeew.dshremote.ui.common.DesignTopBar
+import io.github.qianyeeew.dshremote.ui.common.RoundIconButton
+import io.github.qianyeeew.dshremote.ui.common.chatGrid
 import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -180,7 +181,7 @@ fun ChatContent(
             // 和消息列表按同样的权重分剩余空间，并且不强制占满：事项最多占一半，少时只占需要的高度。
             // 按剩余空间而不是窗口高度计算，打开键盘时输入框不会被挤扁
             AttentionPanel(state, attentionActions, Modifier.weight(1f, fill = false))
-            InputBar(state, actions)
+            ChatComposer(state, actions, pickerOpen = picker != Picker.Closed)
         }
     }
 
@@ -188,21 +189,17 @@ fun ChatContent(
     PickerDialog(picker, state, actions)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatTopBar(
     state: ChatState,
     actions: ChatActions,
 ) {
     var menu by remember { mutableStateOf(false) }
-    TopAppBar(
-        title = {
-            Column {
-                Text(
-                    state.session?.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.sessions_untitled),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+    DesignTopBar(
+        title = state.session?.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.sessions_untitled),
+        navigation = { RoundIconButton(R.drawable.ic_arrow_back, stringResource(R.string.action_back), actions.onBack) },
+        subtitle = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 state.session?.status?.let { status ->
                     Text(
                         stringResource(
@@ -213,35 +210,37 @@ private fun ChatTopBar(
                                 SessionStatus.UNKNOWN -> R.string.session_status_unknown
                             },
                         ),
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         color =
                             if (status ==
                                 SessionStatus.WAITING
                             ) {
-                                MaterialTheme.colorScheme.error
+                                LocalStatusColors.current.waiting
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
                     )
                 }
-            }
-        },
-        navigationIcon = {
-            IconButton(onClick = actions.onBack) {
-                Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = stringResource(R.string.action_back))
+                if (state.session?.permissionPreset == "danger-full-access") {
+                    Text(
+                        permissionLabel(state.session.permissionPreset),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = LocalStatusColors.current.waiting,
+                    )
+                }
             }
         },
         actions = {
             Box {
-                IconButton(onClick = { menu = true }, enabled = state.online) {
-                    Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.action_more))
-                }
+                RoundIconButton(R.drawable.ic_more_vert, stringResource(R.string.action_more), { menu = true }, enabled = state.online)
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    val model = state.session?.model?.model
                     DropdownMenuItem(
                         text = {
                             Text(
-                                model?.let { stringResource(R.string.chat_menu_model_current, it) }
+                                state.session
+                                    ?.model
+                                    ?.model
+                                    ?.let { stringResource(R.string.chat_menu_model_current, it) }
                                     ?: stringResource(R.string.chat_menu_model),
                             )
                         },
@@ -250,11 +249,15 @@ private fun ChatTopBar(
                             actions.onOpenModels()
                         },
                     )
-                    val preset = state.session?.permissionPreset
                     DropdownMenuItem(
                         text = {
                             Text(
-                                preset?.let { stringResource(R.string.chat_menu_preset_current, it) }
+                                state.session?.permissionPreset?.let {
+                                    stringResource(
+                                        R.string.chat_menu_preset_current,
+                                        permissionLabel(it),
+                                    )
+                                }
                                     ?: stringResource(R.string.chat_menu_preset),
                             )
                         },
@@ -278,6 +281,7 @@ private fun MessageList(
     modifier: Modifier,
 ) {
     val listState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
     val reversed = remember(state.items) { state.items.asReversed() }
     // 停在底部时跟随新消息。「是否停在底部」只在用户自己滚动之后更新：新消息连续到达时，
     // 列表会把原来的那一项留在原位，不能拿那一刻的位置来判断
@@ -310,7 +314,13 @@ private fun MessageList(
     LazyColumn(
         state = listState,
         reverseLayout = true,
-        modifier = modifier.fillMaxWidth(),
+        modifier =
+            modifier.fillMaxWidth().chatGrid().testTag("chat-message-list").pointerInput(focusManager) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    focusManager.clearFocus()
+                }
+            },
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.Bottom),
     ) {
@@ -371,7 +381,6 @@ private fun AttentionPanel(
     modifier: Modifier,
 ) {
     if (state.attention.isEmpty() || !state.online) return
-    HorizontalDivider()
     Column(
         modifier
             .fillMaxWidth()
@@ -388,65 +397,13 @@ private fun AttentionPanel(
 /** 会话在等待处理，但还没有可以显示的事项。 */
 @Composable
 private fun WaitingBanner() {
-    Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+    Surface(color = LocalStatusColors.current.waitingContainer, modifier = Modifier.fillMaxWidth()) {
         Text(
             stringResource(R.string.chat_waiting),
-            color = MaterialTheme.colorScheme.onErrorContainer,
+            color = LocalStatusColors.current.waiting,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
         )
-    }
-}
-
-/** 输入框。运行中显示「插话」开关和停止按钮（m2-android.md 3.4：运行中默认插话）。 */
-@Composable
-private fun InputBar(
-    state: ChatState,
-    actions: ChatActions,
-) {
-    var text by rememberSaveable { mutableStateOf("") }
-    var steer by rememberSaveable { mutableStateOf(true) }
-    HorizontalDivider()
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (state.active && state.online) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state.running) {
-                    FilterChip(selected = steer, onClick = { steer = !steer }, label = { Text(stringResource(R.string.chat_mode_steer)) })
-                    Text(
-                        stringResource(R.string.chat_mode_steer_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
-                OutlinedButton(onClick = actions.onCancelRun) {
-                    Icon(painterResource(R.drawable.ic_stop), contentDescription = null)
-                    Text(stringResource(R.string.chat_stop), Modifier.padding(start = 4.dp))
-                }
-            }
-        }
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                enabled = state.canSend,
-                placeholder = {
-                    Text(stringResource(if (state.online) R.string.chat_input_hint else R.string.chat_input_hint_offline))
-                },
-                maxLines = 6,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-            )
-            FilledIconButton(
-                onClick = { if (actions.onSend(text, steer)) text = "" },
-                enabled = state.canSend && text.isNotBlank(),
-            ) {
-                Icon(painterResource(R.drawable.ic_send), contentDescription = stringResource(R.string.chat_send))
-            }
-        }
     }
 }
 
@@ -542,6 +499,7 @@ private fun PickerRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -549,7 +507,11 @@ private fun PickerRow(
             ListItemDefaults.colors(
                 containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
             ),
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier =
+            Modifier.clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                onClick()
+            },
     )
 }
 

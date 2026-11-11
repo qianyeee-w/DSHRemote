@@ -21,6 +21,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okio.BufferedSink
 import java.io.IOException
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -93,6 +94,22 @@ class PluginApi(
     // ---------------------------------------------------------------- 工作区和会话
 
     suspend fun workspaces(): List<Workspace> = get(listOf("workspaces"), WorkspaceList.serializer()).workspaces
+
+    suspend fun directories(path: String? = null): DirectoryListing =
+        get(listOf("directories"), DirectoryListing.serializer(), path?.let { mapOf("path" to it) } ?: emptyMap())
+
+    suspend fun createDirectory(
+        path: String,
+        name: String,
+    ): String {
+        val body = encode(CreateDirectoryRequest.serializer(), CreateDirectoryRequest(path, name)).oneShot()
+        return send("POST", listOf("directories"), body = body) { decode(DirectoryPath.serializer(), it) }.path
+    }
+
+    suspend fun registerWorkspace(path: String): WorkspaceRegistration {
+        val body = encode(DirectoryPath.serializer(), DirectoryPath(path))
+        return send("POST", listOf("workspaces"), body = body) { decode(WorkspaceRegistration.serializer(), it) }
+    }
 
     suspend fun sessions(): List<SessionSummary> = get(listOf("sessions"), SessionList.serializer()).sessions
 
@@ -346,6 +363,20 @@ private data class PairedHost(
     val name: String,
     val pluginVersion: String,
 )
+
+/** 创建目录的回执丢失后交给界面确认，禁止 HTTP 层自行重发已经写出的请求体。 */
+private fun RequestBody.oneShot(): RequestBody {
+    val original = this
+    return object : RequestBody() {
+        override fun contentType() = original.contentType()
+
+        override fun contentLength() = original.contentLength()
+
+        override fun isOneShot() = true
+
+        override fun writeTo(sink: BufferedSink) = original.writeTo(sink)
+    }
+}
 
 /** 在 OkHttp 的线程上执行请求；协程取消时取消请求。 */
 private suspend fun Call.await(): Response =

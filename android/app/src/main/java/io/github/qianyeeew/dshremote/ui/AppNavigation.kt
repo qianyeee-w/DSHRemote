@@ -211,6 +211,9 @@ private fun SessionList(
                     hosts = container.hosts.hosts,
                     states = container.connections.states,
                     creator = PluginSessionCreator { container.connections.api(hostId) },
+                    projectBackend =
+                        io.github.qianyeeew.dshremote.ui.sessions
+                            .PluginProjectBackend { container.connections.api(hostId) },
                 )
             },
         navigation =

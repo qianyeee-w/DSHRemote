@@ -97,6 +97,54 @@ class PluginApiTest {
     // ---------------------------------------------------------------- 配对
 
     @Test
+    fun directoryCreationIsNotAutomaticallyRetriedByHttpClient() =
+        runBlocking<Unit> {
+            server.enqueue(
+                MockResponse
+                    .Builder()
+                    .code(503)
+                    .addHeader("Retry-After", "0")
+                    .body("""{"error":{"code":"DSH_UNAVAILABLE"}}""")
+                    .build(),
+            )
+            respond("""{"path":"/work/new"}""")
+            val error = runCatching { api.createDirectory("/work", "new") }.exceptionOrNull()
+            assertTrue(error is ApiException.Http)
+            assertEquals(503, (error as ApiException.Http).status)
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun projectEndpointsEncodePathsAndUseAuthenticatedRequests() =
+        runBlocking<Unit> {
+            val path = "E:/中文 项目/#a&b"
+            respond("""{"path":"$path","home":"E:/","parent":"E:/中文 项目","entries":[],"truncated":false}""")
+            assertEquals(path, api.directories(path).path)
+            val listing = server.takeRequest()
+            assertEquals("/v1/directories", listing.url.encodedPath)
+            assertEquals(path, listing.url.queryParameter("path"))
+            assertEquals("Bearer $tokenText", listing.headers["Authorization"])
+
+            respond("""{"path":"$path/new"}""")
+            assertEquals("$path/new", api.createDirectory(path, "new"))
+            val create = server.takeRequest()
+            assertEquals("POST", create.method)
+            assertEquals("/v1/directories", create.url.encodedPath)
+            assertEquals("Bearer $tokenText", create.headers["Authorization"])
+            val body = Json.parseToJsonElement(create.body!!.utf8()).jsonObject
+            assertEquals(path, body.getValue("path").jsonPrimitive.content)
+            assertEquals("new", body.getValue("name").jsonPrimitive.content)
+
+            respond("""{"workspace":{"workspaceId":"w1","title":"new","path":"$path/new"},"created":false}""")
+            val registration = api.registerWorkspace("$path/new")
+            assertFalse(registration.created)
+            assertEquals("w1", registration.workspace.workspaceId)
+            val register = server.takeRequest()
+            assertEquals("/v1/workspaces", register.url.encodedPath)
+            assertEquals("Bearer $tokenText", register.headers["Authorization"])
+        }
+
+    @Test
     fun pairSendsRequestAndParsesToken() =
         runBlocking<Unit> {
             respond("""{"deviceId":"d_abc","token":"$tokenText","host":{"name":"MY-PC","pluginVersion":"0.1.0"}}""")

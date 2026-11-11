@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui.attention
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -27,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -38,6 +41,7 @@ import io.github.qianyeeew.dshremote.data.api.Question
 import io.github.qianyeeew.dshremote.data.attention.AnswerForm
 import io.github.qianyeeew.dshremote.data.attention.QuestionDraft
 import io.github.qianyeeew.dshremote.data.attention.QuestionProblem
+import io.github.qianyeeew.dshremote.ui.LocalStatusColors
 import io.github.qianyeeew.dshremote.ui.chat.CodeSection
 import io.github.qianyeeew.dshremote.ui.chat.prettyJson
 
@@ -72,9 +76,10 @@ fun AttentionCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth().testTag("attention-${attention.attentionId}"),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             val approval = attention.approval
             val question = attention.question
             when {
@@ -109,8 +114,15 @@ private fun ApprovalContent(
     ui: AttentionUi,
     actions: AttentionCardActions,
 ) {
-    Text(stringResource(R.string.attention_approval_title), style = MaterialTheme.typography.titleMedium)
-    Text(approval.summary ?: stringResource(R.string.attention_tool, approval.toolName), style = MaterialTheme.typography.bodyLarge)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(painterResource(R.drawable.ic_dsh_shield), null, Modifier.size(16.dp), tint = LocalStatusColors.current.waiting)
+        Text(
+            stringResource(R.string.attention_approval_title),
+            style = MaterialTheme.typography.labelMedium,
+            color = LocalStatusColors.current.waiting,
+        )
+    }
+    Text(approval.summary ?: stringResource(R.string.attention_tool, approval.toolName), style = MaterialTheme.typography.titleSmall)
     if (approval.reason.isNotBlank()) Text(approval.reason, style = MaterialTheme.typography.bodyMedium)
     approval.input?.takeIf { it.isNotEmpty() }?.let { input ->
         var open by rememberSaveable(attention.attentionId) { mutableStateOf(false) }

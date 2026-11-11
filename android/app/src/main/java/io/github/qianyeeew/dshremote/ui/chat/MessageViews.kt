@@ -1,7 +1,13 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
 import android.content.ClipData
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -10,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -19,7 +26,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,13 +39,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeFence
@@ -56,6 +64,8 @@ import io.github.qianyeeew.dshremote.data.api.ToolPart
 import io.github.qianyeeew.dshremote.data.api.ToolStatus
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
+import io.github.qianyeeew.dshremote.ui.CodeFontFamily
+import io.github.qianyeeew.dshremote.ui.LocalStatusColors
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -82,11 +92,11 @@ private fun UserBubble(
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 4.dp),
             modifier = Modifier.widthIn(max = 320.dp).let { if (onClick != null) it.clickable(onClick = onClick) else it },
         ) {
             SelectionContainer {
-                Text(text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge)
+                Text(text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyMedium)
             }
         }
         footer?.invoke()
@@ -164,9 +174,11 @@ private fun CopyButton(
 ) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     TextButton(onClick = {
         scope.launch {
             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("message", text)))
+            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
             onCopied()
         }
     }) {
@@ -211,6 +223,8 @@ fun MarkdownText(text: String) {
             // 库默认的标题用 display 字号，在手机的对话里太大了
             typography =
                 markdownTypography(
+                    text = MaterialTheme.typography.bodyLarge,
+                    code = MaterialTheme.typography.bodySmall.copy(fontFamily = CodeFontFamily, fontSize = 12.5.sp, lineHeight = 22.sp),
                     h1 = MaterialTheme.typography.headlineSmall,
                     h2 = MaterialTheme.typography.titleLarge,
                     h3 = MaterialTheme.typography.titleMedium,
@@ -232,22 +246,32 @@ private fun Collapsible(
     content: @Composable () -> Unit,
 ) {
     var open by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().animateContentSize()) {
+    val rotation by animateFloatAsState(if (open) 180f else 0f, tween(180), label = "thinking-arrow")
+    Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 4.dp),
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable { open = !open }
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
                 painterResource(R.drawable.ic_expand_more),
                 contentDescription = stringResource(R.string.chat_expand),
-                modifier = Modifier.size(18.dp).rotate(if (open) 180f else 0f),
+                modifier = Modifier.size(18.dp).rotate(rotation),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (live) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
         }
-        if (open) {
+        AnimatedVisibility(
+            open,
+            enter = expandVertically(tween(180)) + fadeIn(tween(120)),
+            exit =
+                shrinkVertically(tween(160)) + fadeOut(tween(90)),
+        ) {
             Box(Modifier.padding(start = 24.dp, top = 4.dp)) { content() }
         }
     }
@@ -257,16 +281,21 @@ private fun Collapsible(
 @Composable
 private fun ToolCard(tool: ToolPart) {
     var open by rememberSaveable(tool.callId) { mutableStateOf(false) }
-    OutlinedCard(Modifier.fillMaxWidth().animateContentSize()) {
+    val rotation by animateFloatAsState(if (open) 180f else 0f, tween(180), label = "tool-arrow")
+    Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable { open = !open }
+                .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ToolStatusLabel(tool.status)
             Text(
                 tool.summary.ifBlank { tool.name },
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = if (open) Int.MAX_VALUE else 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -274,10 +303,15 @@ private fun ToolCard(tool: ToolPart) {
             Icon(
                 painterResource(R.drawable.ic_expand_more),
                 contentDescription = stringResource(R.string.chat_expand),
-                modifier = Modifier.size(18.dp).rotate(if (open) 180f else 0f),
+                modifier = Modifier.size(18.dp).rotate(rotation),
             )
         }
-        if (open) {
+        AnimatedVisibility(
+            open,
+            enter = expandVertically(tween(180)) + fadeIn(tween(120)),
+            exit =
+                shrinkVertically(tween(160)) + fadeOut(tween(90)),
+        ) {
             Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (tool.input.isNotEmpty()) CodeSection(stringResource(R.string.chat_tool_input), prettyJson(tool.input))
                 tool.output?.takeIf { it.isNotEmpty() }?.let { CodeSection(stringResource(R.string.chat_tool_output), it) }
@@ -297,7 +331,7 @@ private fun ToolCard(tool: ToolPart) {
 private fun ToolStatusLabel(status: ToolStatus) {
     val (text, color) =
         when (status) {
-            ToolStatus.RUNNING -> stringResource(R.string.chat_tool_running) to MaterialTheme.colorScheme.primary
+            ToolStatus.RUNNING -> stringResource(R.string.chat_tool_running) to LocalStatusColors.current.running
             ToolStatus.DONE -> stringResource(R.string.chat_tool_done) to MaterialTheme.colorScheme.onSurfaceVariant
             ToolStatus.ERROR -> stringResource(R.string.chat_tool_error) to MaterialTheme.colorScheme.error
             ToolStatus.REJECTED -> stringResource(R.string.chat_tool_rejected) to MaterialTheme.colorScheme.error
@@ -318,13 +352,13 @@ internal fun CodeSection(
         SelectionContainer {
             Text(
                 text,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
+                fontFamily = CodeFontFamily,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 22.sp),
                 softWrap = false,
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = CODE_BACKGROUND_ALPHA), RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(8.dp))
                         .horizontalScroll(rememberScrollState())
                         .padding(8.dp),
             )
@@ -335,5 +369,3 @@ internal fun CodeSection(
 private val prettyJson = Json { prettyPrint = true }
 
 internal fun prettyJson(input: JsonObject): String = prettyJson.encodeToString(JsonObject.serializer(), input)
-
-private const val CODE_BACKGROUND_ALPHA = 0.6f

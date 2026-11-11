@@ -40,6 +40,7 @@ beforeEach(async () => {
     return op === 'answerAttention' ? { attentionId: args[1] } : { op }
   }
   const facade = /** @type {import('../../src/server/routes.js').FacadeApi} */ (/** @type {unknown} */ ({
+    directories: op('directories'), createDirectory: op('createDirectory'), registerWorkspace: op('registerWorkspace'),
     workspaces: op('workspaces'), sessions: op('sessions'), models: op('models'), permissionPresets: op('permissionPresets'), messages: op('messages'),
     createSession: op('createSession'), prompt: op('prompt'), cancel: op('cancel'), selectModel: op('selectModel'),
     setPermissionPreset: op('setPermissionPreset'), answerAttention: op('answerAttention'),
@@ -79,6 +80,7 @@ function get(path, options = {}) {
 const post = (path, body, options = {}) => get(path, { ...options, method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) })
 
 const READ_ROUTES = [
+  ['/v1/directories', 'directories'],
   ['/v1/workspaces', 'workspaces'],
   ['/v1/sessions', 'sessions'],
   ['/v1/models', 'models'],
@@ -147,6 +149,8 @@ test('错误映射：DSH 不可用 → 503；外观层错误原样返回；其�
 })
 
 const WRITE_ROUTES = /** @type {const} */ ([
+  ['/v1/directories', 'createDirectory', { path: '/tmp', name: '项目' }, []],
+  ['/v1/workspaces', 'registerWorkspace', { path: '/tmp/项目' }, []],
   ['/v1/sessions', 'createSession', { workspaceId: 'w1' }, []],
   ['/v1/sessions/s1/prompt', 'prompt', { requestId: 'r1', text: '你好', mode: 'queue' }, ['s1']],
   ['/v1/sessions/s1/model', 'selectModel', { provider: 'p', model: 'm' }, ['s1']],
@@ -201,4 +205,14 @@ test('外观层的 409 原样返回', async () => {
   assert.equal(res.status, 409)
   assert.equal(res.json().error.code, 'ATTENTION_RESOLVED')
   assert.equal(env.audit.length, 0)
+})
+
+test('【反向】项目操作：错误或撤销的 token 不能浏览、创建或登记', async () => {
+  for (const token of ['A'.repeat(43), env.token]) {
+    if (token === env.token) await env.devices.revoke(env.deviceId)
+    assert.equal((await get('/v1/directories', { token })).status, 401)
+    assert.equal((await post('/v1/directories', { path: '/tmp', name: 'new' }, { token })).status, 401)
+    assert.equal((await post('/v1/workspaces', { path: '/tmp' }, { token })).status, 401)
+  }
+  assert.equal(env.calls.length, 0)
 })

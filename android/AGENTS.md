@@ -20,6 +20,8 @@ cd android
 ./gradlew connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
                                    # 在已连接、已解锁的真机上跑测试（只在本地跑）：src/sharedTest 的证书校验测试、androidTest 的 Keystore 测试和界面测试。
                                    # 不加这个参数时，跑完会卸载 App，手机上的配对也跟着丢失
+./gradlew connectedDebugAndroidTest -Pdshremote.debugApplicationIdSuffix=.projecttest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
+                                   # 手机已有其他签名的 .debug 包时，用隔离包名测试，不覆盖原 App
 ./gradlew devServerTest            # 对插件的 dev-server 跑集成测试（只在本地跑）：先在 plugin/ 下 npm run dev-server。会重启 dev-server 中的 DSH
 ```
 
@@ -27,6 +29,8 @@ cd android
 
 - lint 把警告也当成错误（`warningsAsErrors`）。关掉的检查写在 `app/build.gradle.kts` 和 `app/lint.xml` 中，每一项都注明了原因；不要为了让构建通过而随手关闭检查。
 - ktlint 的规则在 `android/.editorconfig`（`ktlint_official` 风格，Compose 函数允许大写开头）。
+- JVM 单元测试在运行时使用同版本的 `datastore-core-jvm`，避免 Android 存储后端在 Windows 的 mockable android.jar 中走不支持覆盖文件的 `renameTo`。APK 和真机测试仍使用 Android 后端；不要通过跳过存储测试来处理平台差异。
+- 调试包默认后缀仍为 `.debug`。手机上已有其他签名的调试包时，可通过 `dshremote.debugApplicationIdSuffix` 指定隔离后缀（例如 `.projecttest`），真机测试不会替换原包。
 
 **提交前**：`test`、`lint ktlintCheck`、`assembleDebug` 必须通过；改了 `data/api/` 或之后的实时连接时，还要启动 dev-server 跑 `devServerTest`；改了证书校验（`data/net/`）、界面、Keystore 或前台服务时，还要在真机上跑 `connectedDebugAndroidTest`。
 
@@ -70,6 +74,8 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 ```
 
 ## 约定
+
+创建／导入项目在 `ui/sessions/ProjectFlow.kt`（状态与恢复）和 `ProjectPicker.kt`（目录选择界面）。目录路径由电脑返回，手机不自行拼接 Windows／Linux 路径。创建回执不明时禁止自动重发；已知目录已创建时只重试登记。协议与验收见 `docs/plans/project-create-import.md`。
 
 - **证书校验只能写在一个地方**（`data/net/`），所有网络请求都必须经过它。不允许出现第二个绕过校验的 OkHttpClient；每台主机的客户端都由 `data/net/` 中的工厂创建。HostnameVerifier 的写法见 `docs/security.md`「App 端的证书校验」。
 - 指纹校验必须有单元测试，至少覆盖：指纹正确时通过、指纹错误时拒绝、没有证书时拒绝，以及 TrustManager 和 HostnameVerifier 各自单独都能拦住错误的指纹。

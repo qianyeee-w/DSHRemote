@@ -89,6 +89,9 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | GET | `/v1/me` | 需要 | 当前设备的信息：`{ deviceId, name, platform, createdAt }` |
 | DELETE | `/v1/me` | 需要 | 设备自行取消配对，成功返回 `204`，之后 token 立即失效 |
 | GET | `/v1/workspaces` | 需要 | 工作区列表：`{ workspaces: [{ workspaceId, title, path }] }` |
+| GET | `/v1/directories?path=<绝对路径>` | 需要 | 浏览电脑的一级目录，省略 path 时为用户主目录；见下方「创建／导入项目」 |
+| POST | `/v1/directories` | 需要 | 在已有父目录下创建一个子目录：`{ path, name }` → `{ path }` |
+| POST | `/v1/workspaces` | 需要 | 登记已有目录：`{ path }` → `{ workspace: { workspaceId, title, path }, created }`；重复登记返回已有工作区 |
 | GET | `/v1/sessions` | 需要 | 会话列表：`{ sessions: [...] }`，每项的结构见 5.1。已归档的会话不出现（和 Desktop 一致） |
 | POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
 | GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor }`，消息结构见 5.2。见下方「历史分页」 |
@@ -102,6 +105,15 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | GET | `/v1/stream` | 需要 | WebSocket，所有实时数据都走这一条连接，见第 6 节 |
 
 设备的列表和撤销**只在本机配对页上提供**，不开放给局域网访问。
+
+**创建／导入项目**（用户确认的后续功能，协议 v1 的兼容扩展）
+
+- 浏览返回 `{ path, home, parent, entries: [{ name, path, hidden }], truncated }`。路径由电脑生成；根目录的 `parent` 为 `null`。只返回直接子目录，结果按名称排序，最多 1,000 项，扫描最多 10,000 个条目；达到限制时 `truncated: true`。`hidden` 表示名称以点开头，不代表 Windows 隐藏属性。
+- 使用运行插件的系统账户权限；主目录是起点，不是访问范围限制。支持 Linux 绝对路径和 Windows 完整盘符路径；拒绝 UNC、设备命名空间、相对路径、控制字符。路径最多 4,096 个字符。符号链接／junction 解析为实际目录，实际路径也必须符合规则；失效链接不显示。
+- 新目录名为单个路径段，1–128 个字符；拒绝空白、`.`、`..`、分隔符、控制字符、Windows 保留名称／字符及末尾空格或点。只创建一级，不覆盖同名项、不自动创建父目录。两个 POST 请求体最多 16 KB。
+- 登记调用 DSH 公开 `workspace/create { request: { path } }`，此前检查实际目录存在；只提取上述字段。`created` 表示是否新登记，不表示创建磁盘目录。
+- App 先创建目录，再登记工作区，成功后由用户点击「开始会话」。目录创建成功而登记失败时保留目录，重试只登记同一目录。目录创建响应丢失时提示结果待确认，刷新父目录后由用户选中目录导入；不得自动重发创建或删除目录。登记重试可以返回 `created: false`。
+- 旧插件返回 `404` 时提示升级电脑端插件，原有工作区选择功能仍可使用。全部接口沿用设备认证和 TLS；路径只出现在已认证请求的成功响应中，不进入错误信息和日志。
 
 路径中的 `{id}` 只能由字母、数字、`_`、`-` 组成（最长 128 个字符），否则返回 `404`。
 
@@ -297,6 +309,10 @@ DSH 重启（端口会变）时插件也会重启，连接会断开；DSH 启动
 | `NOT_FOUND` | 404 | 接口不存在（也用于会话或待处理事项不存在） |
 | `METHOD_NOT_ALLOWED` | 405 | 不支持该请求方法，`Allow` 响应头列出支持的方法 |
 | `BAD_REQUEST` | 400 | 请求格式错误，包括缺少字段、字段格式不对、不是合法的 JSON |
+| `DIRECTORY_INVALID` | 400 | 路径或目录名格式不正确、不支持的路径形式 |
+| `DIRECTORY_UNAVAILABLE` | 422 | 目录不存在、不是目录、无权访问或无法读取 |
+| `DIRECTORY_EXISTS` | 409 | 新目录的位置已有文件或目录，不覆盖 |
+| `DIRECTORY_CREATE_FAILED` | 422 | 无法创建目录，例如父目录不可写 |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | `Content-Type` 不是 `application/json` |
 | `PAYLOAD_TOO_LARGE` | 413 | 请求体过大 |
 | `INTERNAL` | 500 | 插件内部错误（不附带细节） |

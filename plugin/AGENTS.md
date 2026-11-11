@@ -103,6 +103,8 @@ plugin/
 
 ## 约定
 
+- 创建／导入项目的有限目录操作在 `src/directories.js`，仅浏览一级目录和创建单个子目录；DSH 工作区登记仍经 `src/dsh/facade.js` 调用公开 `workspace/create`。目录异常必须转换成不含路径的错误，详见 ADR 0013。
+
 - 每个 JS 文件第一行写 `// @ts-check`，用 JSDoc 标注类型。类型检查不通过，不能提交。
 - 运行时依赖只允许 `ws`。其他库要么放进 `src/vendor/` 并保留原许可证声明，要么先写 ADR。开发依赖不受此限制。
 - 使用的 DSH 服务只有 `webServer` 和 `connection`，写在 `inject` 里（单元测试会检查）。不允许访问其他私有字段。

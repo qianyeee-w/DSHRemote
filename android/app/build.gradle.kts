@@ -22,6 +22,7 @@ fun releaseVersionCode(version: String): Int {
 }
 
 val releaseVersion = providers.gradleProperty("dshremote.version").get()
+val debugApplicationIdSuffix = providers.gradleProperty("dshremote.debugApplicationIdSuffix").orElse(".debug").get()
 
 /**
  * release 包的签名（m3-release.md T2）：只从环境变量读取，密钥文件和密码不进仓库。
@@ -31,6 +32,16 @@ val releaseVersion = providers.gradleProperty("dshremote.version").get()
 val releaseSigningEnv = listOf("DSHREMOTE_KEYSTORE", "DSHREMOTE_KEYSTORE_PASSWORD", "DSHREMOTE_KEY_ALIAS")
 val releaseSigning = releaseSigningEnv.associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotBlank) }
 val missingReleaseSigning = releaseSigning.filterValues { it == null }.keys.toList()
+
+// 本地单元测试使用同版本的 JVM 存储后端。Android 后端在 mockable android.jar 中走旧版 renameTo
+// 路径，在 Windows 上不能覆盖目标文件；真机与 APK 仍使用 Android 后端。
+val jvmDataStore = "androidx.datastore:datastore-core-jvm:${libs.versions.datastore.get()}"
+configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("androidx.datastore:datastore-core")).using(module(jvmDataStore))
+        substitute(module("androidx.datastore:datastore-core-android")).using(module(jvmDataStore))
+    }
+}
 
 android {
     namespace = "io.github.qianyeeew.dshremote"
@@ -73,7 +84,8 @@ android {
     buildTypes {
         debug {
             // 和 release 包同时装在手机上，互不覆盖；应用名见 src/debug/res（「DSHRemote 调试」）
-            applicationIdSuffix = ".debug"
+            // 需要保留另一台电脑签名的调试包时，可用 Gradle 属性指定隔离的测试包名。
+            applicationIdSuffix = debugApplicationIdSuffix
             versionNameSuffix = "-debug"
         }
         release {

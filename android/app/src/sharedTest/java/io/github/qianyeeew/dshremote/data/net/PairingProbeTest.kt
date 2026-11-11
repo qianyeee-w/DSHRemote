@@ -75,8 +75,16 @@ class PairingProbeTest {
             val server =
                 CompletableFuture.runAsync {
                     plain.accept().use { socket ->
+                        socket.soTimeout = SERVER_TIMEOUT_MILLIS
+                        socket.getInputStream().read()
                         socket.getOutputStream().write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n".toByteArray())
                         socket.getOutputStream().flush()
+                        // 先半关闭并排空 ClientHello，避免 Windows 因未读数据发送 RST，吞掉已写出的 HTTP 响应。
+                        socket.shutdownOutput()
+                        runCatching {
+                            val buffer = ByteArray(1024)
+                            while (socket.getInputStream().read(buffer) != -1) { /* 等客户端结束探测 */ }
+                        }
                     }
                 }
             assertEquals(PairingProbe.Result.NotTls, PairingProbe().probeBlocking("127.0.0.1", plain.localPort))

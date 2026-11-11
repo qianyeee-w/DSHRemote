@@ -11,13 +11,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.live.OfflineReason
 import io.github.qianyeeew.dshremote.data.live.PairingReason
+import io.github.qianyeeew.dshremote.ui.LocalStatusColors
 
 /** 状态是否需要用户处理（显示为错误色）。 */
 val LinkStatus.needsAttention: Boolean
@@ -85,8 +85,6 @@ fun statusDetail(status: LinkStatus): String =
         is LinkStatus.AppTooOld -> stringResource(R.string.status_detail_app_too_old, status.protocol)
     }
 
-private val OnlineGreen = Color(0xFF2E7D32)
-
 /** 彩色圆点加状态文字。 */
 @Composable
 fun StatusBadge(
@@ -95,19 +93,19 @@ fun StatusBadge(
 ) {
     val color =
         when {
-            status is LinkStatus.Online -> OnlineGreen
+            status is LinkStatus.Online -> LocalStatusColors.current.online
             status.needsAttention -> MaterialTheme.colorScheme.error
             else -> MaterialTheme.colorScheme.outline
         }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(
             Modifier
-                .size(8.dp)
+                .size(6.dp)
                 .background(color, CircleShape),
         )
         Text(
             statusLabel(status),
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = if (status.needsAttention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

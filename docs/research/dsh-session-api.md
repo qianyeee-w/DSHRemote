@@ -190,3 +190,61 @@ PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.m
 ```
 
 这些脚本已经改写成 `plugin/test/contract/` 的契约测试（`npm run contract`），通过插件的适配层逐项验证上面的接口，并额外验证了：拒绝审批（`rejected`）后命令不执行、`session/cancel` 能停下正在输出的回复、同一个启动 token 可以重复登录。以后验证新版本 DSH 时直接运行契约测试即可，见 [roadmap](../roadmap.md)。
+
+## 9. 手机端对齐桌面功能的可行性（2026-11-10）
+
+用户提供了官方 Desktop 的截图：本轮 token 用量、缓存命中、新对话分支、会话性能、上下文占用，以及「已完成／用时」过程折叠。另已明确创建／导入项目优先于完整文件管理和远程终端。
+
+**验证层级**：本节读取的是官方标签 `dsh-v0.2.2-rc.1` 的源码、对应文档及本仓库此前录制的假模型数据，并运行了本地样本读取与现有 `convertRecords` 转换。不涉及真实账户的模型调用，**没有新跑 `session/fork`、`session/projections`、`session/observeProjections` 或 `workspace/create` 的运行时契约测试**；源码存在不等于接口已实测。
+
+### 9.1 公开数据入口与当前缺口
+
+`session/projections` 返回会话的公开统计与状态投影，`session/observeProjections` 提供更新流；`session/list` 的摘要只包含允许进入摘要的投影，不能假定含有全部统计。
+
+基线源码：[Session Remote 控制器](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/session-controller/src/index.ts)、[请求与返回类型](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/session-controller/src/types.ts)。
+
+目前插件的 `facade.js` 只提取 v1 的会话摘要字段，`transcript.js` 只生成文本、思考和工具等消息部件。统计、轮次边界与分支操作尚未进入 App 的外观协议。以后应在适配层提取允许的统计字段，先扩展 `protocol.md` 再实现；不能向手机原样透传请求标头、系统提示词、工具定义或全部 DSH 投影。
+
+### 9.2 token 用量与缓存命中：可做
+
+- 会话累计用量已有 `tokenUsage`，含 `uncachedInputTokens`、`outputTokens`、`cacheReadTokens`、`cacheWriteTokens`。本仓库 `session-list.json` 的非空会话样本实际含有四项，分别为 80、88、0、0；缓存为零来自假模型，不能据此声称已验证真实模型的非零缓存命中。
+- 官方界面会话缓存命中率的分母是未缓存输入、缓存读取和缓存写入之和；分子为缓存读取。输出 token 不进入分母；分母为零时不显示百分比。整段会话的比例应从合计 token 算，不能平均每轮百分比。
+- 每轮详细用量由 `deriveTurnTokenUsage(events)` 从完整轮次的模型尝试计算。最终消息的用量替换同一次尝试的流式样本，重试是另一次尝试；不能把这些样本简单累加。某项缓存／模型信息未被所有尝试报告时，该可选项可能不存在；不能强行显示为 0。
+- 现有历史分页按消息切页，不保证完整轮次。要展示「本轮用量」须补齐相应事件范围，或由插件提供单独的轮次摘要；数据不全时不能展示一个伪装成完整值的小计。
+- 累计用量、本轮用量与当前上下文占用是不同的指标。分支继承历史后的累计统计口径也要与官方对齐，不能自动解释为分支创建后新增的费用。
+
+基线依据：[token-meter 文档](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/llm/token-meter/README.zh.md)、[逐轮用量](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/llm/token-meter/src/turn-usage.ts)、[会话统计界面及缓存比例](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/client/ui-chat/src/client/chat/StatsPills.tsx)、[本轮用量界面](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/client/ui-chat/src/client/chat/TurnUsagePanel.tsx)。
+
+### 9.3 会话性能与上下文占用：可做，但需标明数据含义
+
+- `sessionStats` 提供轮数、步数、模型／工具耗时、`ttftMs`、`ttftSteps`、`decodeMs`、`decodeTokens`。平均 TTFT 为 `ttftMs / ttftSteps`，TPS 为 `decodeTokens / (decodeMs / 1000)`，仅在分母有效时显示。应使用电脑端记录的计时，不用手机收到流式块的时间计算模型速度。
+- `sessionStats` 依赖 DSH 中相应组件；未提供时应显示不可用，或明确标注仅统计已加载窗口，不能把最近一页冒充全会话。
+- `contextPressure` 提供 `pressureTokens`、`projectedTokens` 和 `contextWindow`，`contextBreakdown` 提供系统、工具、消息的估算构成。这两项不进入 `session/list` 摘要，需按会话读取。
+- 当前上下文规模优先使用估算下次请求的 `projectedTokens`；构成数字是另一种启发式估算，不保证加起来等于占用值。展示需保留「约／~」；模型切换后容量与最近用量可能暂时属于不同请求，不应呈现为精确计费数据。
+
+基线依据：[session-stats 文档](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/session/session-stats/README.md)、[上下文投影定义](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/llm/token-meter/src/projection.ts)、[上下文界面](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/client/ui-conversation/src/client/skeleton/ContextMeter.tsx)。
+
+### 9.4 新对话分支：公开接口已存在，难点是边界与恢复
+
+- `session/fork` 接受 `{ request: { sessionId, atSeq?, allowMigration? } }`，返回新 `sessionId`。`atSeq` 是包含该条事件的精确整数序号；省略时取最近已完成轮次的前缀。应以当前源码为准，不使用早期设计笔记中「向后寻找 turn/end」的旧语义。
+- 官方回复尾部按钮使用已掌握的 `turn/end` 序号。当前 DSHRemote 消息只保留消息 id、角色、内容和时间，没有可靠的轮次结束锚点；不能把消息 id 或分页游标直接当成分支位置。
+- 建议首先支持从已完成轮次分支，再评估任意事件位置。空会话、尚未完成的输出、分页缺失边界、源会话迁移和创建请求回执丢失都需要测试。
+- Host 将子会话附加到源工作区；存在「子会话已创建，但附加工作区失败」的部分成功状态，返回错误中包含子会话 id。客户端不能盲目重试并生成多个子会话。
+- 子会话沿用源工作目录，复制的是对话历史；不会为它新建 Git 分支／worktree，也不会撤销电脑上已经发生的文件修改。
+
+基线依据：[分支请求类型](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/session-controller/src/types.ts)、[分支执行逻辑](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/session-controller/src/commands.ts)、[回复尾部按钮](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx)。
+
+### 9.5 思考与整轮过程折叠：前者已实现，后者需要补充轮次模型
+
+- Android `ui/chat/MessageViews.kt` 已把 `ThinkingPart` 放进默认关闭的 `Collapsible`，工具卡片也默认折叠。运行现有转换器处理 `session-page-full.json`，得到 1 个思考部件；没有模型提供的思考内容时不应制造内容。
+- 截图中的「已完成，用时 1 秒」是整轮过程的状态／耗时与折叠入口，与单条思考块折叠不同。官方按轮次分组并保留回复，DSHRemote 目前没有对应轮次数据结构。
+- 数据来源已存在：该历史样本包含 6 个 `turn/start` 和 6 个 `turn/end`。后续可在适配层输出轮次 id、起止时间、结束原因及消息归属，App 再处理整轮折叠；运行中、失败、等待审批与历史分页不能被错误折叠为「已完成」。
+- 这组轮次数据也能供准确结束状态、本轮用量和分支锚点共用，应一起设计协议，避免每项功能单独猜测边界。
+
+基线依据：[官方过程折叠说明](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/client/ui-chat/README.md#turn-process-folding)。
+
+### 9.6 创建／导入项目的补充依据
+
+补充：基线 `directoryPicker/list` 和 `directoryPicker/createDirectory` 已有公开入口，但要求 browse 后端；native 后端返回 `directory-picker/unavailable`。因此本项目采用 ADR 0013，由插件提供有限的本机目录操作，登记仍走 `workspace/create`。接口来源：[目录选择控制器](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/workspace-controller/src/directory-picker.ts)。现有契约测试曾间接调用 `workspace/create` 验证会话归属，本次进一步覆盖外观层登记、重复路径和创建后恢复；最终运行结果见创建／导入项目计划。
+
+基线已有公开 `workspace/create`，用于把**已有目录**注册为工作区，重复路径可幂等解析。它不等于创建磁盘目录，也不能直接把电脑原生目录选择窗口作为手机上的目录选择器。手机目录选择和路径边界已在 ADR 0013、protocol.md 中补充约定。来源：[Workspace Remote 控制器](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/workspace-controller/src/index.ts)。

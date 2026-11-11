@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui.hosts
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.host.HostRepository
+import io.github.qianyeeew.dshremote.ui.CodeFontFamily
 import io.github.qianyeeew.dshremote.ui.common.BackTopBar
 import io.github.qianyeeew.dshremote.ui.common.FingerprintText
 import io.github.qianyeeew.dshremote.ui.common.MessageDialog
@@ -125,7 +128,7 @@ fun HostDetailContent(
                 host.addresses.forEachIndexed { index, address ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(address.toString(), style = MaterialTheme.typography.bodyLarge)
+                            Text(address.toString(), fontFamily = CodeFontFamily, style = MaterialTheme.typography.bodySmall)
                             if (address == host.lastGoodAddress) {
                                 Text(
                                     stringResource(R.string.host_address_last_good),
@@ -265,7 +268,11 @@ fun StatusCard(
     onRepair: () -> Unit,
 ) {
     val status = detail.status
-    Card(Modifier.fillMaxWidth().testTag("status-card")) {
+    Card(
+        Modifier.fillMaxWidth().testTag("status-card"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             StatusBadge(status)
             Text(statusDetail(status), style = MaterialTheme.typography.bodyMedium)

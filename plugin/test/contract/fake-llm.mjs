@@ -52,6 +52,14 @@ fun main() {
 最后一段：以上内容都应该能长按选中和复制。
 `
 export const SHELL_MARKER_FILE = 'contract-output.txt'
+/**
+ * DSH 每轮追加在用户消息后面的上下文（DSH 0.2.2-rc.1 实测的开头）。
+ * @param {string} text
+ */
+function isInjectedContext(text) {
+  return text.startsWith('Current runtime context.') || text.startsWith('Time sampled while preparing turn')
+}
+
 /** FAIL 关键词让假模型返回的错误说明 */
 export const FAIL_MESSAGE = 'fake failure for DSHRemote tests'
 
@@ -150,9 +158,12 @@ export async function startFakeLlm() {
       }
       const text = JSON.stringify(messages.findLast((m) => m.role === 'user')?.content ?? '')
       lastUserText = text.slice(0, 300)
-      // 只看最后一段文字：上一轮没有完整回复（被停止、失败）时，DSH 会把两条用户消息合在一起发过来
+      // 只看用户自己的最后一段文字：上一轮没有完整回复（被停止、失败）时，DSH 会把两条用户消息合在一起发过来；
+      // 每轮还会在后面追加运行时上下文、时间上下文（会话的第一轮两段都有）
       const userBlocks = messages.findLast((m) => m.role === 'user')?.content
-      const lastText = Array.isArray(userBlocks) ? String(userBlocks.findLast((/** @type {any} */ b) => b?.type === 'text')?.text ?? '') : String(userBlocks ?? '')
+      const lastText = Array.isArray(userBlocks)
+        ? String(userBlocks.findLast((/** @type {any} */ b) => b?.type === 'text' && !isInjectedContext(String(b.text ?? '')))?.text ?? '')
+        : String(userBlocks ?? '')
       if (lastText.includes('FAIL')) {
         // 不可重试的错误（DSH 归为 INVALID_REQUEST）：这一轮以 error 结束（protocol.md 5.4 的 failed）
         res.writeHead(400, { 'content-type': 'application/json' })

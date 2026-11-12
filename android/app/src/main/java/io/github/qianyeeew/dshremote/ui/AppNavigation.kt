@@ -3,6 +3,7 @@ package io.github.qianyeeew.dshremote.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -25,15 +26,18 @@ import io.github.qianyeeew.dshremote.ui.hosts.HostDetailScreen
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailViewModel
 import io.github.qianyeeew.dshremote.ui.hosts.HostListContent
 import io.github.qianyeeew.dshremote.ui.hosts.HostListViewModel
+import io.github.qianyeeew.dshremote.ui.hosts.HostRow
 import io.github.qianyeeew.dshremote.ui.pairing.PairingScreen
 import io.github.qianyeeew.dshremote.ui.pairing.PairingViewModel
 import io.github.qianyeeew.dshremote.ui.sessions.PluginSessionCreator
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListNavigation
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListScreen
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListViewModel
+import io.github.qianyeeew.dshremote.ui.sessions.homeHost
 import io.github.qianyeeew.dshremote.ui.settings.BackgroundHint
 import io.github.qianyeeew.dshremote.ui.settings.SettingsScreen
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 /*
@@ -111,9 +115,21 @@ fun AppNavigation(
         composable<HomeRoute> {
             val hosts = viewModel { HostListViewModel(container.hosts.hosts, container.connections.states) }
             val rows by hosts.rows.collectAsStateWithLifecycle()
-            val only = rows?.singleOrNull()
-            if (only != null) {
-                SessionList(container, nav, only.hostId, home = true, hint = hint)
+            val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+            val scope = rememberCoroutineScope()
+            // 配对了多台电脑时直接显示上次用的那台，从左上角切换（用户确认）
+            val hostId = rows?.let { list -> settings?.let { homeHost(list.map(HostRow::hostId), it.lastHostId) } }
+            if (rows != null && settings == null) return@composable
+            if (hostId != null) {
+                SessionList(
+                    container,
+                    nav,
+                    hostId,
+                    home = true,
+                    hint = hint,
+                    hosts = rows.orEmpty(),
+                    onSwitchHost = { scope.launch { container.settings.setLastHost(it) } },
+                )
             } else {
                 HostListContent(
                     rows = rows,
@@ -213,6 +229,8 @@ private fun SessionList(
     hostId: String,
     home: Boolean,
     hint: (@Composable () -> Unit)? = null,
+    hosts: List<HostRow> = emptyList(),
+    onSwitchHost: (String) -> Unit = {},
 ) {
     SessionListScreen(
         // 首页上的会话列表跟着唯一的主机变化，所以按 hostId 区分 ViewModel
@@ -226,6 +244,10 @@ private fun SessionList(
                     projectBackend =
                         io.github.qianyeeew.dshremote.ui.sessions
                             .PluginProjectBackend { container.connections.api(hostId) },
+                    responder = LiveAttentionResponder(container.connections, hostId),
+                    resolvedEvents = container.connections.resolvedEvents(hostId),
+                    projectFilter = container.settings.projectFilter(hostId),
+                    saveProjectFilter = { container.settings.setProjectFilter(hostId, it) },
                 )
             },
         navigation =
@@ -239,6 +261,8 @@ private fun SessionList(
                 onRetry = { container.connections.retry(hostId) },
                 onOpenSettings = { nav.navigate(SettingsRoute) },
                 hint = hint,
+                hosts = hosts,
+                onSwitchHost = onSwitchHost,
             ),
     )
 }

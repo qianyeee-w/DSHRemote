@@ -128,16 +128,19 @@
     <string name="action_more">更多</string>
     <string name="time_just_now">刚刚</string>
     <string name="menu_manage_host">管理这台电脑</string>
-    <string name="sessions_new">新建会话</string>
+    <string name="home_new_task">新任务</string>
+    <string name="home_all_projects">全部项目</string>
+    <string name="home_running">运行中</string>
+    <string name="home_waiting">等你处理</string>
+    <string name="home_other_answer">其他</string>
+    <string name="home_wants_run">想运行</string>
+    <string name="home_wants_edit">想修改</string>
+    <string name="home_switch_host">切换电脑</string>
+    <string name="home_current_host">正在使用</string>
     <string name="sessions_empty_title">还没有会话</string>
     <string name="sessions_empty_body">点「新建会话」开始。在电脑上的 DeepSeek Harness 中新建的会话也会出现在这里。</string>
     <string name="sessions_untitled">新会话</string>
     <string name="sessions_stale">不在线，下面是上次连接时的内容。</string>
-    <string name="session_status_waiting">等待你处理</string>
-    <string name="session_status_waiting_count">等待你处理（%1$d）</string>
-    <string name="session_status_running">运行中</string>
-    <string name="session_status_idle">空闲</string>
-    <string name="session_status_unknown">状态未知</string>
 
     <!-- 新建会话 -->
     <string name="new_session_title">新建会话</string>
@@ -240,7 +243,6 @@
     <string name="attention_not_found">没有找到这一项，可能已经处理完了。</string>
     <string name="attention_waiting_connection">连上电脑后显示这一项。</string>
     <string name="attention_open_session">打开会话</string>
-    <string name="sessions_other_attention">其他待处理事项（例如子代理发起的）</string>
 
     <!-- 通知 -->
     <string name="channel_attention">需要你处理</string>

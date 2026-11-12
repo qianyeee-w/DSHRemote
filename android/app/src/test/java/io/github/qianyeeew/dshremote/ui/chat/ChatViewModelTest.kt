@@ -129,6 +129,8 @@ class ChatViewModelTest {
         val vm = viewModel()
         vm.onVisible()
         assertFalse("还没读到历史", vm.send("hi"))
+        // 重新读取时要有一页历史；没有时假后端会抛出测试框架之外的异常，算到后面的测试头上
+        backend.pages[null] = MessagePage(emptyList(), hasMore = false, cursor = null)
         backend.push(SessionEvent.Resync(SESSION))
         states.value = mapOf("h1" to HostLiveState(LinkStatus.Connecting))
         assertFalse("不在线", vm.send("hi"))

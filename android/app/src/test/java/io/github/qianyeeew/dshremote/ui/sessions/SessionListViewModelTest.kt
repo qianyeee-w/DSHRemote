@@ -1,6 +1,8 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
 import io.github.qianyeeew.dshremote.data.api.ApiException
+import io.github.qianyeeew.dshremote.data.api.Approval
+import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.AttentionRef
 import io.github.qianyeeew.dshremote.data.api.ErrorCode
@@ -188,13 +190,40 @@ class SessionListViewModelTest {
         assertEquals(emptyList<String>(), otherAttention(null).map { it.attentionId })
     }
 
+    /** 卡片里直接处理：拿到会话最早的事项；在这台手机上允许之后，这个事项马上从卡片里去掉，不等插件推送。 */
     @Test
-    fun pathsAreShortenedToLastTwoLevels() {
-        assertEquals("work/app", shortPath("/home/me/work/app/"))
-        assertEquals("Projects/app", shortPath("C:\\Users\\me\\Projects\\app"))
-        assertEquals("/srv", shortPath("/srv"))
-        assertEquals("/home/me", shortPath("/home/me"))
-    }
+    fun cardAttentionIsAnsweredInPlaceAndDroppedOnceDone() =
+        runBlocking<Unit> {
+            val answers = mutableListOf<String>()
+            val vm =
+                SessionListViewModel(
+                    "h1",
+                    hosts,
+                    states,
+                    creator,
+                    PluginProjectBackend { null },
+                    responder = { id, _ -> answers += id },
+                )
+            val shell = Attention("a1", "w", AttentionKind.APPROVAL, approval = Approval("bash", "r"), createdAt = 0)
+            states.value =
+                mapOf(
+                    "h1" to
+                        HostLiveState(
+                            LinkStatus.Online(address),
+                            sessions = mapOf("w" to session("w", SessionStatus.WAITING, 1)),
+                            attention = mapOf("a1" to shell),
+                        ),
+                )
+            val state = withTimeout(5_000) { vm.state.first { it?.sections?.active?.isNotEmpty() == true } }!!
+            assertEquals(ActiveItem.Waiting(session("w", SessionStatus.WAITING, 1), shell), state.sections.active.single())
+            vm.attention.decide(shell, allow = true)
+            val after =
+                withTimeout(
+                    5_000,
+                ) { vm.state.first { (it?.sections?.active?.single() as? ActiveItem.Waiting)?.attention == null } }!!
+            assertEquals(listOf("a1"), answers)
+            assertEquals("h1", after.hostId)
+        }
 
     private fun viewModel() = SessionListViewModel("h1", hosts, states, creator, PluginProjectBackend { null })
 

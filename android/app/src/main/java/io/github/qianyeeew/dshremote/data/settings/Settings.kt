@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -18,6 +19,8 @@ data class Settings(
     val notificationPermissionAsked: Boolean = false,
     /** 用户关掉了首页上「后台运行」的提示。 */
     val backgroundHintDismissed: Boolean = false,
+    /** 上次在首页用的电脑（App 本地的 hostId）。配对了多台电脑时首页直接显示它。 */
+    val lastHostId: String? = null,
 )
 
 class SettingsRepository internal constructor(
@@ -29,8 +32,23 @@ class SettingsRepository internal constructor(
                 notificationsEnabled = p[NOTIFICATIONS] ?: true,
                 notificationPermissionAsked = p[PERMISSION_ASKED] ?: false,
                 backgroundHintDismissed = p[HINT_DISMISSED] ?: false,
+                lastHostId = p[LAST_HOST],
             )
         }
+
+    /** 首页最近列表的项目筛选（每台电脑各自记，null 是全部项目）。 */
+    fun projectFilter(hostId: String): Flow<String?> = store.data.map { it[filterKey(hostId)] }
+
+    suspend fun setProjectFilter(
+        hostId: String,
+        filter: String?,
+    ) {
+        store.edit { if (filter == null) it.remove(filterKey(hostId)) else it[filterKey(hostId)] = filter }
+    }
+
+    suspend fun setLastHost(hostId: String) {
+        store.edit { it[LAST_HOST] = hostId }
+    }
 
     suspend fun setNotificationsEnabled(enabled: Boolean) = set(NOTIFICATIONS, enabled)
 
@@ -49,6 +67,9 @@ class SettingsRepository internal constructor(
         private val NOTIFICATIONS = booleanPreferencesKey("notifications_enabled")
         private val PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
         private val HINT_DISMISSED = booleanPreferencesKey("background_hint_dismissed")
+        private val LAST_HOST = stringPreferencesKey("last_host_id")
+
+        private fun filterKey(hostId: String) = stringPreferencesKey("project_filter:$hostId")
 
         /** 每个进程只调用一次（DataStore 的要求）。 */
         fun create(context: Context): SettingsRepository =

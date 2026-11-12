@@ -1,5 +1,7 @@
 package io.github.qianyeeew.dshremote.ui.hosts
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import io.github.qianyeeew.dshremote.data.host.Host
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.host.HostRepository
@@ -13,8 +15,9 @@ import io.github.qianyeeew.dshremote.ui.FakePairer.Companion.host
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -48,10 +51,20 @@ class HostViewModelsTest {
     @Before
     fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
 
+    /** 测试里建的视图模型。收尾时先取消它们和 [scope]，再复位 Main：主机列表来自 IO 线程上的 DataStore，
+     * 复位之后还收到数据会访问已经不存在的 Main，异常会算到后面的测试头上。 */
+    private val viewModels = mutableListOf<ViewModel>()
+
+    private fun <T : ViewModel> track(vm: T): T = vm.also { viewModels += it }
+
     @After
     fun tearDown() {
+        // 取消是异步完成的：IO 上的子协程结束后还要回到 Main 收尾，所以等它们真正结束再复位
+        runBlocking {
+            viewModels.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+            scope.coroutineContext[Job]?.cancelAndJoin()
+        }
         Dispatchers.resetMain()
-        scope.cancel()
     }
 
     @Test
@@ -73,7 +86,7 @@ class HostViewModelsTest {
                     // 连接还在运行中也以「凭据丢失」为准
                     "h3" to HostLiveState(LinkStatus.Connecting),
                 )
-            val vm = HostListViewModel(hosts, states)
+            val vm = track(HostListViewModel(hosts, states))
             val rows = withTimeout(5_000) { vm.rows.first { it != null } }!!
             assertEquals(listOf("h1", "h2", "h3", "h4"), rows.map { it.hostId })
             assertEquals(HostRow("h1", "在线的", b, LinkStatus.Online(b)), rows[0])
@@ -166,7 +179,7 @@ class HostViewModelsTest {
     private suspend fun detail(retry: (String) -> Unit = {}): Triple<HostRepository, HostDetailViewModel, String> {
         val repo = testHostRepository(File(temp.root, "hosts.json"), scope)
         val added = repo.add("MY-PC", a, "d_1", host().credentials!!)
-        val vm = HostDetailViewModel(added.hostId, repo.hosts, states, repo, pairer, retry)
+        val vm = track(HostDetailViewModel(added.hostId, repo.hosts, states, repo, pairer, retry))
         withTimeout(5_000) { vm.detail.first { it != null } }
         return Triple(repo, vm, added.hostId)
     }

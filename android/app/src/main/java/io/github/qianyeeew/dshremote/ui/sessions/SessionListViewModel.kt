@@ -13,7 +13,12 @@ import io.github.qianyeeew.dshremote.data.api.isTokenInvalid
 import io.github.qianyeeew.dshremote.data.host.Host
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
+import io.github.qianyeeew.dshremote.data.live.LiveEvent
 import io.github.qianyeeew.dshremote.data.live.OfflineException
+import io.github.qianyeeew.dshremote.ui.attention.AttentionHandler
+import io.github.qianyeeew.dshremote.ui.attention.AttentionResponder
+import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
+import io.github.qianyeeew.dshremote.ui.chat.pendingAttention
 import io.github.qianyeeew.dshremote.ui.hosts.statusOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +26,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -34,6 +41,14 @@ data class SessionListState(
     val clockOffsetMillis: Long = 0,
     /** 不属于列表中任何会话的待处理事项（例如子代理发起的），在列表上方单独显示。 */
     val otherAttention: List<Attention> = emptyList(),
+    /** 首页的两段（设计规格 7.1）。默认按 [sessions] 和 [otherAttention] 算，不带项目名和事项。 */
+    val sections: HomeSections = homeSections(sessions, otherAttention, emptyList(), null) { null },
+    /** 已登记的项目，用来显示项目名。 */
+    val workspaces: List<Workspace> = emptyList(),
+    /** 卡片里处理事项的状态（提交中、失败）。 */
+    val attentionUi: Map<String, AttentionUi> = emptyMap(),
+    /** 这台电脑的 id（App 本地的），菜单里标出当前电脑用。 */
+    val hostId: String = "",
 )
 
 /** 新建会话的进度。 */
@@ -100,8 +115,23 @@ class SessionListViewModel(
     states: Flow<Map<String, HostLiveState>>,
     private val creator: SessionCreator,
     projectBackend: ProjectBackend,
+    responder: AttentionResponder = AttentionResponder { _, _ -> throw OfflineException() },
+    resolvedEvents: Flow<LiveEvent.AttentionResolved> = emptyFlow(),
+    /** 最近列表的项目筛选（存在本地设置里，见 [io.github.qianyeeew.dshremote.data.settings.SettingsRepository.projectFilter]）。 */
+    projectFilter: Flow<String?> = flowOf(null),
+    private val saveProjectFilter: suspend (String?) -> Unit = {},
 ) : ViewModel() {
     val projects = ProjectFlow(viewModelScope, projectBackend)
+
+    /** 卡片里直接处理审批和提问，和会话页同一套提交逻辑（设计规格 7.1）。 */
+    val attention = AttentionHandler(viewModelScope, responder, resolvedEvents)
+
+    /** 已登记的项目（显示项目名）。页面可见时刷新。 */
+    val catalog = WorkspaceCatalog(viewModelScope, creator)
+
+    fun chooseProjectFilter(filter: String?) {
+        viewModelScope.launch { saveProjectFilter(filter) }
+    }
 
     fun startProjectSession(workspace: Workspace) {
         if (projects.state.value?.workspace != workspace) return
@@ -112,15 +142,26 @@ class SessionListViewModel(
 
     /** null 表示还在读取，或者主机已经不存在。 */
     val state: StateFlow<SessionListState?> =
-        combine(hosts, states) { list, live ->
+        combine(hosts, states, catalog.state, projectFilter, attention.ui) { list, live, workspaces, filter, attentionUi ->
             val host = list.firstOrNull { it.hostId == hostId } ?: return@combine null
             val hostState = live[hostId]
+            val sessions = hostState?.sessions?.values.orEmpty()
+            // 在这台手机上已经处理完的事项马上从卡片里去掉，不等插件推送
+            val done = { a: Attention -> attentionUi[a.attentionId]?.resolution != null }
+            val others = otherAttention(hostState).filterNot(done)
             SessionListState(
                 hostName = host.name,
                 status = statusOf(host, hostState),
-                sessions = sortSessions(hostState?.sessions?.values.orEmpty()),
+                sessions = sortSessions(sessions),
                 clockOffsetMillis = hostState?.clockOffsetMillis ?: 0,
-                otherAttention = otherAttention(hostState),
+                otherAttention = others,
+                sections =
+                    homeSections(sessions, others, workspaces.workspaces, filter) { session ->
+                        pendingAttention(hostState, session, session.sessionId).firstOrNull { !done(it) }
+                    },
+                workspaces = workspaces.workspaces,
+                attentionUi = attentionUi,
+                hostId = hostId,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
 
@@ -197,4 +238,12 @@ private fun rank(status: SessionStatus): Int =
         SessionStatus.RUNNING -> 1
         SessionStatus.IDLE -> 2
         SessionStatus.UNKNOWN -> 3
+    }
+
+/** 卡片里这一行对应的事项（运行中的会话没有）。 */
+internal fun attentionIdOf(item: ActiveItem): String? =
+    when (item) {
+        is ActiveItem.Waiting -> item.attention?.attentionId
+        is ActiveItem.Orphan -> item.attention.attentionId
+        is ActiveItem.Running -> null
     }

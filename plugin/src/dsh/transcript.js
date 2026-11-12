@@ -19,6 +19,10 @@ export const TOOL_INPUT_STRING_LIMIT = 2_000
 export const TOOL_OUTPUT_LIMIT = 8_000
 /** 工具摘要的上限（字符） */
 const SUMMARY_LIMIT = 120
+/** 失败原因的上限（字符） */
+export const TURN_ERROR_LIMIT = 200
+/** 会话摘要里「最后一句回复」的上限（字符） */
+export const LAST_REPLY_LIMIT = 120
 
 /**
  * @typedef {{ type: 'text', text: string }
@@ -44,6 +48,18 @@ const SUMMARY_LIMIT = 120
  * @property {'user' | 'assistant'} role
  * @property {MessagePart[]} parts
  * @property {number} createdAt
+ * @property {number} [turn] 属于第几轮（protocol.md 5.2）；无法确定时没有
+ */
+
+/**
+ * 一轮（protocol.md 5.4）。还在运行的轮次没有 endedAt 和 result。
+ * @typedef {object} Turn
+ * @property {number} turn
+ * @property {number} [startedAt]
+ * @property {number} [endedAt]
+ * @property {'completed' | 'stopped' | 'failed' | 'interrupted' | 'other'} [result]
+ * @property {string} [error]
+ * @property {'user' | 'other'} [stoppedBy]
  */
 
 /**
@@ -170,9 +186,10 @@ function userParts(content) {
  * 同一段日志里，tool/result 和 approval/decided 会更新前面 tool 部件的状态。
  * 工具调用没有结果、而本轮已经结束（例如被用户停止）时，状态记为 error。
  * @param {readonly unknown[]} records
+ * @param {number} [startTurn] 这段日志开始之前最近一个带 turn 的事件所在的轮次（这段日志里推断不出时用它）
  * @returns {Message[]}
  */
-export function convertRecords(records) {
+export function convertRecords(records, startTurn) {
   /** @type {Message[]} */
   const messages = []
   /** @type {Map<string, ToolPart>} 本段日志中还没有结果的工具调用 */
@@ -181,6 +198,8 @@ export function convertRecords(records) {
   const approvalCalls = new Map()
   /** @type {Set<string>} 审批被拒绝的 callId */
   const rejectedCalls = new Set()
+  /** 当前所在的轮次。一页开头的消息所属的轮次由这一页第一个轮次事件推断 */
+  let currentTurn = leadingTurn(records) ?? startTurn
 
   for (const record of records) {
     if (!isObject(record) || record.type !== 'event' || !isObject(record.event)) continue
@@ -188,6 +207,8 @@ export function convertRecords(records) {
     const data = event.data
     if (!isObject(data)) continue
     const time = typeof event.time === 'number' ? event.time : 0
+    // 用户消息不带 turn：跟着它前面最近一个带 turn 的事件（同一轮的 turn/start、step/start）
+    currentTurn = turnOf(record) ?? currentTurn
 
     switch (event.type) {
       case 'user/message': {
@@ -195,9 +216,10 @@ export function convertRecords(records) {
         if (!isObject(data.source) || data.source.kind !== 'user') break
         if (event.surfaceOp !== undefined && event.surfaceOp !== 'append') break
         const parts = userParts(data.content)
-        if (typeof data.id === 'string' && parts.length > 0) messages.push({ id: data.id, role: 'user', parts, createdAt: time })
+        if (typeof data.id === 'string' && parts.length > 0) messages.push(withTurn({ id: data.id, role: 'user', parts, createdAt: time }, currentTurn))
         break
       }
+
       case 'assistant/message': {
         const message = data.message
         if (!isObject(message) || typeof message.id !== 'string' || !Array.isArray(message.content)) break
@@ -216,7 +238,7 @@ export function convertRecords(records) {
             pendingTools.set(block.id, part)
           }
         }
-        if (parts.length > 0) messages.push({ id: message.id, role: 'assistant', parts, createdAt: time })
+        if (parts.length > 0) messages.push(withTurn({ id: message.id, role: 'assistant', parts, createdAt: time }, isTurnNumber(data.turn) ? data.turn : currentTurn))
         break
       }
       case 'approval/asked':
@@ -252,6 +274,126 @@ export function convertRecords(records) {
   return messages
 }
 
+/** @param {unknown} value @returns {value is number} */
+const isTurnNumber = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+
+/** @param {Message} message @param {number | undefined} turn @returns {Message} */
+const withTurn = (message, turn) => (turn === undefined ? message : { ...message, turn })
+
+/**
+ * 一页开头的消息属于哪一轮。DSH 的大多数事件（step/start、tool/call、assistant/message、turn/end……）都带 turn，
+ * 只有 user/message 不带：按这一页第一个带 turn 的事件推断，它是 turn/start N 时是第 N-1 轮，其他事件就是第 N 轮。
+ * 一个都没有时无法确定。
+ * @param {readonly unknown[]} records
+ * @returns {number | undefined}
+ */
+function leadingTurn(records) {
+  for (const record of records) {
+    const turn = turnOf(record)
+    if (turn === undefined) continue
+    if (isObject(record) && isObject(record.event) && record.event.type === 'turn/start') return turn > 1 ? turn - 1 : undefined
+    return turn
+  }
+  return undefined
+}
+
+/**
+ * 一段日志里最后一个带 turn 的事件所在的轮次。用来补上下一页开头的消息所属的轮次：
+ * 那一页以用户消息开头、里面又没有任何带 turn 的事件时，只能从更早的日志里得知。
+ * @param {readonly unknown[]} records
+ * @returns {number | undefined}
+ */
+export function turnBefore(records) {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const turn = turnOf(records[i])
+    if (turn !== undefined) return turn
+  }
+  return undefined
+}
+
+/** 事件自带的轮次。 @param {unknown} record @returns {number | undefined} */
+function turnOf(record) {
+  if (!isObject(record) || !isObject(record.event) || !isObject(record.event.data)) return undefined
+  const turn = record.event.data.turn
+  return isTurnNumber(turn) ? turn : undefined
+}
+
+/**
+ * DSH 的 turn/end 结束原因 → protocol.md 5.4 的 result。DSH 0.2.2 的原因见
+ * dsh-session 的 TurnEndReasonMap；它允许插件扩展，不认识的一律是 other。
+ * @param {unknown} reason
+ * @returns {Pick<Turn, 'result' | 'error' | 'stoppedBy'>}
+ */
+export function turnResult(reason) {
+  const kind = isObject(reason) ? reason.kind : undefined
+  switch (kind) {
+    case 'completed':
+    case 'max-tokens':
+    case 'forked':
+      return { result: 'completed' }
+    case 'aborted': {
+      const cause = isObject(reason) && isObject(reason.reason) ? reason.reason.kind : undefined
+      return { result: 'stopped', stoppedBy: cause === 'user' ? 'user' : 'other' }
+    }
+    case 'error': {
+      const error = isObject(reason) && isObject(reason.error) ? reason.error : {}
+      const text = typeof error.message === 'string' && error.message.trim() !== '' ? error.message : typeof error.code === 'string' ? error.code : ''
+      const clean = text.replace(/\s+/g, ' ').trim()
+      return clean === '' ? { result: 'failed' } : { result: 'failed', error: truncate(clean, TURN_ERROR_LIMIT).text }
+    }
+    case 'interrupted':
+      return { result: 'interrupted' }
+    default:
+      return { result: 'other' }
+  }
+}
+
+/**
+ * 从一段会话日志里得出各轮的起止和结果（protocol.md 5.4），按轮次编号排序。
+ * @param {readonly unknown[]} records
+ * @returns {Turn[]}
+ */
+export function extractTurns(records) {
+  /** @type {Map<number, Turn>} */
+  const turns = new Map()
+  for (const record of records) {
+    if (!isObject(record) || record.type !== 'event' || !isObject(record.event) || !isObject(record.event.data)) continue
+    const { type, data } = record.event
+    if ((type !== 'turn/start' && type !== 'turn/end') || !isTurnNumber(data.turn)) continue
+    const time = typeof record.event.time === 'number' ? record.event.time : undefined
+    const turn = turns.get(data.turn) ?? { turn: data.turn }
+    if (type === 'turn/start') {
+      if (time !== undefined) turn.startedAt = time
+    } else {
+      if (time !== undefined) turn.endedAt = time
+      Object.assign(turn, turnResult(data.reason))
+    }
+    turns.set(data.turn, turn)
+  }
+  return [...turns.values()].sort((a, b) => a.turn - b.turn)
+}
+
+/**
+ * 会话摘要里的最近一轮（protocol.md 5.1）：最后一个已经结束的轮次，和那一轮模型最后一段回复的开头。
+ * @param {readonly unknown[]} records 会话日志的末尾（最新一页）
+ * @returns {{ lastTurn: { result: NonNullable<Turn['result']>, endedAt: number | null, error?: string } | null, lastReply: string | null }}
+ */
+export function turnDigest(records) {
+  const ended = extractTurns(records).filter((t) => t.result !== undefined)
+  const last = ended[ended.length - 1]
+  if (!last || !last.result) return { lastTurn: null, lastReply: null }
+  /** @type {{ result: NonNullable<Turn['result']>, endedAt: number | null, error?: string }} */
+  const lastTurn = { result: last.result, endedAt: last.endedAt ?? null }
+  if (last.error) lastTurn.error = last.error
+  let reply = null
+  for (const message of convertRecords(records)) {
+    if (message.role !== 'assistant' || message.turn !== last.turn) continue
+    for (const part of message.parts) if (part.type === 'text' && part.text.trim() !== '') reply = part.text
+  }
+  const clean = reply?.replace(/\s+/g, ' ').trim()
+  return { lastTurn, lastReply: clean ? truncate(clean, LAST_REPLY_LIMIT).text : null }
+}
+
 /**
  * 可以作为一页开头的事件：从这里开始，后面的工具调用都能找到它们所属的模型回复。
  * @param {unknown} record
@@ -272,19 +414,22 @@ const seqOf = (record) => (isObject(record) && isObject(record.event) && typeof 
  * 所属的模型回复在更早的一页里。这里把开头这些「孤儿」事件去掉，并把翻页游标设在第一个
  * 完整的边界上——下一次用这个游标向前翻页时，这些事件会和它们的模型回复一起返回。
  * @param {{ records?: unknown, hasMore?: unknown }} page
- * @returns {{ messages: Message[], hasMore: boolean, cursor: string | null }}
+ * @param {number} [startTurn] 这一页之前最近一个带 turn 的事件所在的轮次，见 {@link turnBefore}
+ * @returns {{ messages: Message[], hasMore: boolean, cursor: string | null, turns: Turn[] }}
  */
-export function convertPage(page) {
+export function convertPage(page, startTurn) {
   const records = Array.isArray(page.records) ? page.records : []
   const hasMore = page.hasMore === true
-  if (!hasMore) return { messages: convertRecords(records), hasMore: false, cursor: null }
+  if (!hasMore) return { messages: convertRecords(records, startTurn), hasMore: false, cursor: null, turns: extractTurns(records) }
   const boundary = records.findIndex(isPageBoundary)
   // 整页都没有边界（极少见：一长串工具调用）时不裁剪，避免这些事件永远显示不出来
   const start = boundary > 0 ? boundary : 0
   const cursorSeq = seqOf(records[start])
+  const kept = records.slice(start)
   return {
-    messages: convertRecords(records.slice(start)),
+    messages: convertRecords(kept, startTurn),
     hasMore: cursorSeq === undefined ? false : cursorSeq > 0,
     cursor: cursorSeq === undefined ? null : String(cursorSeq),
+    turns: extractTurns(kept),
   }
 }

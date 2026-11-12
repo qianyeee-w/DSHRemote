@@ -94,7 +94,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | POST | `/v1/workspaces` | 需要 | 登记已有目录：`{ path }` → `{ workspace: { workspaceId, title, path }, created }`；重复登记返回已有工作区 |
 | GET | `/v1/sessions` | 需要 | 会话列表：`{ sessions: [...] }`，每项的结构见 5.1。已归档的会话不出现（和 Desktop 一致） |
 | POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
-| GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor }`，消息结构见 5.2。见下方「历史分页」 |
+| GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor, turns }`，消息结构见 5.2，轮次见 5.4。见下方「历史分页」 |
 | POST | `/v1/sessions/{id}/prompt` | 需要 | 发消息 `{ requestId, text, mode?: "queue" \| "steer" }`，返回 `{ accepted: true }`。见下方「发消息」 |
 | POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务，不需要请求体，返回 `{ accepted: true }`。会话空闲时也返回成功 |
 | GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description? }] }` |
@@ -122,6 +122,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - `limit`：本页最多包含多少条 DSH 消息，默认 50，范围 1–200。插件会过滤掉 DSH 内部注入的消息，所以返回的 `messages` 可能少于 `limit`，甚至为空，这不代表已经翻到底。**是否还有更早的消息只看 `hasMore`**。
 - `cursor`：不透明的字符串，App 不要解析它。`hasMore` 为 `true` 时，把它作为下一次请求的 `before`，取更早的一页；`hasMore` 为 `false` 时为 `null`。
 - 不带 `before` 时返回最新的一页。同一个会话的各页按顺序拼起来，就是完整的历史，不会重复，也不会把一次工具调用拆到两页里。
+- `turns`：这一页里出现的轮次（结构见 5.4），按轮次编号排序。一轮可能跨两页：开始在更早的一页时，这一页里它没有 `startedAt`；App 把各页拿到的同一轮合并。旧插件没有这个字段。
 
 **发消息**
 
@@ -146,11 +147,15 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
   "attention": [{ "attentionId": "…", "kind": "approval | question" }],
   "model": { "provider": "deepseek-official", "model": "deepseek-flash" },
   "permissionPreset": "workspace-write",
-  "updatedAt": 1794107669094
+  "updatedAt": 1794107669094,
+  "lastTurn": { "result": "completed | stopped | failed | interrupted | other", "endedAt": 1794107669094, "error": "…" },
+  "lastReply": "两处去重已经统一，并补了一个测试。"
 }
 ```
 
 `title` 在会话还没有标题时为 `null`（App 显示为「新会话」）；`workspaceId` 在会话没有归入任何工作区时为 `null`。`model` 是下一条消息会使用的模型，`permissionPreset` 是当前的权限模式，读不到时都为 `null`。
+
+`lastTurn` 是最近一轮**已经结束**的结果（字段含义同 5.4），`lastReply` 是那一轮模型最后一段回复的开头（最多 120 个字符，换行和连续空白合成一个空格）。插件要读会话日志的末尾才拿得到这两项：任务结束时读一次并缓存；插件启动后只补算最近更新的 20 个会话，其余会话在下一次任务结束之前为 `null`。拿不到时为 `null`，旧插件没有这两个字段。
 
 `status` 为 `waiting` 表示有未处理的审批或提问（`attention` 不为空）。会话列表按「waiting → running → idle」排序，同一状态内按 `updatedAt` 倒序。
 
@@ -175,6 +180,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - 用户消息中的图片和文件，v1 用占位文字表示（`[图片]`、`[文件：a.txt]`）。
 - `thinking` 和 `tool` 在 App 中默认折叠显示。
 - 工具的 `status`：`running` 还在执行；`done` 成功；`error` 失败，或者没执行完这一轮就结束了（例如被停止）；`rejected` 审批被拒绝。
+- `turn`：这条消息属于第几轮（DSH 的轮次编号，从 1 开始，见 5.4）。一页开头的消息所属的轮次在更早的一页、无法确定时没有这个字段。
 - 工具的 `summary` 是一行给人看的说明（例如「运行命令：npm test」「读取：src/a.js」），插件不认识的工具只显示工具名。
 - 工具的 `input` 和 `output` 可能很大，插件按上限截断，并标记 `truncated: true`：`input` 中每个字符串字段最多 2,000 个字符，`output` 最多 8,000 个字符，截断处以 `…` 结尾。
 - DSH 的内部事件和遥测事件（如 `request/header`、`session-log-*`）**不转发给 App**。
@@ -225,6 +231,23 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 
 > 安装插件后，插件一直以 owner 身份连着 DSH，DSH 会认为「有人能回答审批」。没有任何窗口和手机在线时，审批会一直等待，而不是像以前那样直接失败。这正是远程处理审批需要的行为，`security.md` 中有说明。
 
+### 5.4 轮次
+
+用户发一条消息，DSH 处理它直到停下来，是一轮。插件从 DSH 的 `turn/start`、`turn/end` 得出：
+
+```json
+{ "turn": 3, "startedAt": 1794107669094, "endedAt": 1794107959094, "result": "completed", "error": "…", "stoppedBy": "user" }
+```
+
+- 还在运行的轮次没有 `endedAt` 和 `result`。
+- `result`：
+  - `completed`：正常结束（包括输出达到上限后结束）。**不表示需求已经完成**，App 写「本轮结束」。
+  - `stopped`：被停止。`stoppedBy` 为 `user` 表示用户点了停止，`other` 是其他原因（例如父任务取消）。
+  - `failed`：失败。`error` 是 DSH 给出的错误说明的开头（最多 200 个字符，多半是英文）。
+  - `interrupted`：DSH 中途退出（例如崩溃、重启），重新打开会话时由 DSH 补记的结束。
+  - `other`：DSH 以后新增的结束原因，App 按「本轮结束」显示。
+- 插件只转发上面这些字段，DSH 原始的结束原因和错误对象不转发。
+
 ## 6. 实时流 `/v1/stream`
 
 App 只维持**一条** WebSocket 连接，前台服务和界面共用。
@@ -257,11 +280,12 @@ App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 | `hello` | `{ protocol, sessions: [会话摘要], attention: [待处理事项] }` | 连接建立后第一条消息，即当前的完整状态。在它之前发生的变化会排在它后面发送 |
 | `session.updated` | `{ session: 会话摘要 }` | 会话摘要发生变化（状态、标题、模型、权限模式、待处理事项等），也用于新出现的会话。通过 `/v1/sessions/{id}/model`、`/permission-preset` 切换后会立即推送 |
 | `session.removed` | `{ sessionId }` | 会话从列表中消失（被删除或归档） |
-| `session.idle` | `{ sessionId, title }` | 会话从运行变为空闲，并持续 8 秒（用于发出「任务完成」通知；8 秒内又开始运行就不发）。停下来是因为在等审批或提问时不发 |
+| `session.idle` | `{ sessionId, title, result? }` | 会话从运行变为空闲，并持续 8 秒（用于发出「任务结束」通知；8 秒内又开始运行就不发）。停下来是因为在等审批或提问时不发。`result` 是刚结束那一轮的结果（同 5.4），拿不到时没有这个字段 |
 | `attention.requested` | `{ attention: 待处理事项 }`（结构见 5.3） | 出现新的待处理事项 |
 | `attention.resolved` | `{ attentionId, sessionId, by: "this-device" \| "other" }` | 某个事项已经处理完。`other` 表示在别处处理掉了，或者任务被停止（DSH 0.2.2 不区分这两种情况）。App 收到后收起对应的界面和通知 |
 | `message.upsert` | `{ sessionId, rev, message, replaces? }`（`message` 结构见 5.2） | **只对已订阅的会话发送**：新增或更新一条消息。见 6.4 |
 | `message.removed` | `{ sessionId, messageId }` | **只对已订阅的会话发送**：删除一条消息（目前只用于被放弃的草稿） |
+| `turn.updated` | `{ sessionId, turn }`（`turn` 结构见 5.4） | **只对已订阅的会话发送**：一轮开始或结束。同一轮的后一次推送整条替换前一次 |
 | `error` | `{ code, message }` | 出错，`code` 同第 7 节 |
 
 ### 6.2 App → 插件

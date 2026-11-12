@@ -49,6 +49,7 @@ function fakeApp(history) {
     apply(event) {
       events.push(event)
       if (event.type === 'message.removed') { messages.delete(event.messageId); return }
+      if (event.type === 'turn.updated') return
       const last = revs.get(event.message.id) ?? 0
       assert.ok(event.rev > last, `rev 必须递增：${event.message.id}`)
       revs.set(event.message.id, event.rev)
@@ -82,6 +83,27 @@ test('回放真实的 session/follow：流式草稿先出现，写入日志后�
   assert.equal(new Set(app.events.map((e) => e.eventId)).size, app.events.length)
   feed.close()
   assert.equal(fake.streams[0]?.cancelled, true)
+})
+
+test('轮次：一轮开始和结束时推送 turn.updated，同一轮后一次替换前一次；snapshot 里已有的轮次不推送（protocol.md 6.1）', async () => {
+  const fake = fakeFollow()
+  /** @type {import('../../src/dsh/live.js').MessageEvent[]} */
+  const events = []
+  const feed = new SessionFeed(fake.dsh, 's', (e) => events.push(e), { draftThrottleMs: 0 })
+  await tick()
+  fake.push({ type: 'snapshot', records: [
+    { type: 'event', event: { type: 'turn/start', seq: 1, time: 10, data: { turn: 1 } } },
+    { type: 'event', event: { type: 'turn/end', seq: 2, time: 20, data: { turn: 1, reason: { kind: 'completed' } } } },
+  ], assistantStream: { revision: 0 } })
+  fake.push({ type: 'event', event: { type: 'turn/start', seq: 3, time: 30, data: { turn: 2 } } })
+  fake.push({ type: 'event', event: { type: 'turn/end', seq: 4, time: 90, data: { turn: 2, reason: { kind: 'error', error: { message: 'upstream 400' } } } } })
+  await wait(2)
+  const turns = events.flatMap((e) => (e.type === 'turn.updated' ? [e.turn] : []))
+  assert.deepEqual(turns, [
+    { turn: 2, startedAt: 30 },
+    { turn: 2, startedAt: 30, endedAt: 90, result: 'failed', error: 'upstream 400' },
+  ])
+  feed.close()
 })
 
 test('草稿：输出被放弃（abandoned）时通知 App 删除', async () => {
@@ -161,7 +183,7 @@ test('草稿转换：思考、文本、正在输出参数的工具调用', () =>
 // ---------------------------------------------------------------- LiveHub
 
 /**
- * @param {{ sessions?: () => import('../../src/dsh/facade.js').SessionSummary[] }} [options]
+ * @param {{ sessions?: () => import('../../src/dsh/facade.js').SessionSummary[], digests?: Record<string, any> }} [options]
  */
 function fakeHubDeps(options = {}) {
   /** @type {Set<(e: any) => void>} */
@@ -174,13 +196,27 @@ function fakeHubDeps(options = {}) {
     onEvent: (/** @type {any} */ l) => { dshListeners.add(l); return () => dshListeners.delete(l) },
     onStatus: () => () => {},
   })
-  const facade = /** @type {any} */ ({ sessions: async () => ({ sessions: options.sessions?.() ?? [] }) })
+  /** @type {Map<string, any>} */
+  const digests = new Map()
+  /** @type {string[]} */
+  const digestReads = []
+  const facade = /** @type {any} */ ({
+    sessions: async () => ({ sessions: options.sessions?.() ?? [] }),
+    refreshDigest: async (/** @type {string} */ _actor, /** @type {string} */ id) => {
+      digestReads.push(id)
+      const digest = options.digests?.[id] ?? { lastTurn: null, lastReply: null }
+      digests.set(id, digest)
+      return digest
+    },
+    digest: (/** @type {string} */ id) => digests.get(id),
+    hasDigest: (/** @type {string} */ id) => digests.has(id),
+  })
   const attention = /** @type {any} */ ({
     onChange: (/** @type {any} */ l) => { attentionListeners.add(l); return () => attentionListeners.delete(l) },
     list: (/** @type {string} */ sessionId) => pending.filter((a) => sessionId === undefined || a.sessionId === sessionId),
   })
   return {
-    dsh, facade, attention,
+    dsh, facade, attention, digestReads,
     emitDsh: (/** @type {string} */ event, /** @type {unknown[]} */ args) => { for (const l of dshListeners) l({ type: 'emit', event, args }) },
     emitAttention: (/** @type {any} */ change) => { for (const l of attentionListeners) l(change) },
     setPending: (/** @type {any[]} */ list) => { pending = list },
@@ -188,7 +224,7 @@ function fakeHubDeps(options = {}) {
 }
 
 /** @param {string} id @param {Partial<import('../../src/dsh/facade.js').SessionSummary>} [extra] @returns {import('../../src/dsh/facade.js').SessionSummary} */
-const summary = (id, extra = {}) => ({ sessionId: id, title: id, workspaceId: null, cwd: null, status: 'idle', attention: [], model: null, permissionPreset: null, updatedAt: 1, ...extra })
+const summary = (id, extra = {}) => ({ sessionId: id, title: id, workspaceId: null, cwd: null, status: 'idle', attention: [], model: null, permissionPreset: null, updatedAt: 1, lastTurn: null, lastReply: null, ...extra })
 
 test('任务完成：停止运行并持续一段时间后才发 session.idle；期间又开始运行就不发', async () => {
   const deps = fakeHubDeps({ sessions: () => [summary('s1', { title: '修复登录' })] })
@@ -283,5 +319,43 @@ test('多个手机订阅同一个会话时共用一条 session/follow，最后�
   assert.equal(fake.streams[0]?.cancelled, false)
   offB()
   assert.equal(fake.streams[0]?.cancelled, true)
+  hub.close()
+})
+
+test('任务结束：读一次日志末尾，session.idle 带上这一轮的结果（protocol.md 6.1）', async () => {
+  const deps = fakeHubDeps({
+    sessions: () => [summary('s1')],
+    digests: { s1: { lastTurn: { result: 'failed', endedAt: 5, error: 'rate limit' }, lastReply: null } },
+  })
+  const hub = new LiveHub(deps.dsh, deps.facade, deps.attention, { idleMs: 30, debounceMs: 1 })
+  /** @type {import('../../src/dsh/live.js').BroadcastEvent[]} */
+  const events = []
+  hub.onEvent((e) => events.push(e))
+  await hub.snapshot('d_abcdefghijkl')
+  await new Promise((r) => setTimeout(r, 20))
+  deps.digestReads.length = 0
+  deps.emitDsh('api-session/status', ['s1', true])
+  deps.emitDsh('api-session/status', ['s1', false])
+  await new Promise((r) => setTimeout(r, 80))
+  assert.deepEqual(deps.digestReads, ['s1'])
+  const idle = events.find((e) => e.type === 'session.idle')
+  assert.ok(idle && idle.type === 'session.idle')
+  assert.equal(idle.result, 'failed')
+  hub.close()
+})
+
+test('插件启动后只补算最近更新的 20 个会话（用户确认），读完推送变化', async () => {
+  const sessions = Array.from({ length: 25 }, (_, i) => summary(`s${i}`, { updatedAt: i }))
+  const deps = fakeHubDeps({ sessions: () => sessions })
+  const hub = new LiveHub(deps.dsh, deps.facade, deps.attention, { debounceMs: 1 })
+  hub.onEvent(() => {})
+  await hub.snapshot('d_abcdefghijkl')
+  await new Promise((r) => setTimeout(r, 30))
+  assert.equal(deps.digestReads.length, 20)
+  assert.deepEqual(new Set(deps.digestReads), new Set(sessions.slice(5).map((s) => s.sessionId)))
+  // 第二个连接的 hello 不再重复补算
+  await hub.snapshot('d_abcdefghijkl')
+  await new Promise((r) => setTimeout(r, 10))
+  assert.equal(deps.digestReads.length, 20)
   hub.close()
 })

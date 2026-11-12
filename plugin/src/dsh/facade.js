@@ -6,12 +6,15 @@
  * DSH 的数据格式见 docs/research/dsh-session-api.md，测试数据是从真实 DSH 录制的（test/fixtures/）。
  */
 import { DshUnavailableError } from './connection.js'
-import { convertPage } from './transcript.js'
+import { convertPage, turnBefore, turnDigest } from './transcript.js'
 import { canonicalDirectory, createDirectory, DirectoryError, listDirectories } from '../directories.js'
 
 /** 历史消息分页：默认条数和上限 */
 export const MESSAGES_DEFAULT_LIMIT = 50
 export const MESSAGES_MAX_LIMIT = 200
+/** 计算最近一轮的结果时读取的消息数：一轮通常不会超过这么多条 */
+const DIGEST_PAGE_SIZE = 40
+
 /** 读取工作区列表时，等待 workspace/follow 首帧的时间 */
 const WORKSPACE_TIMEOUT_MS = 10_000
 
@@ -51,7 +54,11 @@ const stringOrNull = (value) => (typeof value === 'string' ? value : null)
  * @property {{ provider: string, model: string } | null} model 下一条消息会使用的模型
  * @property {string | null} permissionPreset 当前的权限模式
  * @property {number} updatedAt
+ * @property {TurnDigest['lastTurn']} lastTurn 最近一轮已经结束的结果（protocol.md 5.1）
+ * @property {string | null} lastReply 那一轮模型最后一段回复的开头
  */
+
+/** @typedef {ReturnType<typeof turnDigest>} TurnDigest */
 
 /**
  * @typedef {object} WorkspaceState
@@ -101,9 +108,10 @@ const STATUS_ORDER = { waiting: 0, running: 1, idle: 2 }
  * @param {unknown} list session/list 的返回值
  * @param {WorkspaceState} workspaces
  * @param {(sessionId: string) => AttentionSummary[]} attentionOf 会话当前的待处理事项
+ * @param {(sessionId: string) => TurnDigest | undefined} [digestOf] 会话最近一轮的结果（插件读过日志末尾时才有）
  * @returns {SessionSummary[]}
  */
-export function convertSessionList(list, workspaces, attentionOf) {
+export function convertSessionList(list, workspaces, attentionOf, digestOf = () => undefined) {
   /** @type {Map<string, string>} */
   const workspaceOf = new Map()
   for (const workspace of workspaces.items) {
@@ -127,6 +135,8 @@ export function convertSessionList(list, workspaces, attentionOf) {
       model: modelOf(values.modelSelection),
       permissionPreset: isObject(values.permissions) ? stringOrNull(values.permissions.currentValue) : null,
       updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : 0,
+      lastTurn: digestOf(item.sessionId)?.lastTurn ?? null,
+      lastReply: digestOf(item.sessionId)?.lastReply ?? null,
     })
   }
   return sessions.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.updatedAt - a.updatedAt)
@@ -229,6 +239,8 @@ export class Facade {
   #now
   /** @type {Map<string, { at: number, done: Promise<unknown> }>} sessionId + requestId → 发送结果 */
   #recentPrompts = new Map()
+  /** @type {Map<string, TurnDigest>} sessionId → 最近一轮的结果（只在内存里，插件重启后重新读取） */
+  #digests = new Map()
 
   /**
    * @param {import('./connection.js').DshConnection} dsh
@@ -310,7 +322,32 @@ export class Facade {
       this.#dsh.call('session/list', { _request: {} }, { actor }),
       this.#workspaceState(actor),
     ])
-    return { sessions: convertSessionList(unwrap(list), workspaces, this.#attentionOf) }
+    return { sessions: convertSessionList(unwrap(list), workspaces, this.#attentionOf, (id) => this.#digests.get(id)) }
+  }
+
+  /**
+   * 读取会话日志的末尾，更新这个会话最近一轮的结果（protocol.md 5.1 的 lastTurn、lastReply）。
+   * 任务结束时调用一次；插件启动后对最近更新的会话补算。
+   * @param {string} actor
+   * @param {string} sessionId
+   */
+  async refreshDigest(actor, sessionId) {
+    assertSessionId(sessionId)
+    const page = unwrap(await this.#dsh.call('session/page', { request: { address: { kind: 'session', sessionId }, maxMessages: DIGEST_PAGE_SIZE } }, { actor }))
+    const records = isObject(page) && Array.isArray(page.records) ? page.records : []
+    const digest = turnDigest(records)
+    this.#digests.set(sessionId, digest)
+    return digest
+  }
+
+  /** 已经读过的最近一轮的结果。 @param {string} sessionId */
+  digest(sessionId) {
+    return this.#digests.get(sessionId)
+  }
+
+  /** 是否已经读过这个会话的日志末尾。 @param {string} sessionId */
+  hasDigest(sessionId) {
+    return this.#digests.has(sessionId)
   }
 
   /** @param {string} actor */
@@ -342,7 +379,14 @@ export class Facade {
       request.beforeSeq = Number(options.before)
     }
     const page = unwrap(await this.#dsh.call('session/page', { request }, { actor }))
-    return convertPage(isObject(page) ? page : {})
+    const converted = convertPage(isObject(page) ? page : {})
+    if (converted.cursor === null || converted.messages.every((m) => m.turn !== undefined)) return converted
+    // 这一页开头的消息推断不出轮次（同一轮前面的事件都在更早的一页）：往前多读一小段，找到最近一个带 turn 的事件
+    const before = unwrap(await this.#dsh.call('session/page', {
+      request: { address: { kind: 'session', sessionId }, maxMessages: 1, beforeSeq: Number(converted.cursor) },
+    }, { actor }))
+    const previous = isObject(before) && Array.isArray(before.records) ? before.records : []
+    return convertPage(isObject(page) ? page : {}, turnBefore(previous))
   }
 
   // ---------------------------------------------------------------- 写操作（T8）

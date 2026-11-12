@@ -11,10 +11,14 @@
  */
 import { randomUUID } from 'node:crypto'
 import { PLUGIN_ACTOR } from './connection.js'
-import { convertRecords, toolSummary, parseToolInput } from './transcript.js'
+import { convertRecords, extractTurns, toolSummary, parseToolInput } from './transcript.js'
 
 /** 会话从运行变为空闲后，持续多久才算「任务完成」 */
 export const IDLE_DELAY_MS = 8_000
+/** 插件启动后补算最近一轮结果的会话数（用户确认） */
+export const DIGEST_BACKFILL = 20
+/** 补算时同时读取的会话数 */
+const DIGEST_CONCURRENCY = 2
 /** 有事件时，刷新会话列表前等多久（合并连续的事件） */
 const REFRESH_DEBOUNCE_MS = 300
 /** 有客户端在线时，定时刷新会话列表的间隔（捕获没有广播的变化，例如标题、归档） */
@@ -33,7 +37,7 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 /**
  * @typedef {{ type: 'session.updated', eventId: string, session: import('./facade.js').SessionSummary }
  *   | { type: 'session.removed', eventId: string, sessionId: string }
- *   | { type: 'session.idle', eventId: string, sessionId: string, title: string | null }
+ *   | { type: 'session.idle', eventId: string, sessionId: string, title: string | null, result?: string }
  *   | { type: 'attention.requested', eventId: string, attention: import('./attention.js').Attention }
  *   | { type: 'attention.resolved', eventId: string, attentionId: string, sessionId: string, by: string | null }} BroadcastEvent
  * attention.resolved 的 by 是回答它的 deviceId（或 null），传输层再换成 this-device / other。
@@ -41,7 +45,8 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 
 /**
  * @typedef {{ type: 'message.upsert', eventId: string, sessionId: string, rev: number, message: import('./transcript.js').Message & { draft?: true }, replaces?: string }
- *   | { type: 'message.removed', eventId: string, sessionId: string, messageId: string }} MessageEvent
+ *   | { type: 'message.removed', eventId: string, sessionId: string, messageId: string }
+ *   | { type: 'turn.updated', eventId: string, sessionId: string, turn: import('./transcript.js').Turn }} MessageEvent
  */
 
 // ---------------------------------------------------------------- 流式输出的草稿
@@ -149,6 +154,8 @@ export class SessionFeed {
   #sent = new Map()
   /** @type {Map<string, number>} 消息 id → rev */
   #revs = new Map()
+  /** @type {Map<number, string>} 轮次 → 上次推送的内容（JSON） */
+  #sentTurns = new Map()
   /** @type {Map<string, Draft>} attemptId → 草稿 */
   #drafts = new Map()
   /** @type {Map<string, NodeJS.Timeout>} 草稿的节流定时器 */
@@ -245,7 +252,7 @@ export class SessionFeed {
     if (this.#buffer.length > FEED_BUFFER_LIMIT) this.#buffer.splice(0, this.#buffer.length - FEED_BUFFER_LIMIT)
     // 只有可能影响消息的事件才需要重新转换
     const type = isObject(record.event) ? record.event.type : undefined
-    if (['user/message', 'assistant/message', 'tool/result', 'approval/decided', 'turn/end'].includes(String(type))) this.#convert({ silent: false })
+    if (['user/message', 'assistant/message', 'tool/result', 'approval/decided', 'turn/start', 'turn/end'].includes(String(type))) this.#convert({ silent: false })
   }
 
   /** @param {{ silent: boolean }} options silent：只记录，不推送 */
@@ -262,6 +269,16 @@ export class SessionFeed {
         if (draft) { replaces = draftId(draft); this.#dropDraft(draft, false) }
       }
       this.#upsert(message, replaces)
+    }
+    // 一轮开始和结束（protocol.md 6.1 turn.updated）
+    for (const turn of extractTurns(this.#buffer)) {
+      const json = JSON.stringify(turn)
+      if (this.#sentTurns.get(turn.turn) === json) continue
+      this.#sentTurns.set(turn.turn, json)
+      if (!options.silent) this.#emit({ type: 'turn.updated', eventId: randomUUID(), sessionId: this.#sessionId, turn })
+    }
+    if (this.#sentTurns.size > 50) {
+      for (const key of [...this.#sentTurns.keys()].sort((a, b) => a - b).slice(0, this.#sentTurns.size - 50)) this.#sentTurns.delete(key)
     }
     // 只保留最近的记录，防止长时间订阅时无限增长
     if (this.#sent.size > 500) {
@@ -392,6 +409,8 @@ export class LiveHub {
   #intervalTimer
   #refreshing = false
   #refreshAgain = false
+  /** 是否已经为最近的会话补算过最近一轮的结果 */
+  #backfilled = false
   /** @type {Map<string, { feed: SessionFeed, listeners: Set<(event: MessageEvent) => void> }>} */
   #feeds = new Map()
   /** @type {(() => void)[]} */
@@ -448,7 +467,28 @@ export class LiveHub {
   async snapshot(actor) {
     const { sessions } = await this.#facade.sessions(actor)
     this.#setBaseline(sessions)
+    if (!this.#backfilled) {
+      this.#backfilled = true
+      void this.#backfill(sessions)
+    }
     return { sessions, attention: this.#attention.list() }
+  }
+
+  /**
+   * 插件启动后，为最近更新的 [DIGEST_BACKFILL] 个会话读取最近一轮的结果（用户确认：只补最近的），
+   * 每次 [DIGEST_CONCURRENCY] 个，读完推送变化。更早的会话等它们下一次任务结束。
+   * @param {import('./facade.js').SessionSummary[]} sessions
+   */
+  async #backfill(sessions) {
+    const queue = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, DIGEST_BACKFILL)
+      .map((s) => s.sessionId).filter((id) => !this.#facade.hasDigest(id))
+    const worker = async () => {
+      for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+        try { await this.#facade.refreshDigest(PLUGIN_ACTOR, id) } catch { /* 读不到就算了，等下一次任务结束 */ }
+      }
+    }
+    await Promise.all(Array.from({ length: DIGEST_CONCURRENCY }, worker))
+    this.#scheduleRefresh()
   }
 
   /** @param {import('./facade.js').SessionSummary[]} sessions */
@@ -472,11 +512,17 @@ export class LiveHub {
     clearTimeout(this.#idleTimers.get(sessionId))
     this.#idleTimers.delete(sessionId)
     if (running) return
+    // 停下来了：读一次日志末尾，更新最近一轮的结果和最后一句回复，读完推送会话摘要的变化
+    this.#facade.refreshDigest(PLUGIN_ACTOR, sessionId).then(() => this.#scheduleRefresh(), () => {})
     // 停下来后持续 8 秒都没有再运行，才算任务完成；有待处理事项时不算（在等人回答）
     this.#idleTimers.set(sessionId, setTimeout(() => {
       this.#idleTimers.delete(sessionId)
       if (this.#attention.list(sessionId).length > 0) return
-      this.#broadcast({ type: 'session.idle', eventId: randomUUID(), sessionId, title: this.#latest.get(sessionId)?.title ?? null })
+      /** @type {BroadcastEvent} */
+      const event = { type: 'session.idle', eventId: randomUUID(), sessionId, title: this.#latest.get(sessionId)?.title ?? null }
+      const result = this.#facade.digest(sessionId)?.lastTurn?.result
+      if (result) event.result = result
+      this.#broadcast(event)
     }, this.#idleMs))
   }
 

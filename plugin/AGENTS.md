@@ -22,7 +22,7 @@ npm run e2e          # 端到端测试：插件装进真实 dsh web，模拟手�
                      # → 提问和审批（含在 Desktop 上处理）→ DSH 重启后恢复 → 撤销设备。环境变量同 load-check
 npm run browser-check     # 用系统安装的 Chrome（BROWSER_CHANNEL=msedge 用 Edge）点一遍配对页上的按钮
                      # 单元测试用 Node 客户端手动设置 Origin，测不出浏览器的行为；改配对页时必须跑
-npm run dev-server   # 给 App 开发用的服务器：真实 dsh web + 本插件 + 假模型（关键词驱动：ASK / SHELL / STREAM / THINK / SLOW / MARKDOWN）
+npm run dev-server   # 给 App 开发用的服务器：真实 dsh web + 本插件 + 假模型（关键词驱动：ASK / SHELL / STREAM / THINK / SLOW / MARKDOWN / FAIL）
                      # 默认局域网端口 3290、配对页 3291，--port / --admin-port / --bind / --home 可改；数据目录默认 ~/.cache/dshremote-dev，
                      # 重启后指纹和已配对设备保留。子命令：pair（打印配对二维码）、devices、revoke、restart（重启 DSH）、stop、status，
                      # 加 --json 输出机器可读结果。前台运行时可按 p / d / r / q。用法见 scripts/dev-server.mjs 开头

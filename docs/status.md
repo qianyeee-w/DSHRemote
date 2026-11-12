@@ -45,7 +45,7 @@ M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 默
 M2 的实现要点（以后改 App 时要知道）：
 
 - `android/` 的骨架已建立（T2）：Gradle 版本目录、lint（警告即错误）、ktlint、禁止明文流量的配置及其单元测试、CI（`android.yml`）。命令和约定见 `android/AGENTS.md`。
-- **开发 App 时连接 dev-server**（`cd plugin && npm run dev-server`，T1 完成）：真实的 `dsh web` + 本插件 + 假模型，消息里的关键词决定模型的行为（ASK 提问、SHELL 审批、STREAM 流式、THINK 思考、SLOW 长输出）。默认局域网端口 3290、配对页 3291，**不用 3190 / 3191**：用户的开发服务器上，3190 被用户自己的 `dsh web` 服务占用。数据目录 `~/.cache/dshremote-dev` 保存指纹和已配对设备，重启后手机不需要重新配对。`npm run dev-server -- pair` 打印配对二维码，`restart` 重启 DSH，`revoke` 撤销设备。测试代码一律用 `dsh-runtime.mjs` 的 `freePort()` 找空闲端口。
+- **开发 App 时连接 dev-server**（`cd plugin && npm run dev-server`，T1 完成）：真实的 `dsh web` + 本插件 + 假模型，消息里的关键词决定模型的行为（ASK 提问、SHELL 审批、STREAM 流式、THINK 思考、SLOW 长输出、FAIL 让这一轮失败）。默认局域网端口 3290、配对页 3291，**不用 3190 / 3191**：用户的开发服务器上，3190 被用户自己的 `dsh web` 服务占用。数据目录 `~/.cache/dshremote-dev` 保存指纹和已配对设备，重启后手机不需要重新配对。`npm run dev-server -- pair` 打印配对二维码，`restart` 重启 DSH，`revoke` 撤销设备。测试代码一律用 `dsh-runtime.mjs` 的 `freePort()` 找空闲端口。
 - **证书校验层**在 `android/.../data/net/`（T3）：App 的所有请求都必须用 `ClientFactory.forPin(指纹)` 创建的客户端；手动配对用 `PairingProbe` 取指纹。它的测试放在 `app/src/sharedTest/`，同一组测试在 JVM 和真机上各跑一遍；改动这一层后必须在真机上跑 `connectedDebugAndroidTest`。
 - **主机与凭据**在 `android/.../data/host/`（T4）：`HostRepository` 保存主机列表，指纹和 token 用 Keystore 密钥加密（`SecretBox`）；`PairUri` 严格解析配对二维码。持有 token 的类型（`DeviceToken`、`PairUri` 的配对码）的 `toString()` 都不输出秘密。
 - **协议客户端**在 `android/.../data/api/`（T5）：`PluginApi` 实现 protocol.md 的全部 REST 接口，失败时抛出 `ApiException`（`Http` / `FingerprintMismatch` / `Network` / `BadResponse`）。发消息用 `OutgoingMessage`，重试时传同一个对象（requestId 不变）。`./gradlew devServerTest` 对 dev-server 跑配对、只读接口、发消息去重和取消配对。
@@ -101,6 +101,8 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
   - 装了 VMware、VirtualBox、WSL 的电脑，会有很多虚拟网卡。
   - 防火墙放行时只勾「专用网络」。
 - **JVM 测试里的协程泄漏会算到别的测试头上**：用 `Dispatchers.setMain` 的测试，如果视图模型的协程在测试结束后还在跑（或者假对象在协程里抛了没被捕获的异常），kotlinx-coroutines-test 会在下一个 `runTest` 开始时报「There were uncaught exceptions before the test started」，失败的是一个无关的测试，而且是偶发的。用到真实 `HostRepository`（IO 上的 DataStore）的测试，收尾时先 `cancelAndJoin` 视图模型的作用域，再 `resetMain`（见 `HostViewModelsTest`）。查这类问题时把完整套件循环跑到失败为止，再看报告里的 Suppressed 异常。
+- **DSH 会把没有完整回复的两条用户消息合在一起发给模型**：上一轮被停止或失败、没有完整的模型回复时，下一轮请求里最后一条用户消息包含两次输入的文字。假模型按关键词分派时，`FAIL` 只看最后一段文字（`test/contract/fake-llm.mjs`）；其他关键词仍按整条消息匹配，在被停止的一轮之后发消息时要注意。
+- **DSH 的轮次**：大多数事件的 `data` 都带 `turn`，只有 `user/message` 不带；按 2 条消息分页时，可能有一页以用户消息开头、里面一个带 `turn` 的事件都没有，插件这时往前多读一小段（`facade.messages`）。LLM 返回 400 时 DSH 归为 `INVALID_REQUEST`，不重试，这一轮以 `error` 结束；默认可重试的是 `RATE_LIMIT`、`SERVER` 等，最多 5 次。
 - **Compose 的可点区域**：比 48dp 小的可点控件，Compose 的触摸命中会自动把可点区域扩到 48dp，所以新组件的布局按样稿的大小（胶囊 32/34），不为点击区域撑高。Material3 的 `minimumInteractiveComponentSize()` 在当前版本的实测中没有把布局撑到 48dp，不要靠它；要验证点击区域，用 `performTouchInput { click(...) }` 在控件外几 dp 处点（`DesignComponentsUiTest`）。
 - **没有放在 `Surface` 或 `Scaffold` 里的 `Text` 默认是黑字**，深色模式下看不见。新页面都要有 `Scaffold` 或 `Surface` 提供内容颜色。
 - **真机上已有的测试包**：手机上的 `io.github.qianyeeew.dshremote.debug` 是这台开发机的调试密钥签的，可以直接用默认包名跑真机测试（覆盖安装，数据和配对保留）；`.projecttest.test` 是别的电脑签的，用 `.projecttest` 后缀会安装失败。

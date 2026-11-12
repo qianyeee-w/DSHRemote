@@ -19,7 +19,7 @@ import { CERT_FILE } from '../../src/tls/identity.js'
 import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { startDshWeb, DSH_VERSION, log, freePort } from '../helpers/dsh-runtime.mjs'
 import { pinnedRequest, pinnedWebSocket, collectMessages } from '../helpers/pinned-client.js'
-import { startFakeLlm, STREAM_REPLY, TOOL_DONE_REPLY } from '../contract/fake-llm.mjs'
+import { FAIL_MESSAGE, startFakeLlm, STREAM_REPLY, TOOL_DONE_REPLY } from '../contract/fake-llm.mjs'
 
 // 用临时找到的空闲端口：开发机上 3190 / 3191 可能已被占用（例如用户自己的 dsh web 服务）
 const LAN_PORT = await freePort()
@@ -199,7 +199,26 @@ async function main() {
       if (assistant.some((m) => m.draft)) throw new Error('草稿没有被替换')
       if (!JSON.stringify(assistant).includes(STREAM_REPLY)) throw new Error('最终消息不完整')
       const idle = await s.inbox.waitFor((m) => m.type === 'session.idle' && m.sessionId === sid, 20_000)
-      return `草稿「${partial}」；session.idle 在 ${Math.round((Date.now() - start) / 1000)} 秒后，title=${idle.title}`
+      // 轮次（protocol.md 5.4、6.1）：开始和结束各推送一次；session.idle 带上结果；会话摘要有最后一句回复
+      const ended = await s.inbox.waitFor((m) => m.type === 'turn.updated' && m.sessionId === sid && m.turn.result !== undefined)
+      if (ended.turn.result !== 'completed' || typeof ended.turn.startedAt !== 'number' || typeof ended.turn.endedAt !== 'number') throw new Error(`轮次不对：${JSON.stringify(ended.turn)}`)
+      if (idle.result !== 'completed') throw new Error(`session.idle 没有带上结果：${JSON.stringify(idle)}`)
+      const summary = await s.inbox.waitFor((m) => m.type === 'session.updated' && m.session.sessionId === sid && m.session.lastReply !== null)
+      if (!STREAM_REPLY.startsWith(String(summary.session.lastReply).replace(/…$/, ''))) throw new Error(`最后一句回复不对：${summary.session.lastReply}`)
+      if (summary.session.lastTurn?.result !== 'completed') throw new Error(`最近一轮不对：${JSON.stringify(summary.session.lastTurn)}`)
+      return `草稿「${partial}」；session.idle 在 ${Math.round((Date.now() - start) / 1000)} 秒后，title=${idle.title}，result=${idle.result}`
+    })
+
+    await step('一轮失败（假模型返回错误）：turn.updated、session.idle 和会话摘要都是 failed', async () => {
+      await api('POST', `/v1/sessions/${sid}/prompt`, { requestId: randomUUID(), text: '请 FAIL 一次' })
+      const failed = await s.inbox.waitFor((m) => m.type === 'turn.updated' && m.sessionId === sid && m.turn.result === 'failed', 30_000)
+      if (!String(failed.turn.error).includes(FAIL_MESSAGE)) throw new Error(`失败原因不对：${JSON.stringify(failed.turn)}`)
+      const idle = await s.inbox.waitFor((m) => m.type === 'session.idle' && m.sessionId === sid && m.result === 'failed', 20_000)
+      const listed = (await api('GET', '/v1/sessions')).json().sessions.find((/** @type {any} */ x) => x.sessionId === sid)
+      if (listed.lastTurn?.result !== 'failed') throw new Error(`会话摘要的最近一轮不对：${JSON.stringify(listed.lastTurn)}`)
+      const page = (await api('GET', `/v1/sessions/${sid}/messages`)).json()
+      if (page.turns.at(-1)?.result !== 'failed') throw new Error(`历史里的轮次不对：${JSON.stringify(page.turns.at(-1))}`)
+      return `error=${failed.turn.error}；idle.result=${idle.result}`
     })
 
     await step('提问：手机收到 attention.requested，回答后收到 attention.resolved（this-device）', async () => {

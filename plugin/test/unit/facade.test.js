@@ -36,7 +36,7 @@ test('会话列表：标题、所属工作区、状态；没有归入工作区�
   assert.equal(blank?.title, null)
   assert.equal(typeof blank?.cwd, 'string')
   // 只输出协议规定的字段，DSH 的 projections 等内部数据不出现
-  assert.deepEqual(Object.keys(sessions[0] ?? {}).sort(), ['attention', 'cwd', 'model', 'permissionPreset', 'sessionId', 'status', 'title', 'updatedAt', 'workspaceId'])
+  assert.deepEqual(Object.keys(sessions[0] ?? {}).sort(), ['attention', 'cwd', 'lastReply', 'lastTurn', 'model', 'permissionPreset', 'sessionId', 'status', 'title', 'updatedAt', 'workspaceId'])
 })
 
 test('会话列表：waiting → running → idle 排序，同一状态内按 updatedAt 倒序；已归档的会话不出现', () => {

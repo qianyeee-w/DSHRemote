@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { convertRecords, convertPage, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT } from '../../src/dsh/transcript.js'
+import { convertRecords, convertPage, extractTurns, turnBefore, turnDigest, turnResult, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT, TURN_ERROR_LIMIT, LAST_REPLY_LIMIT } from '../../src/dsh/transcript.js'
 
 /** @param {string} name */
 const fixture = (name) => JSON.parse(readFileSync(new URL(`../fixtures/dsh-0.2.2-rc.1/${name}`, import.meta.url), 'utf8'))
@@ -157,4 +157,92 @@ test('工具摘要', () => {
   assert.equal(toolSummary('web_fetch', { url: 'https://example.com' }), '打开网页：https://example.com')
   assert.equal(toolSummary('some_future_tool', {}), 'some_future_tool')
   assert.equal(toolSummary('bash', { command: 'z'.repeat(500) }).length, 121)
+})
+
+// ---------------------------------------------------------------- 轮次（protocol.md 5.4）
+
+test('轮次：每条消息带上所属的轮次，录制的 6 轮里最后一轮被用户停止', () => {
+  const messages = convertRecords(full.records)
+  // 用户消息在 turn/start 之后，属于这一轮；模型回复用事件自带的 turn
+  assert.deepEqual(messages.filter((m) => m.role === 'user').map((m) => m.turn), [1, 2, 3, 4, 5, 6])
+  for (const m of messages) assert.ok(typeof m.turn === 'number', `${m.id} 没有轮次`)
+  const turns = extractTurns(full.records)
+  assert.deepEqual(turns.map((t) => t.turn), [1, 2, 3, 4, 5, 6])
+  assert.deepEqual(turns.map((t) => t.result), ['completed', 'completed', 'completed', 'completed', 'completed', 'stopped'])
+  assert.equal(turns[5]?.stoppedBy, 'user')
+  for (const t of turns) assert.ok(t.startedAt !== undefined && t.endedAt !== undefined && t.endedAt >= t.startedAt)
+  // 只输出协议规定的字段
+  for (const t of turns) for (const key of Object.keys(t)) assert.ok(['turn', 'startedAt', 'endedAt', 'result', 'error', 'stoppedBy'].includes(key), key)
+})
+
+test('轮次：分页切在任何位置，各页的轮次合起来和整段一致；一页开头的消息由第一个轮次事件推断所属的轮次', () => {
+  const expected = extractTurns(full.records)
+  for (let cut = 1; cut < full.records.length; cut++) {
+    const newer = convertPage({ records: full.records.slice(cut), hasMore: true })
+    const older = convertPage({ records: full.records.filter((r) => r.event.seq < Number(newer.cursor)), hasMore: false })
+    /** @type {Map<number, any>} */
+    const merged = new Map()
+    for (const t of [...older.turns, ...newer.turns]) merged.set(t.turn, { ...merged.get(t.turn), ...t })
+    assert.deepEqual([...merged.values()].sort((a, b) => a.turn - b.turn), expected, `cut=${cut}`)
+  }
+})
+
+test('轮次：还在运行的一轮没有 endedAt 和 result', () => {
+  const running = full.records.filter((r) => r.event.seq < 89)
+  const last = extractTurns(running).at(-1)
+  assert.equal(last?.turn, 6)
+  assert.equal(last?.endedAt, undefined)
+  assert.equal(last?.result, undefined)
+})
+
+test('轮次的结束原因 → result（DSH 0.2.2 的 TurnEndReasonMap，不认识的是 other）', () => {
+  assert.deepEqual(turnResult({ kind: 'completed' }), { result: 'completed' })
+  assert.deepEqual(turnResult({ kind: 'max-tokens' }), { result: 'completed' })
+  assert.deepEqual(turnResult({ kind: 'forked' }), { result: 'completed' })
+  assert.deepEqual(turnResult({ kind: 'aborted', reason: { kind: 'user' } }), { result: 'stopped', stoppedBy: 'user' })
+  assert.deepEqual(turnResult({ kind: 'aborted', reason: { kind: 'parent' } }), { result: 'stopped', stoppedBy: 'other' })
+  assert.deepEqual(turnResult({ kind: 'interrupted' }), { result: 'interrupted' })
+  assert.deepEqual(turnResult({ kind: 'blocked' }), { result: 'other' })
+  assert.deepEqual(turnResult({ kind: 'something-new' }), { result: 'other' })
+  assert.deepEqual(turnResult(undefined), { result: 'other' })
+  assert.deepEqual(turnResult({ kind: 'error', error: { message: '  rate limit\n exceeded ', code: 'RATE_LIMIT' } }), { result: 'failed', error: 'rate limit exceeded' })
+  assert.deepEqual(turnResult({ kind: 'error', error: { code: 'TOOL_ACTIVATION_FAILED' } }), { result: 'failed', error: 'TOOL_ACTIVATION_FAILED' })
+  assert.deepEqual(turnResult({ kind: 'error' }), { result: 'failed' })
+  const long = turnResult({ kind: 'error', error: { message: 'x'.repeat(500) } })
+  assert.equal(long.error?.length, TURN_ERROR_LIMIT + 1) // 截断后以「…」结尾
+  assert.ok(long.error?.endsWith('…'))
+})
+
+test('会话摘要的最近一轮：最后一个已经结束的轮次和那一轮最后一段回复的开头', () => {
+  const digest = turnDigest(full.records)
+  assert.equal(digest.lastTurn?.result, 'stopped')
+  assert.equal(typeof digest.lastTurn?.endedAt, 'number')
+  assert.equal(typeof digest.lastReply, 'string')
+  assert.doesNotMatch(digest.lastReply ?? '', /\n/)
+  assert.ok((digest.lastReply ?? '').length <= LAST_REPLY_LIMIT + 1)
+  // 最后一轮还在运行时，取上一轮已经结束的
+  const running = turnDigest(full.records.filter((r) => r.event.seq < 89))
+  assert.equal(running.lastTurn?.result, 'completed')
+  // 没有任何已结束的轮次
+  assert.deepEqual(turnDigest([]), { lastTurn: null, lastReply: null })
+})
+
+test('会话摘要的最近一轮：失败时带上原因', () => {
+  const records = [
+    { type: 'event', event: { type: 'turn/start', seq: 1, time: 10, data: { turn: 1 } } },
+    { type: 'event', event: { type: 'user/message', seq: 2, time: 11, data: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: 'FAIL' }] } } },
+    { type: 'event', event: { type: 'turn/end', seq: 3, time: 12, data: { turn: 1, reason: { kind: 'error', error: { message: 'upstream 400' } } } } },
+  ]
+  assert.deepEqual(turnDigest(records), { lastTurn: { result: 'failed', endedAt: 12, error: 'upstream 400' }, lastReply: null })
+})
+
+test('一页以用户消息开头、里面没有任何带 turn 的事件时，用更早日志里最近的轮次补上（facade 会多读一小段）', () => {
+  const userIndex = full.records.findIndex((r) => r.event.type === 'user/message' && r.event.data.source?.kind === 'user' && r.event.seq > 20)
+  // 只留下这条用户消息：这一页推断不出轮次
+  const lonely = { records: [full.records[userIndex]], hasMore: true }
+  assert.equal(convertPage(lonely).messages[0]?.turn, undefined)
+  const earlier = full.records.slice(0, userIndex)
+  assert.equal(turnBefore(earlier), 2)
+  assert.equal(convertPage(lonely, turnBefore(earlier)).messages[0]?.turn, 2)
+  assert.equal(turnBefore([]), undefined)
 })

@@ -19,7 +19,7 @@ import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { Facade, FacadeError } from '../../src/dsh/facade.js'
 import { AttentionTracker } from '../../src/dsh/attention.js'
 import { startDshWeb, DSH_VERSION, log } from '../helpers/dsh-runtime.mjs'
-import { startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE } from './fake-llm.mjs'
+import { FAIL_MESSAGE, startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE } from './fake-llm.mjs'
 
 /** 测试里模拟的设备身份：适配层要求每次调用都说明替谁发起 */
 const ACTOR = 'd_contracttest'
@@ -290,8 +290,43 @@ async function main() {
         if (!page.hasMore || page.cursor === null) break
         before = page.cursor
       }
-      if (JSON.stringify(paged) !== JSON.stringify(all.messages)) throw new Error(`分页结果不一致：${paged.length} vs ${all.messages.length}`)
+      if (JSON.stringify(paged) !== JSON.stringify(all.messages)) {
+        const i = paged.findIndex((m, k) => JSON.stringify(m) !== JSON.stringify(all.messages[k]))
+        throw new Error(`分页结果不一致：${paged.length} vs ${all.messages.length}；第 ${i} 条：${short({ ...paged[i], parts: undefined })} vs ${short({ ...all.messages[i], parts: undefined })}`)
+      }
       return `messages=${all.messages.length}`
+    })
+    await step('外观层：轮次（protocol.md 5.4）——每条消息都有所属的轮次，最后一轮是用户停止的', async () => {
+      const all = await facade.messages(ACTOR, sid, { limit: 200 })
+      const missing = all.messages.filter((m) => typeof m.turn !== 'number')
+      if (missing.length > 0) throw new Error(`没有轮次的消息：${missing.map((m) => m.id).join(',')}`)
+      const turns = all.turns
+      if (turns.length === 0) throw new Error('没有轮次')
+      const open = turns.filter((t) => t.result === undefined)
+      if (open.length > 0) throw new Error(`还有没结束的轮次：${short(open)}`)
+      const last = turns.at(-1)
+      if (last?.result !== 'stopped' || last.stoppedBy !== 'user') throw new Error(`最后一轮应当是用户停止：${short(last)}`)
+      const digest = await facade.refreshDigest(ACTOR, sid)
+      if (digest.lastTurn?.result !== 'stopped') throw new Error(`摘要的最近一轮不对：${short(digest)}`)
+      return `turns=${turns.map((t) => t.result).join(',')}`
+    })
+    await step('外观层：假模型返回错误（FAIL），这一轮的结果是 failed，带上错误说明', async () => {
+      await prompt(conn, sid, '请 FAIL 一次')
+      try {
+        await untilAsync(async () => {
+          const page = await facade.messages(ACTOR, sid, { limit: 20 })
+          return page.turns.at(-1)?.result === 'failed'
+        }, '这一轮以失败结束', 30_000)
+      } catch (error) {
+        const raw = valueOf(await conn.call('session/page', { request: { address: { kind: 'session', sessionId: sid }, maxMessages: 4 } }, { actor: ACTOR }))
+        const events = (/** @type {any} */ (raw)?.records ?? []).map((/** @type {any} */ r) => `${r.event.type}${r.event.type === 'turn/end' ? JSON.stringify(r.event.data.reason) : ''}${r.event.type === 'assistant/message' ? JSON.stringify(r.event.data.message?.content).slice(0, 160) : ''}${r.event.type === 'user/message' ? JSON.stringify(r.event.data.content).slice(0, 80) : ''}`)
+        throw new Error(`${error instanceof Error ? error.message : error}；最近的事件：${events.slice(-12).join(' ')}`, { cause: error })
+      }
+      const last = (await facade.messages(ACTOR, sid, { limit: 20 })).turns.at(-1)
+      if (!last?.error?.includes(FAIL_MESSAGE)) throw new Error(`错误说明里没有假模型的错误：${short(last)}`)
+      const digest = await facade.refreshDigest(ACTOR, sid)
+      if (digest.lastTurn?.result !== 'failed') throw new Error(`摘要的最近一轮不对：${short(digest)}`)
+      return short(last, 160)
     })
     await step('【反向】外观层：不存在的会话返回 404', async () => {
       try {

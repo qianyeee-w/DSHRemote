@@ -52,6 +52,8 @@ fun main() {
 最后一段：以上内容都应该能长按选中和复制。
 `
 export const SHELL_MARKER_FILE = 'contract-output.txt'
+/** FAIL 关键词让假模型返回的错误说明 */
+export const FAIL_MESSAGE = 'fake failure for DSHRemote tests'
 
 /** @param {http.ServerResponse} res @param {[string, unknown][]} events @param {number} [delayMs] */
 async function sse(res, events, delayMs = 0) {
@@ -112,13 +114,14 @@ function toolReply(res, name, input) {
 }
 
 /**
- * @returns {Promise<{ url: string, requests: () => number, diagnostics: () => { tools: string[], lastToolResult: string }, close: () => Promise<void> }>}
+ * @returns {Promise<{ url: string, requests: () => number, diagnostics: () => { tools: string[], lastToolResult: string, lastUserText: string }, close: () => Promise<void> }>}
  */
 export async function startFakeLlm() {
   let requests = 0
   /** @type {string[]} */
   let lastTools = []
   let lastToolResult = ''
+  let lastUserText = ''
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (d) => { body += d })
@@ -146,7 +149,15 @@ export async function startFakeLlm() {
         return
       }
       const text = JSON.stringify(messages.findLast((m) => m.role === 'user')?.content ?? '')
-      if (text.includes('ASK')) {
+      lastUserText = text.slice(0, 300)
+      // 只看最后一段文字：上一轮没有完整回复（被停止、失败）时，DSH 会把两条用户消息合在一起发过来
+      const userBlocks = messages.findLast((m) => m.role === 'user')?.content
+      const lastText = Array.isArray(userBlocks) ? String(userBlocks.findLast((/** @type {any} */ b) => b?.type === 'text')?.text ?? '') : String(userBlocks ?? '')
+      if (lastText.includes('FAIL')) {
+        // 不可重试的错误（DSH 归为 INVALID_REQUEST）：这一轮以 error 结束（protocol.md 5.4 的 failed）
+        res.writeHead(400, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: FAIL_MESSAGE } }))
+      } else if (text.includes('ASK')) {
         void toolReply(res, 'ask_user_question', { questions: [{ id: 'q1', question: '用哪种方案？', header: '选择', options: [{ label: '方案A' }, { label: '方案B' }], multi_select: false }] })
       } else if (text.includes('SHELL')) {
         // Linux 上是 bash，Windows 上是 pwsh
@@ -176,7 +187,7 @@ export async function startFakeLlm() {
     url: `http://127.0.0.1:${address.port}`,
     requests: () => requests,
     // 检查失败时用来定位原因：DSH 提供了哪些工具、最近一次工具结果是什么
-    diagnostics: () => ({ tools: lastTools, lastToolResult }),
+    diagnostics: () => ({ tools: lastTools, lastToolResult, lastUserText }),
     close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()) }),
   }
 }

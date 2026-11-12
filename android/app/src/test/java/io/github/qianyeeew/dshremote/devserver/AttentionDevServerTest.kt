@@ -89,7 +89,7 @@ class AttentionDevServerTest {
     @Test
     fun approvingShellRunsTheToolAndCollapsesTheCard() =
         runBlocking<Unit> {
-            assertTrue(withContext(main) { vm.send("SHELL 运行一下", steer = true) })
+            assertTrue(withContext(main) { vm.send("SHELL 运行一下") })
             val waiting = await("出现审批", timeoutMillis = 30_000) { state -> state.attention.any { it.kind == AttentionKind.APPROVAL } }
             val approval = waiting.attention.single()
             assertTrue("插件补上了要执行的命令：${approval.approval}", approval.approval?.summary?.contains("echo") == true)
@@ -112,7 +112,7 @@ class AttentionDevServerTest {
     @Test
     fun answeringAQuestion() =
         runBlocking<Unit> {
-            assertTrue(withContext(main) { vm.send("ASK 问我", steer = true) })
+            assertTrue(withContext(main) { vm.send("ASK 问我") })
             val question =
                 await("出现提问", timeoutMillis = 30_000) { state ->
                     state.attention.any {
@@ -140,7 +140,7 @@ class AttentionDevServerTest {
     @Test
     fun handledOnAnotherDeviceCollapsesWithNoticeAndAnsweringAgainIsAConflict() =
         runBlocking<Unit> {
-            assertTrue(withContext(main) { vm.send("SHELL 运行一下", steer = true) })
+            assertTrue(withContext(main) { vm.send("SHELL 运行一下") })
             val approval =
                 await("出现审批", timeoutMillis = 30_000) { state -> state.attention.isNotEmpty() }
                     .attention

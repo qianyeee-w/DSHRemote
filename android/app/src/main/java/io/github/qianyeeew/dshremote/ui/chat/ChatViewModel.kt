@@ -13,6 +13,7 @@ import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.chat.ChatTimeline
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.Outbox
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -57,6 +59,9 @@ interface ChatBackend {
     suspend fun permissionPresets(): PermissionPresetList
 
     suspend fun setPermissionPreset(preset: String)
+
+    /** 电脑上的项目，用来在顶栏显示项目名。 */
+    suspend fun workspaces(): List<Workspace>
 }
 
 /** 通过实时连接订阅，通过 [ConnectionManager.api] 调用接口。 */
@@ -84,6 +89,8 @@ class LiveChatBackend(
     override suspend fun setPermissionPreset(preset: String) {
         api().setPermissionPreset(sessionId, preset)
     }
+
+    override suspend fun workspaces(): List<Workspace> = api().workspaces()
 
     private fun api() = connections.api(hostId) ?: throw OfflineException()
 
@@ -124,10 +131,14 @@ data class ChatState(
     /** 这个会话的待处理事项（不含已经在本地确认结束的），按出现的先后。 */
     val attention: List<Attention> = emptyList(),
     val attentionUi: Map<String, AttentionUi> = emptyMap(),
+    /** 电脑名（顶栏第二行）。 */
+    val hostName: String? = null,
+    /** 项目名（顶栏第二行）：电脑上登记的项目名，拿不到时用工作目录的最后一段。 */
+    val projectName: String? = null,
 ) {
     val online: Boolean get() = link is LinkStatus.Online
 
-    /** 正在运行：发消息默认插话。 */
+    /** 正在运行：发消息插话。 */
     val running: Boolean get() = session?.status == SessionStatus.RUNNING
 
     /** 任务还没结束（运行中，或者在等待审批、回答）：显示「停止」。 */
@@ -172,6 +183,7 @@ class ChatViewModel(
     private val backend: ChatBackend,
     responder: AttentionResponder,
     resolvedEvents: Flow<LiveEvent.AttentionResolved>,
+    hostName: Flow<String?> = flowOf(null),
 ) : ViewModel() {
     /** 这个会话的审批和提问（T10）。 */
     val attention = AttentionHandler(viewModelScope, responder, resolvedEvents)
@@ -179,6 +191,7 @@ class ChatViewModel(
     private val timeline = MutableStateFlow(ChatTimeline())
     private val outbox = MutableStateFlow(Outbox())
     private val flags = MutableStateFlow(Flags())
+    private val workspaces = MutableStateFlow<List<Workspace>>(emptyList())
     private var subscription: Job? = null
     private var reload: Job? = null
 
@@ -186,6 +199,8 @@ class ChatViewModel(
         val loadingOlder: Boolean = false,
         val loadFailed: Boolean = false,
     )
+
+    private val names = combine(hostName, workspaces) { host, list -> host to list }
 
     val state: StateFlow<ChatState> =
         combine(states, timeline, outbox, flags, attention.ui) { live, t, o, f, attentionUi ->
@@ -202,6 +217,8 @@ class ChatViewModel(
                 attention = pendingAttention(host, session, sessionId).filter { attentionUi[it.attentionId]?.resolution == null },
                 attentionUi = attentionUi,
             )
+        }.combine(names) { base, (name, projects) ->
+            base.copy(hostName = name, projectName = projectName(base.session, projects))
         }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatState(null, LinkStatus.Stopped, emptyList(), false, false, false, false))
 
     init {
@@ -217,6 +234,7 @@ class ChatViewModel(
 
     /** 界面可见：订阅推送（插件每个会话按引用计数订阅，离开页面后取消）。 */
     fun onVisible() {
+        loadWorkspaces()
         if (subscription?.isActive == true) return
         subscription =
             viewModelScope.launch {
@@ -258,16 +276,13 @@ class ChatViewModel(
     }
 
     /**
-     * 发消息。运行中并且 [steer] 为 true 时插话（下一步就让模型看到），否则排队。
+     * 发消息。运行中一律插话（下一步就让模型看到），否则排队（空闲时就是马上开始）。用户确认过不提供「排队到本轮结束」的选择。
      * 返回 false 表示没有发送（内容为空、太长，或者现在不能发送）。
      */
-    fun send(
-        text: String,
-        steer: Boolean,
-    ): Boolean {
+    fun send(text: String): Boolean {
         val current = state.value
         if (text.isBlank() || text.length > OutgoingMessage.MAX_TEXT || !current.canSend) return false
-        val mode = if (current.running && steer) PromptMode.STEER else PromptMode.QUEUE
+        val mode = if (current.running) PromptMode.STEER else PromptMode.QUEUE
         val message = OutgoingMessage(text, mode)
         outbox.update { it.add(message) }
         deliver(message)
@@ -313,6 +328,18 @@ class ChatViewModel(
 
     override fun onCleared() {
         onHidden()
+    }
+
+    /** 项目名只是顶栏的说明，读不到就算了（之后回到页面再试）。 */
+    private fun loadWorkspaces() {
+        if (workspaces.value.isNotEmpty()) return
+        viewModelScope.launch {
+            try {
+                workspaces.value = backend.workspaces()
+            } catch (_: ApiException) {
+            } catch (_: OfflineException) {
+            }
+        }
     }
 
     private fun reloadLatest() {
@@ -387,6 +414,22 @@ class ChatViewModel(
             }
         }
     }
+}
+
+/** 顶栏的项目名：会话所属的已登记项目；没有登记的用工作目录的最后一段。 */
+internal fun projectName(
+    session: SessionSummary?,
+    workspaces: List<Workspace>,
+): String? {
+    if (session == null) return null
+    session.workspaceId?.let { id ->
+        workspaces
+            .firstOrNull { it.workspaceId == id }
+            ?.title
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+    }
+    return session.cwd?.takeIf { it.isNotBlank() }?.let(::fileName)
 }
 
 /**

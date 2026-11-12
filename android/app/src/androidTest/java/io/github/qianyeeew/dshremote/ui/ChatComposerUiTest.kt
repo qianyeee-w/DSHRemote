@@ -7,10 +7,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.isNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -50,29 +54,74 @@ class ChatComposerUiTest {
         compose.onNodeWithTag("chat-composer-options").assertDoesNotExist()
     }
 
+    /** 没有焦点就收起（设计规格 6.3），写了一半的字留着；收起时发送键还在，发送被拒绝时字不丢。 */
     @Test
     fun draftSurvivesBlurAndRejectedSend() {
-        render(ChatActions(onSend = { _, _ -> false }))
+        render(ChatActions(onSend = { false }))
         compose.onNodeWithTag("chat-input").performTextInput("继续验证")
         compose.onNodeWithText("移开焦点").performClick()
-        compose.onNodeWithTag("chat-composer-options").assertIsDisplayed()
-        compose.onNodeWithTag("chat-send").performClick()
+        compose.onNodeWithTag("chat-composer-options").assertDoesNotExist()
+        compose.onNodeWithTag("chat-send").assertIsEnabled().performClick()
         compose.onNodeWithTag("chat-input").assertTextContains("继续验证")
     }
 
     @Test
-    fun acceptedSendClearsDraftAndForwardsSteeringMode() {
-        val sent = mutableListOf<Pair<String, Boolean>>()
+    fun acceptedSendClearsDraft() {
+        val sent = mutableListOf<String>()
         render(
-            ChatActions(onSend = { text, steer ->
-                sent += text to steer
+            ChatActions(onSend = { text ->
+                sent += text
                 true
             }),
         )
         compose.onNodeWithTag("chat-input").performTextInput("运行测试")
         compose.onNodeWithTag("chat-send").performClick()
         compose.onNodeWithTag("chat-send").assertIsNotEnabled()
-        compose.runOnIdle { assertEquals(listOf("运行测试" to true), sent) }
+        compose.runOnIdle { assertEquals(listOf("运行测试"), sent) }
+    }
+
+    /** 发送键的三种样子：没字且空闲不可点；有字发送；没字且在运行时是停止，有字时又变回发送（插话）。 */
+    @Test
+    fun sendKeyHasThreeStates() {
+        var state by mutableStateOf(onlineChatState())
+        var stopped = 0
+        val sent = mutableListOf<String>()
+        compose.setContent {
+            DshRemoteTheme {
+                ChatComposer(
+                    state,
+                    ChatActions(onSend = {
+                        sent += it
+                        true
+                    }, onCancelRun = { stopped++ }),
+                )
+            }
+        }
+        compose.onNodeWithTag("chat-send").assertIsNotEnabled()
+        compose.onNodeWithTag("chat-stop").assertDoesNotExist()
+        compose.runOnIdle { state = onlineChatState(SessionStatus.RUNNING) }
+        compose.onNodeWithTag("chat-send").assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.chat_stop)).assertIsEnabled()
+        compose.onNodeWithTag("chat-stop").performClick()
+        compose.onNodeWithTag("chat-input").performTextInput("说快一点")
+        compose.onNodeWithTag("chat-stop").assertDoesNotExist()
+        compose.onNodeWithTag("chat-send").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(1, stopped)
+            assertEquals(listOf("说快一点"), sent)
+        }
+    }
+
+    /** 占位文字随场景变化：空闲「继续对话」，运行中「补充一句」，离线时说明不能发。 */
+    @Test
+    fun placeholderFollowsTheSession() {
+        var state by mutableStateOf(onlineChatState())
+        compose.setContent { DshRemoteTheme { ChatComposer(state, ChatActions()) } }
+        compose.onNodeWithText(context.getString(R.string.chat_input_hint)).assertIsDisplayed()
+        compose.runOnIdle { state = onlineChatState(SessionStatus.RUNNING) }
+        compose.onNodeWithText(context.getString(R.string.chat_input_hint_running)).assertIsDisplayed()
+        compose.runOnIdle { state = state.copy(link = LinkStatus.Stopped) }
+        compose.onNodeWithText(context.getString(R.string.chat_input_hint_offline)).assertIsDisplayed()
     }
 
     @Test
@@ -123,7 +172,9 @@ class ChatComposerUiTest {
         compose.runOnIdle { state = state.copy(link = LinkStatus.Stopped) }
         compose.onNodeWithTag("chat-input").assertTextContains("保留草稿").assertIsNotEnabled()
         compose.onNodeWithTag("chat-send").assertIsNotEnabled()
-        compose.onNodeWithContentDescription(context.getString(R.string.design_model_value, "测试模型")).assertIsNotEnabled()
+        compose
+            .onAllNodesWithContentDescription(context.getString(R.string.design_model_value, "测试模型"))
+            .assertAll(isNotEnabled())
     }
 
     @Test

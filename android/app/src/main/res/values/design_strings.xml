@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="design_default_permission">默认权限</string>
+    <string name="design_default_permission">默认审批方式</string>
     <string name="design_choose_model">选择模型</string>
-    <string name="design_permission_value">权限模式：%1$s</string>
+    <string name="design_permission_value">审批方式：%1$s</string>
     <string name="design_model_value">模型：%1$s</string>
-    <string name="design_permission_read_only">只读</string>
-    <string name="design_permission_workspace">工作区写入</string>
-    <string name="design_permission_full">完全访问</string>
+    <string name="design_permission_read_only">只读，改动先问</string>
+    <string name="design_permission_workspace">改文件不问</string>
+    <string name="design_permission_full">全部不问</string>
+    <string name="design_permission_read_only_hint">只能读文件，要改动时先问你</string>
+    <string name="design_permission_workspace_hint">在项目里可以直接改，超出项目时问你</string>
+    <string name="design_permission_full_hint">不再询问，可以访问整台电脑</string>
     <string name="design_hosts_intro">连接你的电脑，继续手边的任务。</string>
     <string name="design_paired_hosts">已配对的电脑</string>
     <string name="design_connection_management">连接管理</string>

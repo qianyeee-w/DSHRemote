@@ -3,6 +3,7 @@ package io.github.qianyeeew.dshremote.ui.chat
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -11,25 +12,26 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -58,6 +60,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,10 +75,11 @@ import io.github.qianyeeew.dshremote.ui.attention.AttentionCard
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
 import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
 import io.github.qianyeeew.dshremote.ui.attention.Resolution
-import io.github.qianyeeew.dshremote.ui.common.DesignTopBar
-import io.github.qianyeeew.dshremote.ui.common.RoundIconButton
+import io.github.qianyeeew.dshremote.ui.common.PillButton
+import io.github.qianyeeew.dshremote.ui.common.StatusMark
+import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.sessionTitleText
-import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
+import io.github.qianyeeew.dshremote.ui.hosts.needsAttention
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -83,7 +87,7 @@ import kotlinx.coroutines.launch
 /** 页面上的操作。 */
 class ChatActions(
     val onBack: () -> Unit = {},
-    val onSend: (text: String, steer: Boolean) -> Boolean = { _, _ -> false },
+    val onSend: (text: String) -> Boolean = { false },
     val onRetrySend: (requestId: String) -> Unit = {},
     val onCancelRun: () -> Unit = {},
     val onLoadOlder: () -> Unit = {},
@@ -189,87 +193,57 @@ fun ChatContent(
     PickerDialog(picker, state, actions)
 }
 
+/** 顶栏（设计规格 7.2）：返回、会话名，下面一行灰字「电脑名 · 项目名 · 审批方式」。没有「更多」按钮。 */
 @Composable
 private fun ChatTopBar(
     state: ChatState,
     actions: ChatActions,
 ) {
-    var menu by remember { mutableStateOf(false) }
-    DesignTopBar(
-        title = sessionTitleText(state.session?.title),
-        navigation = { RoundIconButton(R.drawable.ic_arrow_back, stringResource(R.string.action_back), actions.onBack) },
-        subtitle = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                state.session?.status?.let { status ->
-                    Text(
-                        stringResource(
-                            when (status) {
-                                SessionStatus.RUNNING -> R.string.session_status_running
-                                SessionStatus.WAITING -> R.string.session_status_waiting
-                                SessionStatus.IDLE -> R.string.session_status_idle
-                                SessionStatus.UNKNOWN -> R.string.session_status_unknown
-                            },
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color =
-                            if (status ==
-                                SessionStatus.WAITING
-                            ) {
-                                DesignTheme.colors.waitingText
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                    )
-                }
-                if (state.session?.permissionPreset == "danger-full-access") {
-                    Text(
-                        permissionLabel(state.session.permissionPreset),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = DesignTheme.colors.waitingText,
-                    )
-                }
+    val colors = DesignTheme.colors
+    val subtitle =
+        listOfNotNull(
+            state.hostName,
+            state.projectName,
+            state.session?.permissionPreset?.let { permissionLabel(it) },
+        ).joinToString(" · ")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.page)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(start = 4.dp, end = 20.dp, top = 8.dp)
+            .heightIn(min = 52.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        IconButton(onClick = actions.onBack) {
+            Icon(
+                painterResource(R.drawable.ic_dsh_chevron_left),
+                stringResource(R.string.action_back),
+                Modifier.size(20.dp),
+                tint = colors.text,
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                sessionTitleText(state.session?.title),
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("chat-subtitle"),
+                )
             }
-        },
-        actions = {
-            Box {
-                RoundIconButton(R.drawable.ic_more_vert, stringResource(R.string.action_more), { menu = true }, enabled = state.online)
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                state.session
-                                    ?.model
-                                    ?.model
-                                    ?.let { stringResource(R.string.chat_menu_model_current, it) }
-                                    ?: stringResource(R.string.chat_menu_model),
-                            )
-                        },
-                        onClick = {
-                            menu = false
-                            actions.onOpenModels()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                state.session?.permissionPreset?.let {
-                                    stringResource(
-                                        R.string.chat_menu_preset_current,
-                                        permissionLabel(it),
-                                    )
-                                }
-                                    ?: stringResource(R.string.chat_menu_preset),
-                            )
-                        },
-                        onClick = {
-                            menu = false
-                            actions.onOpenPresets()
-                        },
-                    )
-                }
-            }
-        },
-    )
+        }
+    }
 }
 
 /** 最新的消息在底部（reverseLayout），滚到顶部附近时取更早的一页。 */
@@ -282,7 +256,8 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
-    val reversed = remember(state.items) { state.items.asReversed() }
+    val blocks = remember(state.items) { chatBlocks(state.items) }
+    val reversed = remember(blocks) { blocks.asReversed() }
     // 停在底部时跟随新消息。「是否停在底部」只在用户自己滚动之后更新：新消息连续到达时，
     // 列表会把原来的那一项留在原位，不能拿那一刻的位置来判断
     var stickToBottom by remember { mutableStateOf(true) }
@@ -321,13 +296,17 @@ private fun MessageList(
                     focusManager.clearFocus()
                 }
             },
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.Bottom),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.Bottom),
     ) {
-        items(reversed, key = { it.key }, contentType = { it::class }) { item ->
-            when (item) {
-                is ChatItem.Entry -> MessageView(item.message, onCopied)
-                is ChatItem.Local -> LocalMessageView(item.local) { actions.onRetrySend(item.local.outgoing.requestId) }
+        if (state.running) {
+            item(key = "running-line") { RunningLine(currentStep(blocks), replying = blocks.lastOrNull() is ChatBlock.Reply) }
+        }
+        items(reversed, key = { it.key }, contentType = { it::class }) { block ->
+            when (block) {
+                is ChatBlock.User -> UserBubble(block.text, block.local) { block.local?.let { actions.onRetrySend(it.outgoing.requestId) } }
+                is ChatBlock.Reply -> MarkdownText(block.text, onCopied)
+                is ChatBlock.Steps -> StepsView(block)
             }
         }
         item(key = "history-header") { HistoryHeader(state, actions) }
@@ -344,33 +323,43 @@ private fun HistoryHeader(
         when {
             state.loadFailed && !state.loaded ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.chat_load_failed), color = MaterialTheme.colorScheme.error)
-                    OutlinedButton(onClick = actions.onRetryLoad) { Text(stringResource(R.string.action_retry)) }
+                    Text(
+                        stringResource(R.string.chat_load_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DesignTheme.colors.danger,
+                    )
+                    PillButton(stringResource(R.string.action_retry), actions.onRetryLoad)
                 }
             !state.loaded ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CircularProgressIndicator(Modifier.padding(4.dp))
-                    Text(stringResource(R.string.chat_loading))
+                    StatusMarker(StatusMark.RUNNING)
+                    Text(
+                        stringResource(R.string.chat_loading),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DesignTheme.colors.textSecondary,
+                    )
                 }
-            state.hasMore || state.loadingOlder -> CircularProgressIndicator()
+            state.hasMore || state.loadingOlder -> StatusMarker(StatusMark.RUNNING)
             state.items.isEmpty() ->
                 Text(
                     stringResource(R.string.chat_empty),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DesignTheme.colors.textSecondary,
                     modifier = Modifier.padding(vertical = 32.dp),
                 )
         }
     }
 }
 
+/** 连接有问题时，顶栏下面一行字说明（状态正常时不显示，设计原则 2）。 */
 @Composable
 private fun LinkBanner(state: ChatState) {
-    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            StatusBadge(state.link)
-            Text(statusDetail(state.link), style = MaterialTheme.typography.bodySmall)
-        }
-    }
+    Text(
+        statusDetail(state.link),
+        style = MaterialTheme.typography.bodySmall,
+        color = if (state.link.needsAttention) DesignTheme.colors.danger else DesignTheme.colors.textSecondary,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag("chat-link-banner"),
+    )
 }
 
 /** 这个会话的审批和提问，显示在输入框上方。事项多或者很长时可以滚动。 */
@@ -453,7 +442,7 @@ private fun PickerDialog(
     AlertDialog(
         onDismissRequest = actions.onClosePicker,
         title = {
-            Text(stringResource(if (picker is Picker.Presets) R.string.chat_menu_preset else R.string.chat_menu_model))
+            Text(stringResource(if (picker is Picker.Presets) R.string.chat_picker_preset else R.string.chat_picker_model))
         },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
@@ -461,7 +450,7 @@ private fun PickerDialog(
                     Picker.Closed -> Unit
                     Picker.Loading ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            CircularProgressIndicator()
+                            StatusMarker(StatusMark.RUNNING)
                             Text(stringResource(R.string.chat_picker_loading))
                         }
                     is Picker.Models -> {
@@ -479,7 +468,12 @@ private fun PickerDialog(
                     is Picker.Presets -> {
                         if (picker.list.presets.isEmpty()) Text(stringResource(R.string.chat_picker_empty))
                         picker.list.presets.forEach { preset ->
-                            PickerRow(title = preset.name, subtitle = preset.id, selected = preset.id == state.session?.permissionPreset) {
+                            val known = permissionHint(preset.id)
+                            PickerRow(
+                                title = if (known != null) permissionLabel(preset.id) else preset.name,
+                                subtitle = known,
+                                selected = preset.id == state.session?.permissionPreset,
+                            ) {
                                 actions.onChoosePreset(preset.id)
                             }
                         }
@@ -495,17 +489,17 @@ private fun PickerDialog(
 @Composable
 private fun PickerRow(
     title: String,
-    subtitle: String,
+    subtitle: String?,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     ListItem(
         headlineContent = { Text(title) },
-        supportingContent = { Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        supportingContent = subtitle?.takeIf { it.isNotBlank() }?.let { { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
         colors =
             ListItemDefaults.colors(
-                containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                containerColor = if (selected) DesignTheme.colors.fill else Color.Transparent,
             ),
         modifier =
             Modifier.clickable {

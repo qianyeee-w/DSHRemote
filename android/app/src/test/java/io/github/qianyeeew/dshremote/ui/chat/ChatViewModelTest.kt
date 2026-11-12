@@ -12,6 +12,7 @@ import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.TextPart
+import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
@@ -100,30 +101,37 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun sendWhileRunningSteersByDefaultAndQueuesOtherwise() {
+    fun sendWhileRunningAlwaysSteersAndStartsImmediatelyWhenIdle() {
         val vm = visible()
-        assertTrue(vm.send("空闲时", steer = true))
+        assertTrue(vm.send("空闲时"))
         assertEquals(PromptMode.QUEUE, backend.prompts.last().mode)
 
         states.value = live(SessionStatus.RUNNING)
         assertTrue(vm.state.value.running)
-        assertTrue(vm.send("插话", steer = true))
+        assertTrue(vm.send("插话"))
         assertEquals(PromptMode.STEER, backend.prompts.last().mode)
-        assertTrue(vm.send("排队", steer = false))
-        assertEquals(PromptMode.QUEUE, backend.prompts.last().mode)
 
-        assertFalse(vm.send("   ", steer = true))
-        assertFalse(vm.send("x".repeat(OutgoingMessage.MAX_TEXT + 1), steer = true))
+        assertFalse(vm.send("   "))
+        assertFalse(vm.send("x".repeat(OutgoingMessage.MAX_TEXT + 1)))
+    }
+
+    @Test
+    fun projectNameComesFromTheRegisteredWorkspaceOrTheDirectory() {
+        val session = SessionSummary("s", "标题", workspaceId = "w1", cwd = "/home/u/code/dshremote", updatedAt = 0)
+        assertEquals("DSHRemote", projectName(session, listOf(Workspace("w1", "DSHRemote", "/home/u/code/dshremote"))))
+        assertEquals("dshremote", projectName(session, emptyList()))
+        assertEquals(null, projectName(session.copy(cwd = null), emptyList()))
+        assertEquals(null, projectName(null, emptyList()))
     }
 
     @Test
     fun cannotSendBeforeHistoryIsLoadedOrWhileOffline() {
         val vm = viewModel()
         vm.onVisible()
-        assertFalse("还没读到历史", vm.send("hi", steer = true))
+        assertFalse("还没读到历史", vm.send("hi"))
         backend.push(SessionEvent.Resync(SESSION))
         states.value = mapOf("h1" to HostLiveState(LinkStatus.Connecting))
-        assertFalse("不在线", vm.send("hi", steer = true))
+        assertFalse("不在线", vm.send("hi"))
         assertTrue(backend.prompts.isEmpty())
     }
 
@@ -131,7 +139,7 @@ class ChatViewModelTest {
     fun localMessageShowsStatusAndDisappearsWhenItAppearsInTheLog() {
         val vm = visible(MessagePage(listOf(msg("u0", "你好", MessageRole.USER)), hasMore = false, cursor = null))
         backend.promptGate = CompletableDeferred()
-        vm.send("你好", steer = true)
+        vm.send("你好")
         assertEquals(OutgoingStatus.SENDING, vm.locals().single().status)
         backend.promptGate!!.complete(Unit)
         assertEquals(OutgoingStatus.SENT, vm.locals().single().status)
@@ -146,7 +154,7 @@ class ChatViewModelTest {
     fun failedSendIsRetriedWithTheSameRequestId() {
         val vm = visible()
         backend.promptError = ApiException.Network(IOException("x"))
-        vm.send("重要的消息", steer = true)
+        vm.send("重要的消息")
         val failed = vm.locals().single()
         assertEquals(OutgoingStatus.FAILED, failed.status)
 
@@ -160,8 +168,8 @@ class ChatViewModelTest {
     @Test
     fun sameTextSentTwiceMatchesInOrder() {
         val vm = visible()
-        vm.send("继续", steer = true)
-        vm.send("继续", steer = true)
+        vm.send("继续")
+        vm.send("继续")
         val first = vm.locals()[0].outgoing.requestId
         backend.push(upsert(msg("u1", "继续", MessageRole.USER), 1))
         assertEquals(1, vm.locals().size)
@@ -426,6 +434,11 @@ class ChatViewModelTest {
         override suspend fun setPermissionPreset(preset: String) {
             check()
             presetChanges += preset
+        }
+
+        override suspend fun workspaces(): List<Workspace> {
+            check()
+            return emptyList()
         }
 
         private fun check() {

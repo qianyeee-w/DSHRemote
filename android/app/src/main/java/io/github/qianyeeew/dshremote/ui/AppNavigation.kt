@@ -32,6 +32,7 @@ import io.github.qianyeeew.dshremote.ui.sessions.SessionListScreen
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListViewModel
 import io.github.qianyeeew.dshremote.ui.settings.BackgroundHint
 import io.github.qianyeeew.dshremote.ui.settings.SettingsScreen
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 
 /*
@@ -135,6 +136,7 @@ fun AppNavigation(
                             backend = LiveChatBackend(container.connections, route.hostId, route.sessionId),
                             responder = LiveAttentionResponder(container.connections, route.hostId),
                             resolvedEvents = container.connections.resolvedEvents(route.hostId),
+                            hostName = container.hosts.hosts.map { list -> list.firstOrNull { it.hostId == route.hostId }?.name },
                         )
                     },
                 onBack = { nav.popBackStack() },

@@ -85,7 +85,7 @@ class ChatDevServerTest {
     fun streamedMarkdownEndsUpEqualToTheHistory() =
         runBlocking<Unit> {
             val keysSeen = CopyOnWriteArrayList<String>()
-            assertTrue(withContext(main) { vm.send("MARKDOWN 请输出", steer = true) })
+            assertTrue(withContext(main) { vm.send("MARKDOWN 请输出") })
 
             // 本地气泡在日志里出现用户消息后消失；草稿出现，最后被正式消息替换，并且沿用草稿的列表项
             var sawDraft = false
@@ -113,9 +113,9 @@ class ChatDevServerTest {
     @Test
     fun steerWhileRunningThenStop() =
         runBlocking<Unit> {
-            assertTrue(withContext(main) { vm.send("SLOW 慢慢说", steer = true) })
+            assertTrue(withContext(main) { vm.send("SLOW 慢慢说") })
             await("开始运行", timeoutMillis = 30_000) { it.running }
-            assertTrue(withContext(main) { vm.send("插话：说快一点", steer = true) })
+            assertTrue(withContext(main) { vm.send("插话：说快一点") })
             await("插话已发送") { state -> state.items.filterIsInstance<ChatItem.Local>().none { it.local.status == OutgoingStatus.SENDING } }
             assertTrue(
                 "插话没有失败",

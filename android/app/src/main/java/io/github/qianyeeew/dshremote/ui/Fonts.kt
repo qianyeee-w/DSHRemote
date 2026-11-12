@@ -1,66 +1,29 @@
 package io.github.qianyeeew.dshremote.ui
 
-import android.content.res.Resources
-import android.graphics.Typeface
-import android.os.Build
-import androidx.annotation.RequiresApi
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import io.github.qianyeeew.dshremote.R
-import android.graphics.fonts.Font as AndroidFont
-import android.graphics.fonts.FontFamily as AndroidFontFamily
 
+/**
+ * 界面和正文：IBM Plex Sans SC。它同时带中文和西文字形，所以所有系统版本都只用这一个字族，
+ * 不再需要 Android 10 起的自定义回退链，Android 8、9 也不用另走一条分支。两者都没有的字形（例如 emoji）
+ * 由系统字体回退。
+ *
+ * 字族是进程级的单例：Compose 的字体解析器和 `ResourcesCompat` 都按资源缓存已加载的 Typeface，
+ * 每个约 8.5 MB 的字重在一个进程里只加载一次。不要在 Composable 里新建字族或用 `Font.Builder` 读字体文件——
+ * 上一次改版这样做时，每次创建界面都重新加载中文字库，真机测试进程因此内存不足。
+ */
+val InterfaceFontFamily =
+    FontFamily(
+        Font(R.font.ibm_plex_sans_sc_regular, FontWeight.Normal),
+        Font(R.font.ibm_plex_sans_sc_medium, FontWeight.Medium),
+        Font(R.font.ibm_plex_sans_sc_semibold, FontWeight.SemiBold),
+    )
+
+/** 代码：JetBrains Mono，400 和 600（关键字加粗）。 */
 val CodeFontFamily =
     FontFamily(
         Font(R.font.jetbrains_mono_regular, FontWeight.Normal),
-        Font(R.font.jetbrains_mono_medium, FontWeight.Medium),
+        Font(R.font.jetbrains_mono_semibold, FontWeight.SemiBold),
     )
-
-private val ChineseFontFamily =
-    FontFamily(
-        Font(R.font.noto_sans_sc_regular, FontWeight.Normal),
-        Font(R.font.noto_sans_sc_medium, FontWeight.Medium),
-        Font(R.font.noto_sans_sc_semibold, FontWeight.SemiBold),
-    )
-
-private val combinedFamilyLock = Any()
-
-@Volatile
-private var cachedCombinedFamily: FontFamily? = null
-
-/** 字体全部随包提供。Android 10 起由系统按字形使用 Inter → Noto Sans SC 回退链。 */
-@Composable
-internal fun rememberInterfaceFont(): FontFamily {
-    val resources = LocalResources.current
-    return remember(resources) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) combinedFamily(resources) else ChineseFontFamily
-    }
-}
-
-@RequiresApi(Build.VERSION_CODES.Q)
-private fun combinedFamily(resources: Resources): FontFamily {
-    cachedCombinedFamily?.let { return it }
-    return synchronized(combinedFamilyLock) {
-        cachedCombinedFamily ?: buildCombinedFamily(resources).also { cachedCombinedFamily = it }
-    }
-}
-
-@RequiresApi(Build.VERSION_CODES.Q)
-private fun buildCombinedFamily(resources: Resources): FontFamily {
-    fun family(vararg ids: Int): AndroidFontFamily {
-        val builder = AndroidFontFamily.Builder(AndroidFont.Builder(resources, ids.first()).build())
-        ids.drop(1).forEach { builder.addFont(AndroidFont.Builder(resources, it).build()) }
-        return builder.build()
-    }
-    return FontFamily(
-        Typeface
-            .CustomFallbackBuilder(family(R.font.inter_regular, R.font.inter_medium, R.font.inter_semibold))
-            .addCustomFallback(family(R.font.noto_sans_sc_regular, R.font.noto_sans_sc_medium, R.font.noto_sans_sc_semibold))
-            .setSystemFallback("sans-serif")
-            .build(),
-    )
-}

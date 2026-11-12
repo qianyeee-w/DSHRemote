@@ -67,14 +67,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
-import io.github.qianyeeew.dshremote.ui.LocalStatusColors
+import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCard
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
 import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
 import io.github.qianyeeew.dshremote.ui.attention.Resolution
 import io.github.qianyeeew.dshremote.ui.common.DesignTopBar
 import io.github.qianyeeew.dshremote.ui.common.RoundIconButton
-import io.github.qianyeeew.dshremote.ui.common.chatGrid
 import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -215,7 +214,7 @@ private fun ChatTopBar(
                             if (status ==
                                 SessionStatus.WAITING
                             ) {
-                                LocalStatusColors.current.waiting
+                                DesignTheme.colors.waitingText
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
@@ -225,7 +224,7 @@ private fun ChatTopBar(
                     Text(
                         permissionLabel(state.session.permissionPreset),
                         style = MaterialTheme.typography.labelSmall,
-                        color = LocalStatusColors.current.waiting,
+                        color = DesignTheme.colors.waitingText,
                     )
                 }
             }
@@ -315,7 +314,7 @@ private fun MessageList(
         state = listState,
         reverseLayout = true,
         modifier =
-            modifier.fillMaxWidth().chatGrid().testTag("chat-message-list").pointerInput(focusManager) {
+            modifier.fillMaxWidth().testTag("chat-message-list").pointerInput(focusManager) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     focusManager.clearFocus()
@@ -397,10 +396,10 @@ private fun AttentionPanel(
 /** 会话在等待处理，但还没有可以显示的事项。 */
 @Composable
 private fun WaitingBanner() {
-    Surface(color = LocalStatusColors.current.waitingContainer, modifier = Modifier.fillMaxWidth()) {
+    Surface(color = DesignTheme.colors.panel, modifier = Modifier.fillMaxWidth()) {
         Text(
             stringResource(R.string.chat_waiting),
-            color = LocalStatusColors.current.waiting,
+            color = DesignTheme.colors.waitingText,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
         )

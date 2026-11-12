@@ -41,7 +41,7 @@ import io.github.qianyeeew.dshremote.data.api.Question
 import io.github.qianyeeew.dshremote.data.attention.AnswerForm
 import io.github.qianyeeew.dshremote.data.attention.QuestionDraft
 import io.github.qianyeeew.dshremote.data.attention.QuestionProblem
-import io.github.qianyeeew.dshremote.ui.LocalStatusColors
+import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.chat.CodeSection
 import io.github.qianyeeew.dshremote.ui.chat.prettyJson
 
@@ -115,11 +115,11 @@ private fun ApprovalContent(
     actions: AttentionCardActions,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(painterResource(R.drawable.ic_dsh_shield), null, Modifier.size(16.dp), tint = LocalStatusColors.current.waiting)
+        Icon(painterResource(R.drawable.ic_dsh_shield), null, Modifier.size(16.dp), tint = DesignTheme.colors.waitingText)
         Text(
             stringResource(R.string.attention_approval_title),
             style = MaterialTheme.typography.labelMedium,
-            color = LocalStatusColors.current.waiting,
+            color = DesignTheme.colors.waitingText,
         )
     }
     Text(approval.summary ?: stringResource(R.string.attention_tool, approval.toolName), style = MaterialTheme.typography.titleSmall)

@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-12（新版界面设计已确认，落地方案待开工；M3 进行中：T1–T5 完成，`v0.1.0-rc.1` 已发布；新增开发优先级建议）
+最后更新：2026-11-12（新版界面落地中：A1 主题、字体、通用组件完成，等用户确认后做 A2；M3 进行中：T1–T5 完成，`v0.1.0-rc.1` 已发布；新增开发优先级建议）
 
 ## 1. 进度
 
@@ -25,7 +25,7 @@
 
 **后续范围确认（2026-11-10）**：用户确认下一阶段纳入通知操作按钮和云推送；**锁屏时不能提交审批，必须先解锁，并在提交前重新校验事项状态**。前面讨论的可靠性、Diff、会话定位、计划／目标、终端和完整文件管理纳入后续设计，图片附件为备选，语音不纳入本阶段，中转与自动穿透暂不考虑。创建／导入项目已获实现方案确认，优先于 M3 剩余任务、完整文件管理和远程终端。桌面端用量、缓存命中、对话分支、过程折叠及截图中的其他统计已做源码与录制样本调研，见 [`DSH 接口调研`](research/dsh-session-api.md) 第 9 节；尚未实测新增统计接口或确认这些统计功能的排期。完整范围及设计约束见 [`roadmap.md`](roadmap.md) 第 3 节。
 
-**新版界面设计（2026-11-12）**：用户确认了一套新的 App 界面设计，共十四屏，覆盖现有功能以及执行结果、未读、发送状态、计划、用量、图片附件、对话分支、限时提问。设计规格（截图、可在浏览器打开的样稿、规则说明）在 [`design/ui-redesign/`](design/ui-redesign/README.md)，落地方案在 [`plans/ui-redesign.md`](plans/ui-redesign.md)：第一批只改 Android，第二、三批要先扩展协议和插件。方案第 7 节有四个问题等用户确认，**代码还没有开始改**。它取代 `plans/android-visual-refresh.md` 里的视觉约定。改界面之前先读设计规格。
+**新版界面设计（2026-11-12）**：用户确认了一套新的 App 界面设计，共十四屏，覆盖现有功能以及执行结果、未读、发送状态、计划、用量、图片附件、对话分支、限时提问。设计规格（截图、可在浏览器打开的样稿、规则说明）在 [`design/ui-redesign/`](design/ui-redesign/README.md)，落地方案在 [`plans/ui-redesign.md`](plans/ui-redesign.md)：第一批只改 Android，第二、三批要先扩展协议和插件。方案第 7 节的问题 1 已确认（深色按建议值一起换），问题 2–4 在做到对应任务前再确认。**A1（主题、字体、通用组件）已完成**，结果见方案末尾；下一个是 A2（会话页）。它取代 `plans/android-visual-refresh.md` 里的视觉约定。改界面之前先读设计规格。
 
 **取消 Git 功能（2026-11-11）**：用户决定手机端不做 Git 提交与回滚。这类操作直接在对话里交给 Agent 完成，手机上可操作的空间也很小；[`roadmap.md`](roadmap.md) 第 3 节已同步。
 
@@ -37,7 +37,7 @@ M3 已完成：
 - T1：DSH 新版本兼容性检测（`.github/workflows/dsh-compat.yml`，脚本 `plugin/scripts/dsh-compat.mjs`）。每天北京时间 9 点检查 npm 上 latest、next、alpha 中比基线新的版本，跑 load-check、contract、e2e，失败时开 issue「DSH <版本> 兼容性检测失败」。定时运行时跳过已经通过的版本和已经开过 issue 的版本；要重新检测某个版本，在 Actions 页面手动触发并填写版本号。收到这类 issue 后，按 issue 中「怎么处理」一节适配。
 - T2：release 构建和签名（ADR 0012）。版本号只在 `android/gradle.properties` 的 `dshremote.version`；release 签名信息只从环境变量读取，缺少时打包失败；debug 包加 `.debug` 后缀。发布密钥由用户生成，在 GitHub Secrets 和用户的离线备份中，agent 不接触；证书指纹在 `android/release-cert.sha256`。
 - T3：插件安装包 `dshremote-plugin-X.Y.Z.tgz`（`npm run pack`，`ws` 打包在内）。在 Desktop「添加插件」中填它的绝对路径即可安装；装好后 `.tgz` 不能删除或移动（`docs/research/dsh-plugin-install.md`）。CI 用安装包离线装进 `dsh web` 跑 load-check。
-- T4：发布工作流 `.github/workflows/release.yml`。推送 `vX.Y.Z[-rc.N]` 标签时检查、构建、签名并创建 GitHub Release（rc 版标为预发布）；手动触发时只试运行。签名证书指纹必须和 `android/release-cert.sha256` 一致。版本号用 `node plugin/scripts/release.mjs bump <版本>` 一次改好三处，更新说明取自根目录的 `CHANGELOG.md`。release APK 有 34 MB（中文字体约 30 MB，没开 R8）。
+- T4：发布工作流 `.github/workflows/release.yml`。推送 `vX.Y.Z[-rc.N]` 标签时检查、构建、签名并创建 GitHub Release（rc 版标为预发布）；手动触发时只试运行。签名证书指纹必须和 `android/release-cert.sha256` 一致。版本号用 `node plugin/scripts/release.mjs bump <版本>` 一次改好三处，更新说明取自根目录的 `CHANGELOG.md`。release APK 有 34 MB（中文字体约 30 MB，没开 R8）；新版界面 A1 把中文字体换成 IBM Plex Sans SC 后，debug 包小了约 3.2 MB。
 - T5：会话标题去掉开头的 Markdown 标记（`ui/common/SessionTitle.kt`），只改显示。以后新的地方显示会话标题时，用 `sessionTitleText()` 或 `sessionDisplayTitle()`。
 
 M2 的已知限制（v1 范围内不处理，或留待以后）：dev-server 默认没有预置工作区；子代理的事项和独立处理页面只有测试覆盖；Markdown 宽表格的单元格会被截断成「…」；不做开机自启；App 进程被杀后，旧通知里的令牌失效，点开只进入首页。
@@ -100,6 +100,9 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
   - 用 VS Code Remote-SSH 时，VS Code 会把服务器上监听的端口自动转发到 Windows 本机，可能占用插件的端口。
   - 装了 VMware、VirtualBox、WSL 的电脑，会有很多虚拟网卡。
   - 防火墙放行时只勾「专用网络」。
+- **Compose 的可点区域**：比 48dp 小的可点控件，Compose 的触摸命中会自动把可点区域扩到 48dp，所以新组件的布局按样稿的大小（胶囊 32/34），不为点击区域撑高。Material3 的 `minimumInteractiveComponentSize()` 在当前版本的实测中没有把布局撑到 48dp，不要靠它；要验证点击区域，用 `performTouchInput { click(...) }` 在控件外几 dp 处点（`DesignComponentsUiTest`）。
+- **没有放在 `Surface` 或 `Scaffold` 里的 `Text` 默认是黑字**，深色模式下看不见。新页面都要有 `Scaffold` 或 `Surface` 提供内容颜色。
+- **真机上已有的测试包**：手机上的 `io.github.qianyeeew.dshremote.debug` 是这台开发机的调试密钥签的，可以直接用默认包名跑真机测试（覆盖安装，数据和配对保留）；`.projecttest.test` 是别的电脑签的，用 `.projecttest` 后缀会安装失败。
 - **Compose 聊天列表「停在底部时跟随新消息」**：新的一项插入后，LazyColumn 会把原来的那一项留在原位；消息连续到达时（用户消息和回复几乎同时），不能用那一刻的滚动位置判断「是否在底部」。现在只在用户自己滚动结束后更新「停在底部」，列表变化时据此滚动（`ui/chat/ChatScreen.kt`）。输入框上方的面板用 `weight(1f, fill = false)` 和列表分剩余空间，不要用窗口高度算上限（打开键盘时会把输入框挤扁）。
 - **DSH 切换模型时不发出会话事件**：插件原来只在收到 `api-session/*` 事件时推送 `session.updated`（另有 30 秒定时刷新），切换模型后手机要等最多 30 秒才更新。现在切换模型和权限模式成功后插件主动刷新（`LiveHub.refreshSoon()`）。插件依赖 DSH 事件的地方，都要在 devServerTest 或 e2e 里确认事件真的会来。
 - **DSH 会把工作目录所在的整个 git 仓库快照到系统临时目录**（`dsh-workspace-changes-*`，每一轮结束时）。开发服务器的 home 目录本身就是一个 git 仓库，dev-server 的工作目录又在 `~/.cache` 下，于是每个会话都复制一遍整个 home 仓库：T5 时把 7.7G 的 `/tmp`（内存盘）写满了，每一轮还要多等约 30 秒才变为空闲。现在 dev-server 把工作目录 `git init` 成独立的空仓库，一轮结束后约 1 秒就空闲。`/tmp` 被写满时先停掉 dev-server，DSH 退出时会清理自己的临时目录。

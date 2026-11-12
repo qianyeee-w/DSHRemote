@@ -55,7 +55,7 @@ import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
-import io.github.qianyeeew.dshremote.ui.LocalStatusColors
+import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.common.DesignTopBar
 import io.github.qianyeeew.dshremote.ui.common.RoundIconButton
 import io.github.qianyeeew.dshremote.ui.common.relativeTime
@@ -198,7 +198,7 @@ internal fun SessionHomeLayout(
                 item(key = "waiting-heading") {
                     Text(
                         stringResource(R.string.design_attention_count, grouped.waiting.size),
-                        color = LocalStatusColors.current.waiting,
+                        color = DesignTheme.colors.waitingText,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
                     )
@@ -333,8 +333,8 @@ private fun HomeSessionRow(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             val (label, color) =
                 when (if (session.attention.isNotEmpty()) SessionStatus.WAITING else session.status) {
-                    SessionStatus.WAITING -> R.string.session_status_waiting to LocalStatusColors.current.waiting
-                    SessionStatus.RUNNING -> R.string.session_status_running to LocalStatusColors.current.running
+                    SessionStatus.WAITING -> R.string.session_status_waiting to DesignTheme.colors.waitingText
+                    SessionStatus.RUNNING -> R.string.session_status_running to DesignTheme.colors.text
                     SessionStatus.UNKNOWN -> R.string.session_status_unknown to MaterialTheme.colorScheme.onSurfaceVariant
                     SessionStatus.IDLE -> R.string.session_status_idle to MaterialTheme.colorScheme.onSurfaceVariant
                 }

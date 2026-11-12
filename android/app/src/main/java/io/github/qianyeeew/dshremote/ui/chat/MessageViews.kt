@@ -65,7 +65,7 @@ import io.github.qianyeeew.dshremote.data.api.ToolStatus
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.ui.CodeFontFamily
-import io.github.qianyeeew.dshremote.ui.LocalStatusColors
+import io.github.qianyeeew.dshremote.ui.DesignTheme
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -331,7 +331,7 @@ private fun ToolCard(tool: ToolPart) {
 private fun ToolStatusLabel(status: ToolStatus) {
     val (text, color) =
         when (status) {
-            ToolStatus.RUNNING -> stringResource(R.string.chat_tool_running) to LocalStatusColors.current.running
+            ToolStatus.RUNNING -> stringResource(R.string.chat_tool_running) to DesignTheme.colors.text
             ToolStatus.DONE -> stringResource(R.string.chat_tool_done) to MaterialTheme.colorScheme.onSurfaceVariant
             ToolStatus.ERROR -> stringResource(R.string.chat_tool_error) to MaterialTheme.colorScheme.error
             ToolStatus.REJECTED -> stringResource(R.string.chat_tool_rejected) to MaterialTheme.colorScheme.error

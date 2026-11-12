@@ -17,7 +17,7 @@ import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.live.OfflineReason
 import io.github.qianyeeew.dshremote.data.live.PairingReason
-import io.github.qianyeeew.dshremote.ui.LocalStatusColors
+import io.github.qianyeeew.dshremote.ui.DesignTheme
 
 /** 状态是否需要用户处理（显示为错误色）。 */
 val LinkStatus.needsAttention: Boolean
@@ -93,7 +93,7 @@ fun StatusBadge(
 ) {
     val color =
         when {
-            status is LinkStatus.Online -> LocalStatusColors.current.online
+            status is LinkStatus.Online -> DesignTheme.colors.textSecondary
             status.needsAttention -> MaterialTheme.colorScheme.error
             else -> MaterialTheme.colorScheme.outline
         }

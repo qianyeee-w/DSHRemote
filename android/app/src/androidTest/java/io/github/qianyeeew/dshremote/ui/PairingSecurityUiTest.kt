@@ -1,14 +1,19 @@
 package io.github.qianyeeew.dshremote.ui
 
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -52,7 +57,37 @@ class PairingSecurityUiTest {
         assertNoBypassWording()
         // 状态卡片上唯一能点的是「重新配对」，没有「立即重试」
         assertEquals(listOf(text(R.string.host_repair)), clickableLabels(hasAnyAncestor(hasTestTag("status-card"))))
-        compose.onNodeWithText(text(R.string.status_fingerprint_mismatch)).assertExists()
+        compose.onNodeWithText(text(R.string.host_line_rejected)).assertExists()
+    }
+
+    /** 设计规格 7.9：指纹不匹配时整页上只有「重新配对」，没有任何其他能发起连接的控件（例如「立即重试」）。 */
+    @Test
+    fun mismatchedHostPageHasNoOtherWayToConnect() {
+        showHost(LinkStatus.FingerprintMismatch)
+        compose.onAllNodesWithText(text(R.string.host_retry)).assertCountEquals(0)
+        compose.onAllNodesWithText(text(R.string.host_repair)).assertCountEquals(1)
+        // 页面上能点的只有返回、改名、改地址、添加地址、查看指纹、重新配对、移除：都不会用这张证书连接
+        val allowed =
+            listOf(
+                R.string.action_back,
+                R.string.host_repair,
+                R.string.host_remove_link,
+                R.string.host_info_add_address,
+                R.string.host_info_name,
+                R.string.host_info_address,
+                R.string.host_info_fingerprint,
+            ).map(::text)
+        val labels = clickableLabels()
+        val unexpected = labels.filter { label -> allowed.none { it in label } }
+        assertTrue("意外的可点控件：$unexpected（全部：$labels）", unexpected.isEmpty())
+        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        val directory = java.io.File(context.getExternalFilesDir(null), "visual-verification").apply { mkdirs() }
+        java.io
+            .File(
+                directory,
+                "host-mismatch.png",
+            ).outputStream()
+            .use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     @Test

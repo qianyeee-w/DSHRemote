@@ -64,6 +64,8 @@ sealed interface PairingStep {
     data class Done(
         val hostName: String,
         val replaced: Boolean,
+        /** 配对好的电脑（App 本地的 id）。 */
+        val hostId: String = "",
     ) : PairingStep
 
     data class Failed(
@@ -187,7 +189,7 @@ class PairingViewModel(
         viewModelScope.launch {
             _step.value =
                 when (val result = pairer.pair(target, replaceHostId)) {
-                    is PairingResult.Paired -> PairingStep.Done(result.host.name, result.replaced)
+                    is PairingResult.Paired -> PairingStep.Done(result.host.name, result.replaced, result.host.hostId)
                     else -> PairingStep.Failed(result)
                 }
             lastForm = lastForm.copy(code = "")

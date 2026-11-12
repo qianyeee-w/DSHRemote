@@ -10,16 +10,5 @@
     <string name="design_permission_read_only_hint">只能读文件，要改动时先问你</string>
     <string name="design_permission_workspace_hint">在项目里可以直接改，超出项目时问你</string>
     <string name="design_permission_full_hint">不再询问，可以访问整台电脑</string>
-    <string name="design_hosts_intro">连接你的电脑，继续手边的任务。</string>
-    <string name="design_paired_hosts">已配对的电脑</string>
-    <string name="design_connection_management">连接管理</string>
-    <string name="design_notifications_section">通知</string>
     <string name="design_recent">最近</string>
-    <string name="design_manage_hosts">管理主机</string>
-    <string name="design_notification_permission">系统通知权限</string>
-    <string name="design_permission_granted">已允许</string>
-    <string name="design_permission_needed">未允许</string>
-    <string name="design_battery_title">电池优化</string>
-    <string name="design_scan_hint">打开电脑上的配对页后扫码</string>
-    <string name="design_manual_hint">适用于无法扫码的情况</string>
 </resources>

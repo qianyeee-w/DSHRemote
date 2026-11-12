@@ -24,9 +24,9 @@ import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
 import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailScreen
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailViewModel
-import io.github.qianyeeew.dshremote.ui.hosts.HostListContent
 import io.github.qianyeeew.dshremote.ui.hosts.HostListViewModel
 import io.github.qianyeeew.dshremote.ui.hosts.HostRow
+import io.github.qianyeeew.dshremote.ui.hosts.NoHostsContent
 import io.github.qianyeeew.dshremote.ui.pairing.PairingScreen
 import io.github.qianyeeew.dshremote.ui.pairing.PairingViewModel
 import io.github.qianyeeew.dshremote.ui.sessions.PluginSessionCreator
@@ -35,7 +35,7 @@ import io.github.qianyeeew.dshremote.ui.sessions.SessionListScreen
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListViewModel
 import io.github.qianyeeew.dshremote.ui.sessions.homeHost
 import io.github.qianyeeew.dshremote.ui.settings.BackgroundHint
-import io.github.qianyeeew.dshremote.ui.settings.SettingsScreen
+import io.github.qianyeeew.dshremote.ui.settings.ComputersSettingsScreen
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -45,15 +45,9 @@ import kotlinx.serialization.Serializable
  * 配对码只保存在 PairingViewModel 的内存中。
  */
 
-/** 首页：没有主机时是配对引导，只有一台时直接是它的会话列表，有多台时是主机列表。 */
+/** 首页：没有电脑时是配对引导，否则是上次用的那台电脑的会话列表（多台时从左上角切换）。 */
 @Serializable
 object HomeRoute
-
-/** 一台主机的会话列表（有多台主机时从主机列表进入）。 */
-@Serializable
-data class SessionsRoute(
-    val hostId: String,
-)
 
 @Serializable
 data class SessionRoute(
@@ -68,7 +62,7 @@ data class AttentionRoute(
     val attentionId: String,
 )
 
-/** 设置。 */
+/** 电脑与设置（设计规格 7.8）。 */
 @Serializable
 object SettingsRoute
 
@@ -130,19 +124,9 @@ fun AppNavigation(
                     hosts = rows.orEmpty(),
                     onSwitchHost = { scope.launch { container.settings.setLastHost(it) } },
                 )
-            } else {
-                HostListContent(
-                    rows = rows,
-                    versionName = versionName,
-                    onOpenHost = { nav.navigate(SessionsRoute(it)) },
-                    onPair = { manual -> nav.navigate(PairRoute(manual)) },
-                    onOpenSettings = { nav.navigate(SettingsRoute) },
-                    hint = if (rows.isNullOrEmpty()) null else hint,
-                )
+            } else if (rows != null) {
+                NoHostsContent(versionName, onPair = { manual -> nav.navigate(PairRoute(manual)) })
             }
-        }
-        composable<SessionsRoute> { entry ->
-            SessionList(container, nav, entry.toRoute<SessionsRoute>().hostId, home = false)
         }
         composable<SessionRoute> { entry ->
             val route = entry.toRoute<SessionRoute>()
@@ -187,16 +171,27 @@ fun AppNavigation(
             )
         }
         composable<SettingsRoute> {
-            SettingsScreen(
-                container.settings,
-                versionName,
+            val hosts = viewModel { HostListViewModel(container.hosts.hosts, container.connections.states) }
+            val rows by hosts.rows.collectAsStateWithLifecycle()
+            val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+            val list = rows.orEmpty()
+            ComputersSettingsScreen(
+                settings = container.settings,
+                hosts = list,
+                currentHostId = homeHost(list.map(HostRow::hostId), settings?.lastHostId),
+                versionName = versionName,
                 onBack = { nav.popBackStack() },
+                onOpenHost = { nav.navigate(HostRoute(it)) },
+                onAddHost = { manual -> nav.navigate(PairRoute(manual)) },
                 onPermissionGranted = container.linkController::refresh,
             )
         }
         composable<HostRoute> { entry ->
             val hostId = entry.toRoute<HostRoute>().hostId
+            val hostList by container.hosts.hosts.collectAsStateWithLifecycle(initialValue = emptyList())
+            val settings by container.settings.settings.collectAsStateWithLifecycle(initialValue = null)
             HostDetailScreen(
+                currentHost = homeHost(hostList.map { it.hostId }, settings?.lastHostId) == hostId,
                 viewModel =
                     viewModel {
                         HostDetailViewModel(
@@ -214,10 +209,13 @@ fun AppNavigation(
         }
         composable<PairRoute> { entry ->
             val route = entry.toRoute<PairRoute>()
+            val scope = rememberCoroutineScope()
             PairingScreen(
                 viewModel = viewModel { PairingViewModel(route.manual, route.replaceHostId, container.pairing) },
                 replacing = route.replaceHostId != null,
                 onClose = { nav.popBackStack() },
+                // 新配对的电脑：首页切到这台（刚配对完通常就是要用它）
+                onPaired = { hostId -> scope.launch { container.settings.setLastHost(hostId) } },
             )
         }
     }
@@ -263,6 +261,7 @@ private fun SessionList(
                 onRepair = { manual -> nav.navigate(PairRoute(manual, hostId)) },
                 onRetry = { container.connections.retry(hostId) },
                 onOpenSettings = { nav.navigate(SettingsRoute) },
+                onOpenHostDetail = { nav.navigate(HostRoute(it)) },
                 hint = hint,
                 hosts = hosts,
                 onSwitchHost = onSwitchHost,

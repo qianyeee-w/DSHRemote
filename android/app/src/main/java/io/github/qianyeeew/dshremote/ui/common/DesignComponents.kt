@@ -1,13 +1,11 @@
 package io.github.qianyeeew.dshremote.ui.common
 
-import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,7 +15,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,13 +27,10 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -72,90 +66,6 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.ui.DesignTheme
-
-/*
- * 下面三个是上一版界面的组件，还没改版的页面在用。对应页面按 docs/plans/ui-redesign.md 改完后删除。
- * 新界面用本文件后半部分「新版界面的通用组件」。
- */
-
-/** 图形紧凑，点击区域保留 48dp。 */
-@Composable
-fun RoundIconButton(
-    @DrawableRes icon: Int,
-    description: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    IconButton(onClick = onClick, modifier = modifier.size(48.dp), enabled = enabled) {
-        Surface(
-            modifier = Modifier.size(40.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    painterResource(icon),
-                    contentDescription = description,
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f),
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun DesignTopBar(
-    title: String,
-    navigation: @Composable () -> Unit = {},
-    subtitle: (@Composable () -> Unit)? = null,
-    actions: @Composable RowScope.() -> Unit = {},
-) {
-    CenterAlignedTopAppBar(
-        title = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                subtitle?.invoke()
-            }
-        },
-        navigationIcon = navigation,
-        actions = actions,
-    )
-}
-
-/** 设置与主机页面共用的分组行。长说明允许换行，避免字体放大后挤掉操作。 */
-@Composable
-fun DesignRow(
-    title: String,
-    @DrawableRes icon: Int,
-    subtitle: String? = null,
-    onClick: (() -> Unit)? = null,
-    onClickLabel: String? = null,
-    trailing: @Composable () -> Unit = {},
-) {
-    Column {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .let { if (onClick != null) it.clickable(onClickLabel = onClickLabel, onClick = onClick) else it }
-                .padding(vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(painterResource(icon), null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.bodyMedium)
-                subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-            trailing()
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    }
-}
 
 // ---------------------------------------------------------------------------
 // 新版界面的通用组件（docs/design/ui-redesign/README.md 第 5、6 节）。

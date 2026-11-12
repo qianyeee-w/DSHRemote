@@ -15,18 +15,6 @@ import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.net.Fingerprint
 import io.github.qianyeeew.dshremote.ui.CodeFontFamily
 
-/** 带返回按钮的标题栏。 */
-@Composable
-fun BackTopBar(
-    title: String,
-    onBack: () -> Unit,
-) {
-    DesignTopBar(
-        title = title,
-        navigation = { RoundIconButton(R.drawable.ic_arrow_back, stringResource(R.string.action_back), onBack) },
-    )
-}
-
 /** 按 4 个字符一组分开，和插件配对页的显示一致（plugin/src/admin/page.js 的 groupFingerprint）。 */
 fun groupFingerprint(fingerprint: Fingerprint): String = fingerprint.value.chunked(FINGERPRINT_GROUP).joinToString(" ")
 

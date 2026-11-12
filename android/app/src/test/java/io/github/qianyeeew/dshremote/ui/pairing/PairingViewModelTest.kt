@@ -42,7 +42,7 @@ class PairingViewModelTest {
         assertEquals(FINGERPRINT, target.fingerprint)
         assertEquals(CODE, target.code)
         assertNull(replace)
-        assertEquals(PairingStep.Done("MY-PC", replaced = false), vm.step.value)
+        assertEquals(PairingStep.Done("MY-PC", replaced = false, hostId = "h1"), vm.step.value)
         // 扫码时不需要探测指纹（二维码里就有）
         assertTrue(pairer.probes.isEmpty())
     }
@@ -107,7 +107,7 @@ class PairingViewModelTest {
         assertEquals(FINGERPRINT, target.fingerprint)
         assertEquals(CODE, target.code)
         assertEquals(address, target.address)
-        assertEquals(PairingStep.Done("MY-PC", replaced = false), vm.step.value)
+        assertEquals(PairingStep.Done("MY-PC", replaced = false, hostId = "h1"), vm.step.value)
     }
 
     @Test

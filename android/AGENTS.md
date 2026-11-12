@@ -68,7 +68,7 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 ├── service/        # （T11 已完成）LinkService（specialUse 前台服务）、LinkController（启停）、NotificationRules（通知规则，纯逻辑）、Notifier
 ├── ui/             # 各页面。AppNavigation（路由）、hosts/（主机列表、主机管理）、pairing/（扫码、手动输入、指纹核对）、
 │                   # sessions/（会话列表、新建会话）、chat/（会话详情：消息、Markdown、输入框、模型和权限模式）、
-│                   # attention/（审批和提问的卡片、独立处理页面、AttentionHandler）、settings/（设置页、后台运行提示）、common/
+│                   # attention/（审批和提问的面板、独立处理页面、AttentionHandler）、settings/（电脑与设置、后台运行提示）、common/（通用组件）
 ├── DshRemoteApp.kt # Application：AppContainer 手动创建 HostRepository、ConnectionManager、PairingService，注册 NetworkMonitor
 └── MainActivity.kt # 唯一的 Activity；可见时（onStart 到 onStop）持有 ConnectionManager.hold()
 ```

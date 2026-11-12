@@ -47,8 +47,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
@@ -77,6 +77,8 @@ import io.github.qianyeeew.dshremote.ui.common.serverNow
 import io.github.qianyeeew.dshremote.ui.common.sessionTitleText
 import io.github.qianyeeew.dshremote.ui.hosts.HostRow
 import io.github.qianyeeew.dshremote.ui.hosts.PairMethodDialog
+import io.github.qianyeeew.dshremote.ui.hosts.color
+import io.github.qianyeeew.dshremote.ui.hosts.menuStatus
 import io.github.qianyeeew.dshremote.ui.hosts.needsAttention
 import io.github.qianyeeew.dshremote.ui.hosts.offersRepair
 import io.github.qianyeeew.dshremote.ui.hosts.offersRetry
@@ -99,6 +101,8 @@ class SessionListNavigation(
     /** 已配对的电脑，左上角菜单里切换用。 */
     val hosts: List<HostRow> = emptyList(),
     val onSwitchHost: (hostId: String) -> Unit = {},
+    /** 电脑菜单里点了有问题的电脑：进它的详情页（设计规格 7.7）。 */
+    val onOpenHostDetail: (hostId: String) -> Unit = {},
     /** 新任务已经开始（会话已创建）：把没完成的步骤交给会话页，然后进入会话。 */
     val onTaskStarted: (StartedTask) -> Unit = { onOpenSession(it.sessionId) },
 )
@@ -181,6 +185,7 @@ fun SessionListContent(
     onDismissAttentionNotice: () -> Unit = {},
 ) {
     var choosingRepair by remember { mutableStateOf(false) }
+    var hostMenu by remember { mutableStateOf(false) }
     // 新任务：写过的字在收起后保留（设计规格 7.6）
     var taskText by rememberSaveable { mutableStateOf("") }
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -192,7 +197,6 @@ fun SessionListContent(
         }
     }
     BackHandler(enabled = expanded) { expanded = false }
-    var choosingAdd by remember { mutableStateOf(false) }
     val online = state.status is LinkStatus.Online
     val colors = DesignTheme.colors
     val snackbar = remember { SnackbarHostState() }
@@ -204,7 +208,7 @@ fun SessionListContent(
         }
     }
     Scaffold(
-        topBar = { HomeTopBar(state, navigation, onAddHost = { choosingAdd = true }) },
+        topBar = { HomeTopBar(state, navigation, menu = hostMenu, onMenu = { hostMenu = it }) },
         bottomBar = {
             if (!expanded) {
                 NewTaskBar(taskText, enabled = online) {
@@ -219,6 +223,16 @@ fun SessionListContent(
         val sections = state.sections
         val now = serverNow(System.currentTimeMillis(), state.clockOffsetMillis)
         val workspaces = remember(state.workspaces) { state.workspaces.associateBy { it.workspaceId } }
+        // 电脑菜单弹出时，后面的页面盖一层页面底色（设计规格第 3 节）
+        if (hostMenu) {
+            Box(
+                Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .background(colors.page.copy(alpha = MENU_SCRIM_ALPHA))
+                    .zIndex(1f),
+            )
+        }
         LazyColumn(
             Modifier.padding(padding).fillMaxSize().testTag("home-list"),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp),
@@ -289,16 +303,6 @@ fun SessionListContent(
             )
         }
     }
-    if (choosingAdd) {
-        PairMethodDialog(
-            title = stringResource(R.string.pair_method_title),
-            onChoose = { manual ->
-                choosingAdd = false
-                navigation.onAddHost?.invoke(manual)
-            },
-            onDismiss = { choosingAdd = false },
-        )
-    }
     if (choosingRepair) {
         PairMethodDialog(
             title = stringResource(R.string.repair_method_title),
@@ -312,17 +316,17 @@ fun SessionListContent(
 }
 
 /**
- * 顶栏：电脑名（17 号 600）和一个小箭头，点了弹出菜单。菜单里能切换到其他电脑，进入这台电脑的管理、设置、添加电脑。
- * 设计里完整的电脑菜单和「电脑与设置」在落地方案 A6。
+ * 顶栏：电脑名（17 号 600）和一个小箭头，点了弹出电脑菜单（设计规格 7.7）。每行高 48：当前电脑加粗带勾；
+ * 其他正常的电脑点了切换过去；有问题的电脑右边一个短状态，点了不切换，进它的详情页；分隔线下面是「电脑与设置」。
  */
 @Composable
 private fun HomeTopBar(
     state: SessionListState,
     navigation: SessionListNavigation,
-    onAddHost: () -> Unit,
+    menu: Boolean,
+    onMenu: (Boolean) -> Unit,
 ) {
     val colors = DesignTheme.colors
-    var menu by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
@@ -346,7 +350,7 @@ private fun HomeTopBar(
             Row(
                 Modifier
                     .heightIn(min = 48.dp)
-                    .clickable(onClickLabel = stringResource(R.string.home_switch_host), role = Role.Button) { menu = true }
+                    .clickable(onClickLabel = stringResource(R.string.home_switch_host), role = Role.Button) { onMenu(true) }
                     .testTag("home-host"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -361,29 +365,38 @@ private fun HomeTopBar(
                 Icon(painterResource(R.drawable.ic_dsh_chevron_down), null, Modifier.size(14.dp), tint = colors.textSecondary)
             }
             if (menu) {
-                DesignPopup(onDismiss = { menu = false }, offset = IntOffset(0, 0), modifier = Modifier.width(280.dp)) {
+                DesignPopup(onDismiss = { onMenu(false) }, modifier = Modifier.width(300.dp)) {
                     Column(Modifier.padding(vertical = 6.dp)) {
                         navigation.hosts.forEach { host ->
                             val current = host.hostId == state.hostId
-                            MenuRow(host.name, bold = current, testTag = "home-host:${host.hostId}") {
-                                menu = false
-                                if (!current) navigation.onSwitchHost(host.hostId)
+                            val problem = if (current) null else menuStatus(host.status)
+                            MenuRow(
+                                host.name,
+                                bold = current,
+                                testTag = "home-host:${host.hostId}",
+                                trailing =
+                                    problem?.let { p ->
+                                        {
+                                            Text(
+                                                stringResource(p.text),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = p.tone.color(),
+                                            )
+                                        }
+                                    },
+                            ) {
+                                onMenu(false)
+                                when {
+                                    current -> Unit
+                                    problem != null -> navigation.onOpenHostDetail(host.hostId)
+                                    else -> navigation.onSwitchHost(host.hostId)
+                                }
                             }
                         }
                         if (navigation.hosts.isNotEmpty()) DesignDivider(Modifier.padding(vertical = 4.dp))
-                        MenuRow(stringResource(R.string.menu_manage_host)) {
-                            menu = false
-                            navigation.onManageHost()
-                        }
-                        MenuRow(stringResource(R.string.menu_settings)) {
-                            menu = false
+                        MenuRow(stringResource(R.string.computers_and_settings), testTag = "home-computers-settings") {
+                            onMenu(false)
                             navigation.onOpenSettings()
-                        }
-                        if (navigation.onAddHost != null) {
-                            MenuRow(stringResource(R.string.hosts_add)) {
-                                menu = false
-                                onAddHost()
-                            }
                         }
                     }
                 }
@@ -397,6 +410,7 @@ private fun MenuRow(
     text: String,
     bold: Boolean = false,
     testTag: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -425,6 +439,7 @@ private fun MenuRow(
                 tint = DesignTheme.colors.text,
             )
         }
+        trailing?.invoke()
     }
 }
 
@@ -820,6 +835,9 @@ private fun EmptySessions() {
 }
 
 private const val STALE_ALPHA = 0.6f
+
+/** 电脑菜单弹出时盖在首页上的那层页面底色。 */
+private const val MENU_SCRIM_ALPHA = 0.6f
 
 /** 输入框展开时盖在首页上的那层页面底色（设计规格第 3 节：60%–78%）。 */
 private const val SCRIM_ALPHA = 0.78f

@@ -11,10 +11,7 @@
     <string name="action_delete">删除</string>
 
     <!-- 主机列表 -->
-    <string name="hosts_title">我的电脑</string>
     <string name="hosts_add">添加电脑</string>
-    <string name="hosts_empty_title">还没有配对的电脑</string>
-    <string name="hosts_empty_body">在电脑上安装 DSHRemote 插件并启动 DeepSeek Harness，用浏览器打开插件的配对页（http://127.0.0.1:3191），生成配对码后用手机扫码。</string>
     <string name="hosts_version">版本 %1$s</string>
 
     <!-- 配对方式 -->
@@ -24,6 +21,35 @@
     <string name="repair_method_title">重新配对</string>
 
     <!-- 连接状态 -->
+    <string name="host_menu_connecting">连接中</string>
+    <string name="host_menu_unreachable">连不上</string>
+    <string name="host_menu_rejected">已拒绝连接</string>
+    <string name="host_menu_needs_pairing">需要重新配对</string>
+    <string name="host_menu_incompatible">版本不兼容</string>
+    <string name="host_menu_app_old">需要更新 App</string>
+    <string name="host_line_current">已连接，正在使用</string>
+    <string name="host_line_online">已连接</string>
+    <string name="host_line_stopped">未连接</string>
+    <string name="host_line_rejected">已拒绝连接，证书和配对时不一样</string>
+    <string name="host_line_incompatible">DSH 版本不兼容，等插件更新</string>
+    <string name="computers_and_settings">电脑与设置</string>
+    <string name="computers_section">电脑</string>
+    <string name="reminders_section">提醒</string>
+    <string name="reminder_notify">需要我时通知</string>
+    <string name="reminder_notify_detail">审批、提问、任务结束</string>
+    <string name="reminder_keep_alive">锁屏后保持连接</string>
+    <string name="reminder_keep_alive_missing">还差一步：关闭电池优化</string>
+    <string name="reminder_keep_alive_ok">已设置好</string>
+    <string name="reminder_permission">系统通知权限</string>
+    <string name="reminder_permission_missing">还没允许，收不到通知</string>
+    <string name="host_info_name">名称</string>
+    <string name="host_info_address">地址</string>
+    <string name="host_info_fingerprint">记下的指纹</string>
+    <string name="host_info_add_address">添加地址</string>
+    <string name="host_remove_link">移除这台电脑</string>
+    <string name="host_address_delete">删除这个地址</string>
+    <string name="no_hosts_title">还没有配对电脑</string>
+    <string name="no_hosts_body">在电脑的 DSH 里打开 DSHRemote 配对页，然后扫码配对。</string>
     <string name="status_online">在线</string>
     <string name="status_connecting">连接中</string>
     <string name="status_stopped">未连接</string>
@@ -50,11 +76,6 @@
 
     <!-- 主机管理 -->
     <string name="host_section_name">名称</string>
-    <string name="host_section_addresses">地址</string>
-    <string name="host_section_fingerprint">证书指纹</string>
-    <string name="host_addresses_hint">地址只用来找到电脑，修改地址不需要重新配对；安全由证书指纹保证。可以添加多个地址（例如局域网和 Tailscale），连接时会自动选择能用的。</string>
-    <string name="host_address_last_good">最近使用</string>
-    <string name="host_address_add">添加地址</string>
     <string name="host_address_edit_title">修改地址</string>
     <string name="host_address_add_title">添加地址</string>
     <string name="host_address_label">地址:端口</string>
@@ -62,15 +83,12 @@
     <string name="host_address_invalid">格式不对，应为「地址:端口」</string>
     <string name="host_address_duplicate">这个地址已经在列表中</string>
     <string name="host_address_too_many">最多 %1$d 个地址</string>
-    <string name="host_address_remove">删除地址 %1$s</string>
     <string name="host_address_edit">修改地址 %1$s</string>
-    <string name="host_rename">重命名</string>
     <string name="host_rename_title">重命名</string>
     <string name="host_rename_invalid">名称不能为空</string>
     <string name="host_fingerprint_unavailable">无法读取（需要重新配对）</string>
     <string name="host_retry">立即重试</string>
     <string name="host_repair">重新配对</string>
-    <string name="host_remove">删除这台电脑</string>
     <string name="host_remove_title">删除 %1$s？</string>
     <string name="host_remove_body">删除后，这台手机不能再连接这台电脑。电脑在线时会同时在电脑上撤销这台手机；不在线时，请到电脑的配对页上手动撤销。</string>
     <string name="host_removing">正在删除……</string>
@@ -78,7 +96,6 @@
     <string name="host_removed_not_revoked_body">没能连上电脑确认撤销。请在电脑上打开配对页，撤销这台手机。</string>
 
     <!-- 配对 -->
-    <string name="pair_title">添加电脑</string>
     <string name="repair_title">重新配对</string>
     <string name="pair_scan_hint">在电脑上打开配对页（http://127.0.0.1:3191），点「生成配对码」，然后扫描页面上的二维码。</string>
     <string name="pair_scan_invalid">这不是 DSHRemote 的配对二维码</string>
@@ -125,9 +142,7 @@
     <string name="pair_failed_other">配对失败，请稍后再试。如果一直失败，请检查插件和 App 的版本。</string>
 
     <!-- 会话列表 -->
-    <string name="action_more">更多</string>
     <string name="time_just_now">刚刚</string>
-    <string name="menu_manage_host">管理这台电脑</string>
     <string name="home_new_task">新任务</string>
     <string name="new_task_project">项目</string>
     <string name="new_task_no_project">不指定项目</string>
@@ -260,20 +275,13 @@
     <string name="notification_link_detail">需要你处理或任务完成时会通知你</string>
 
     <!-- 设置 -->
-    <string name="menu_settings">设置</string>
-    <string name="settings_title">设置</string>
-    <string name="settings_notifications">通知和后台连接</string>
-    <string name="settings_notifications_detail">打开时，App 不在前台也保持和电脑的连接，在需要你处理或任务完成时通知你。通知栏会有一条常驻通知。关闭后，只在打开 App 时连接。</string>
-    <string name="settings_permission_missing">没有通知权限，收不到通知。</string>
     <string name="settings_permission_grant">允许通知</string>
     <string name="settings_permission_open">打开通知设置</string>
-    <string name="settings_background">后台运行</string>
     <string name="settings_battery_ok">已关闭电池优化。</string>
     <string name="settings_battery_needed">电池优化可能会在锁屏后断开连接，收不到通知。请在系统设置中把 DSHRemote 设为「不优化」。</string>
     <string name="settings_battery_open">打开电池优化设置</string>
     <string name="settings_vendor_hint">小米、红米等手机还需要：在「设置 → 应用设置 → 应用管理 → DSHRemote」中打开「自启动」，并把「省电策略」设为「无限制」。其他品牌的手机也有类似的设置。</string>
     <string name="settings_app_details">打开 App 的系统设置</string>
-    <string name="settings_version">版本 %1$s</string>
     <string name="background_hint">为了锁屏后也能收到通知，请关闭 DSHRemote 的电池优化。</string>
     <string name="background_hint_go">去设置</string>
     <string name="background_hint_dismiss">不再提示</string>

@@ -7,24 +7,27 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,14 +36,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -49,7 +59,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.net.PairingProbe
 import io.github.qianyeeew.dshremote.data.pairing.PairingResult
-import io.github.qianyeeew.dshremote.ui.common.BackTopBar
+import io.github.qianyeeew.dshremote.ui.DesignTheme
+import io.github.qianyeeew.dshremote.ui.common.BlockButton
+import io.github.qianyeeew.dshremote.ui.common.DesignBackBar
+import io.github.qianyeeew.dshremote.ui.common.PillButton
 import io.github.qianyeeew.dshremote.ui.common.fingerprintPrefix
 import io.github.qianyeeew.dshremote.ui.common.groupFingerprint
 
@@ -58,8 +71,14 @@ fun PairingScreen(
     viewModel: PairingViewModel,
     replacing: Boolean,
     onClose: () -> Unit,
+    /** 配对成功（不是从「重新配对」进来的）：首页切到这台电脑。 */
+    onPaired: (hostId: String) -> Unit = {},
 ) {
     val step by viewModel.step.collectAsStateWithLifecycle()
+    LaunchedEffect(step) {
+        val done = step as? PairingStep.Done ?: return@LaunchedEffect
+        if (!replacing && done.hostId.isNotEmpty()) onPaired(done.hostId)
+    }
     PairingContent(
         step = step,
         replacing = replacing,
@@ -95,17 +114,23 @@ fun PairingContent(
     replacing: Boolean,
     actions: PairingActions,
 ) {
-    Scaffold(topBar = {
-        BackTopBar(stringResource(if (replacing) R.string.repair_title else R.string.pair_title), actions.onClose)
-    }) { padding ->
+    Scaffold(topBar = { DesignBackBar(actions.onClose) }, containerColor = DesignTheme.colors.page) { padding ->
         Column(
             Modifier
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(24.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // 重新配对时说明是在替换这台电脑原来的配对
+            if (replacing) {
+                Text(
+                    stringResource(R.string.repair_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = DesignTheme.colors.text,
+                )
+            }
             when (step) {
                 is PairingStep.Scan -> ScanStep(step, actions)
                 is PairingStep.Manual -> ManualStep(step.form, actions)
@@ -151,28 +176,76 @@ private fun ScanStep(
     // 从系统设置回来时重新检查权限
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { granted = hasCamera() }
 
-    Text(stringResource(R.string.pair_scan_hint), style = MaterialTheme.typography.bodyMedium)
     when {
         granted && !unavailable ->
-            QrScanner(
-                onText = actions.onQrScanned,
-                onUnavailable = { unavailable = true },
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            )
+            Viewfinder {
+                QrScanner(
+                    onText = actions.onQrScanned,
+                    onUnavailable = { unavailable = true },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         unavailable -> Text(stringResource(R.string.pair_camera_unavailable), color = MaterialTheme.colorScheme.error)
         !asked -> Text(stringResource(R.string.pair_camera_needed))
         else -> {
             Text(stringResource(R.string.pair_camera_denied), color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = { launcher.launch(Manifest.permission.CAMERA) }) { Text(stringResource(R.string.pair_camera_grant)) }
-            OutlinedButton(onClick = {
+            PillButton(stringResource(R.string.pair_camera_grant), { launcher.launch(Manifest.permission.CAMERA) }, primary = true)
+            PillButton(stringResource(R.string.pair_camera_settings), {
                 context.startActivity(
                     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
                 )
-            }) { Text(stringResource(R.string.pair_camera_settings)) }
+            })
         }
     }
+    Text(stringResource(R.string.pair_scan_hint), style = MaterialTheme.typography.bodyLarge, color = DesignTheme.colors.text)
     if (step.invalidQr) Text(stringResource(R.string.pair_scan_invalid), color = MaterialTheme.colorScheme.error)
-    TextButton(onClick = actions.onSwitchToManual) { Text(stringResource(R.string.pair_scan_switch_manual)) }
+    Text(
+        stringResource(R.string.pair_scan_switch_manual),
+        style = MaterialTheme.typography.bodyLarge.copy(textDecoration = TextDecoration.Underline),
+        color = DesignTheme.colors.textSecondary,
+        modifier =
+            Modifier
+                .heightIn(min = 48.dp)
+                .clickable(role = Role.Button, onClick = actions.onSwitchToManual)
+                .padding(vertical = 10.dp),
+    )
+}
+
+/** 扫码的取景框（设计规格 7.10）：深色底、圆角 28、高 350，四角各一个白色的角标。 */
+@Composable
+private fun Viewfinder(content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(350.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(Color(0xFF16181C)),
+    ) {
+        content()
+        Canvas(Modifier.fillMaxSize()) {
+            val inset = 64.dp.toPx()
+            val arm = 36.dp.toPx()
+            val stroke = 2.dp.toPx()
+            val r = 12.dp.toPx()
+            val corners =
+                listOf(
+                    Offset(inset, inset) to Offset(1f, 1f),
+                    Offset(size.width - inset, inset) to Offset(-1f, 1f),
+                    Offset(inset, size.height - inset) to Offset(1f, -1f),
+                    Offset(size.width - inset, size.height - inset) to Offset(-1f, -1f),
+                )
+            for ((corner, dir) in corners) {
+                val path =
+                    Path().apply {
+                        moveTo(corner.x, corner.y + dir.y * arm)
+                        lineTo(corner.x, corner.y + dir.y * r)
+                        quadraticTo(corner.x, corner.y, corner.x + dir.x * r, corner.y)
+                        lineTo(corner.x + dir.x * arm, corner.y)
+                    }
+                drawPath(path, Color.White, style = Stroke(stroke))
+            }
+        }
+    }
 }
 
 @Composable
@@ -231,7 +304,7 @@ private fun ManualStep(
             color = MaterialTheme.colorScheme.error,
         )
     }
-    Button(onClick = actions.onSubmitManual, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pair_manual_next)) }
+    BlockButton(stringResource(R.string.pair_manual_next), actions.onSubmitManual, Modifier.fillMaxWidth(), primary = true, tall = true)
 }
 
 /** 核对指纹：大号字体显示前 8 位（protocol.md 2.3）。只有「一致」和「不一致」两个选择。 */
@@ -240,7 +313,7 @@ private fun ConfirmStep(
     step: PairingStep.ConfirmFingerprint,
     actions: PairingActions,
 ) {
-    Text(stringResource(R.string.pair_confirm_title), style = MaterialTheme.typography.headlineSmall)
+    Text(stringResource(R.string.pair_confirm_title), style = MaterialTheme.typography.titleLarge)
     Text(stringResource(R.string.pair_confirm_body), style = MaterialTheme.typography.bodyMedium)
     Text(
         fingerprintPrefix(step.fingerprint),
@@ -257,10 +330,14 @@ private fun ConfirmStep(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Text(step.address.toString(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Button(onClick = actions.onConfirmFingerprint, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pair_confirm_match)) }
-    OutlinedButton(onClick = actions.onRejectFingerprint, modifier = Modifier.fillMaxWidth()) {
-        Text(stringResource(R.string.pair_confirm_mismatch))
-    }
+    BlockButton(
+        stringResource(R.string.pair_confirm_match),
+        actions.onConfirmFingerprint,
+        Modifier.fillMaxWidth(),
+        primary = true,
+        tall = true,
+    )
+    BlockButton(stringResource(R.string.pair_confirm_mismatch), actions.onRejectFingerprint, Modifier.fillMaxWidth(), tall = true)
 }
 
 @Composable
@@ -301,11 +378,11 @@ private fun Outcome(
     primary: Pair<String, () -> Unit>,
     secondary: Pair<String, () -> Unit>? = null,
 ) {
-    Text(title, style = MaterialTheme.typography.headlineSmall)
+    Text(title, style = MaterialTheme.typography.titleLarge)
     body?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-    Button(onClick = primary.second, modifier = Modifier.fillMaxWidth()) { Text(primary.first) }
+    BlockButton(primary.first, primary.second, Modifier.fillMaxWidth(), primary = true, tall = true)
     secondary?.let { (label, onClick) ->
-        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) { Text(label) }
+        BlockButton(label, onClick, Modifier.fillMaxWidth(), tall = true)
     }
 }
 

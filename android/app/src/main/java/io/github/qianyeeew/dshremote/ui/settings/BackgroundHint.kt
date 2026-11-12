@@ -2,14 +2,9 @@ package io.github.qianyeeew.dshremote.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +20,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.settings.SettingsRepository
+import io.github.qianyeeew.dshremote.ui.DesignTheme
+import io.github.qianyeeew.dshremote.ui.common.PillPair
 import kotlinx.coroutines.launch
 
 /**
@@ -43,15 +40,14 @@ fun BackgroundHint(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { status = DeviceStatus.of(context) }
     val s = current ?: return
     if (!s.notificationsEnabled || s.backgroundHintDismissed || status.ignoringBatteryOptimizations) return
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
-        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
-            Text(stringResource(R.string.background_hint), style = MaterialTheme.typography.bodyMedium)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { scope.launch { settings.dismissBackgroundHint() } }) {
-                    Text(stringResource(R.string.background_hint_dismiss))
-                }
-                TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.background_hint_go)) }
-            }
-        }
+    // 不用卡片：只有「等你处理」的东西带框（设计原则 4）。还差一步的提示用等你（字）的颜色
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.background_hint), style = MaterialTheme.typography.bodySmall, color = DesignTheme.colors.waitingText)
+        PillPair(
+            stringResource(R.string.background_hint_dismiss),
+            { scope.launch { settings.dismissBackgroundHint() } },
+            stringResource(R.string.background_hint_go),
+            onOpenSettings,
+        )
     }
 }

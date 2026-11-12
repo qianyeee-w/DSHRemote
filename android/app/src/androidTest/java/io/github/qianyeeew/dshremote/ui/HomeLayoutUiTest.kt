@@ -156,6 +156,24 @@ class HomeLayoutUiTest {
         compose.runOnIdle { assertEquals("second", switched) }
     }
 
+    /** 有问题的电脑在菜单里带短状态，点了不切换，进它的详情页；最后一行「电脑与设置」（设计规格 7.7）。 */
+    @Test fun hostMenuSendsProblemComputersToTheirPage() {
+        var switched = ""
+        var detail = ""
+        var settings = 0
+        render(onSwitch = { switched = it }, onHostDetail = { detail = it }, onSettings = { settings++ })
+        compose.onNodeWithTag("home-host").performClick()
+        compose.onNodeWithText(text(R.string.host_menu_rejected)).assertIsDisplayed()
+        compose.onNodeWithTag("home-host:third").performClick()
+        compose.onNodeWithTag("home-host").performClick()
+        compose.onNodeWithTag("home-computers-settings").performClick()
+        compose.runOnIdle {
+            assertEquals("", switched)
+            assertEquals("third", detail)
+            assertEquals(1, settings)
+        }
+    }
+
     /** 点底部输入框原地展开；点外面收起，已经写的字保留（设计规格 7.6）。 */
     @Test fun newTaskExpandsInPlaceAndKeepsTheTextWhenCollapsed() {
         var expanded = 0
@@ -239,6 +257,8 @@ class HomeLayoutUiTest {
         newTaskProject: () -> ProjectPick = { ProjectPick.Existing(workspaces[0]) },
         newTaskActions: NewTaskActions = NewTaskActions(),
         onProject: (ProjectMode) -> Unit = {},
+        onHostDetail: (String) -> Unit = {},
+        onSettings: () -> Unit = {},
     ) {
         val attention = mapOf("waiting" to shell, "asking" to ask)
         val state =
@@ -267,8 +287,15 @@ class HomeLayoutUiTest {
                             onAddHost = {},
                             onRepair = {},
                             onRetry = {},
-                            hosts = listOf(HostRow("first", "开发电脑", null, online), HostRow("second", "笔记本", null, LinkStatus.Stopped)),
+                            onOpenSettings = onSettings,
+                            hosts =
+                                listOf(
+                                    HostRow("first", "开发电脑", null, online),
+                                    HostRow("second", "笔记本", null, LinkStatus.Stopped),
+                                    HostRow("third", "实验室服务器", null, LinkStatus.FingerprintMismatch),
+                                ),
                             onSwitchHost = onSwitch,
+                            onOpenHostDetail = onHostDetail,
                         ),
                     attentionActions = actions,
                     onFilter = onFilter,

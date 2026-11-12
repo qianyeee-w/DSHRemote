@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390">
+<title>会话</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
+<style>
+
+body{margin:0;background:#E9E8E3;display:flex;justify-content:center}
+button{font:inherit;color:inherit;cursor:pointer}
+a{color:#16181C;text-decoration:none}a:hover{color:#000000}
+</style>
+</head>
+<body>
+<div style="width: 390px; height: 880px; box-sizing: border-box; position: relative; overflow: hidden; background: #FAFAF8; color: #16181C; font-family: 'IBM Plex Sans SC', 'Noto Sans SC', sans-serif">
+
+<div style="height: 60px; box-sizing: border-box; padding: 16px 8px 0 8px; display: flex; align-items: center; gap: 4px">
+<a href="01-home.html" aria-label="返回" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16181C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>
+</a>
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column">
+<span style="font-size: 15px; line-height: 22px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">优化通知展示</span>
+<span style="font-size: 12px; line-height: 16px; color: #5F646C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">工作电脑 · DSHRemote · 改文件不问</span>
+</div>
+<span aria-hidden="true" style="flex-shrink: 0; width: 12px"></span>
+</div>
+
+<button style="margin-top: 4px; width: 100%; height: 44px; box-sizing: border-box; padding: 0 20px; display: flex; align-items: center; gap: 8px; background: none; border: none; border-top: 1px solid #E9E8E3; border-bottom: 1px solid #E9E8E3; text-align: left; font-size: 13px">
+<span style="flex-shrink: 0; color: #5F646C">第 3 步，共 5 步</span>
+<span style="flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">补测试并跑通</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5F646C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+</button>
+
+<div style="box-sizing: border-box; padding: 16px 20px 0 20px; display: flex; flex-direction: column; gap: 18px">
+
+<div style="align-self: flex-end; max-width: 280px; padding: 9px 14px; background: #F1F0EC; border-radius: 18px; font-size: 15px; line-height: 24px">通知里同一个审批会重复出现，帮我查一下原因并修掉。</div>
+
+<p style="margin: 0; font-size: 15px; line-height: 26px">找到原因了。同一个审批会从两条路径进来，去重用的键不一样：<strong style="font-weight: 600">建立连接时</strong>按主机加事项编号，<strong style="font-weight: 600">收到新事件时</strong>只按事项编号。</p>
+
+<p style="margin: 0; font-size: 15px; line-height: 26px">我把两处统一成 <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 1px 5px; background: #F1F0EC; border-radius: 5px">key()</code> 一个入口：</p>
+
+<div style="margin-top: -8px; position: relative; background: #F4F3EF; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column">
+<div style="height: 44px; padding: 0 0 0 14px; display: flex; align-items: center; justify-content: space-between">
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #5F646C">NotificationRules.kt</span>
+<button aria-label="复制代码" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: none; border: none">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5F646C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2.5"></rect><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"></path></svg>
+</button>
+</div>
+<div style="padding: 0 14px 14px 14px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 20px; white-space: nowrap; display: flex; flex-direction: column">
+<span><span style="font-weight: 600">private fun</span> key(hostId: String, item: Attention) =</span>
+<span style="padding-left: 4ch; color: #46607A">"$hostId/${item.id}"</span>
+<span style="height: 20px"></span>
+<span><span style="font-weight: 600">fun</span> onAttention(hostId: String, item: Attention) {</span>
+<span style="padding-left: 4ch"><span style="font-weight: 600">if</span> (!seen.add(key(hostId, item))) <span style="font-weight: 600">return</span></span>
+<span style="padding-left: 4ch">notifier.post(hostId, item)</span>
+<span>}</span>
+</div>
+<span aria-hidden="true" style="position: absolute; right: 0; top: 44px; bottom: 0; width: 32px; background: linear-gradient(to right, rgba(244, 243, 239, 0), #F4F3EF)"></span>
+</div>
+
+<a href="03-steps.html" style="align-self: flex-start; height: 44px; margin: -11px 0; display: flex; align-items: center; gap: 6px; font-size: 13px; color: #5F646C">
+<span>5 个步骤 · 改了 2 个文件</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5F646C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+</a>
+
+<div style="display: flex; align-items: center; gap: 10px; color: #5F646C">
+<span aria-hidden="true" style="box-sizing: border-box; width: 10px; height: 10px; border-radius: 5px; border: 1.5px solid #D5D4CE; border-top-color: #16181C"></span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 20px; flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">./gradlew test</span>
+<span style="flex-shrink: 0; font-size: 12px; line-height: 20px">本轮 4:12 · 约 48k token</span>
+</div>
+
+<div style="align-self: flex-end; max-width: 280px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px">
+<div style="padding: 9px 14px; background: #F1F0EC; border-radius: 18px; font-size: 15px; line-height: 24px">顺便核对一下通知文案。</div>
+<span style="font-size: 12px; line-height: 16px; color: #5F646C">已送出，DSH 下一步会读到</span>
+</div>
+
+</div>
+
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 88px; box-sizing: border-box; padding: 8px 16px 0 16px; background: #FAFAF8">
+<div style="height: 52px; box-sizing: border-box; padding: 0 6px 0 4px; display: flex; align-items: center; gap: 2px; background: #FFFFFF; border: 1px solid #E3E2DD; border-radius: 26px">
+<button aria-label="添加图片" style="flex-shrink: 0; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: none; border: none">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5F646C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+</button>
+<label for="msg" style="position: absolute; width: 1px; height: 1px; overflow: hidden">消息</label>
+<input id="msg" type="text" placeholder="补充一句" style="flex-grow: 1; min-width: 0; height: 44px; padding: 0; background: none; border: none; outline: none; font: inherit; font-size: 15px; color: #16181C">
+<button aria-label="停止。上下文用了不到一半，长按看用量" style="flex-shrink: 0; width: 44px; height: 44px; margin-right: -2px; padding: 0; background: none; border: none; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="40" height="40" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18.5" stroke="#E3E2DD" stroke-width="2.5"></circle><circle cx="20" cy="20" r="18.5" stroke="#5F646C" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="53.5 117" transform="rotate(-90 20 20)"></circle><circle cx="20" cy="20" r="14.5" fill="#16181C"></circle><rect x="15" y="15" width="10" height="10" rx="2.5" fill="#FFFFFF"></rect></svg>
+</button>
+</div>
+</div>
+
+</div>
+</body>
+</html>

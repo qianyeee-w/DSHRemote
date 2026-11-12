@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390">
+<title>审批</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
+<style>
+
+body{margin:0;background:#E9E8E3;display:flex;justify-content:center}
+button{font:inherit;color:inherit;cursor:pointer}
+a{color:#16181C;text-decoration:none}a:hover{color:#000000}
+</style>
+</head>
+<body>
+<div style="width: 390px; height: 880px; box-sizing: border-box; position: relative; overflow: hidden; background: #FAFAF8; color: #16181C; font-family: 'IBM Plex Sans SC', 'Noto Sans SC', sans-serif">
+
+<div style="height: 60px; box-sizing: border-box; padding: 16px 8px 0 8px; display: flex; align-items: center; gap: 4px">
+<a href="01-home.html" aria-label="返回" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16181C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>
+</a>
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column">
+<span style="font-size: 15px; line-height: 22px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">检查连接恢复逻辑</span>
+<span style="font-size: 12px; line-height: 16px; color: #5F646C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">工作电脑 · DSHRemote · 改文件不问</span>
+</div>
+<span aria-hidden="true" style="flex-shrink: 0; width: 12px"></span>
+</div>
+
+<a href="12-plan.html" style="margin-top: 4px; height: 44px; box-sizing: border-box; padding: 0 20px; display: flex; align-items: center; gap: 8px; border-top: 1px solid #E9E8E3; border-bottom: 1px solid #E9E8E3; font-size: 13px">
+<span style="flex-shrink: 0; color: #5F646C">第 3 步，共 4 步</span>
+<span style="flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">跑单元测试，确认实际行为</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5F646C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+</a>
+
+<div style="box-sizing: border-box; padding: 16px 20px 0 20px; display: flex; flex-direction: column; gap: 18px">
+
+<div style="align-self: flex-end; max-width: 286px; padding: 10px 16px; background: #F1F0EC; border-radius: 20px; font-size: 15px; line-height: 24px">检查断线后的恢复逻辑，确认能继续查看当前会话。</div>
+
+<button style="align-self: flex-start; height: 44px; margin: -11px 0; padding: 0; display: flex; align-items: center; gap: 6px; background: none; border: none; font-size: 13px; color: #5F646C">
+<span>3 个步骤 · 读了 4 个文件</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5F646C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+</button>
+
+<p style="margin: 0; font-size: 15px; line-height: 26px">看完了连接状态和会话订阅的流程。重连之后有两点要保证：恢复原来的会话订阅，以及保留当前的阅读位置。</p>
+
+<p style="margin: 0; font-size: 15px; line-height: 26px">代码看起来都处理了。我想跑一遍单元测试，确认实际行为。</p>
+
+</div>
+
+<div style="position: absolute; left: 0; right: 0; bottom: 0; box-sizing: border-box; padding: 0 16px 28px 16px; background: #FAFAF8; display: flex; flex-direction: column; gap: 8px">
+
+<div style="padding: 16px; background: #FFFFFF; border: 1px solid #E3E2DD; border-radius: 22px; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 18px; color: #8A5200">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 4px; background: #C77700"></span>
+<span>想运行命令</span>
+</div>
+<div style="margin-top: 10px; font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 22px; word-break: break-all">./gradlew test</div>
+<div style="margin-top: 2px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 18px; color: #5F646C">~/code/dshremote/android</div>
+<div style="margin-top: 14px; display: flex; gap: 8px">
+<button style="flex: 1 1 0; height: 44px; background: #F1F0EC; border: none; border-radius: 22px; font-size: 14px">拒绝</button>
+<button style="flex: 1 1 0; height: 44px; background: #16181C; border: none; border-radius: 22px; font-size: 14px; font-weight: 600; color: #FFFFFF">允许</button>
+</div>
+</div>
+
+<div style="height: 52px; box-sizing: border-box; padding: 0 6px 0 4px; display: flex; align-items: center; gap: 2px; background: #FFFFFF; border: 1px solid #E3E2DD; border-radius: 26px">
+<button aria-label="添加图片" style="flex-shrink: 0; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: none; border: none">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5F646C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+</button>
+<label for="msg" style="position: absolute; width: 1px; height: 1px; overflow: hidden">消息</label>
+<input id="msg" type="text" placeholder="或者告诉它换个做法" style="flex-grow: 1; min-width: 0; height: 44px; padding: 0; background: none; border: none; outline: none; font: inherit; font-size: 15px; color: #16181C">
+<button aria-label="发送。上下文用了大约三成，长按看用量" style="flex-shrink: 0; width: 44px; height: 44px; margin-right: -2px; padding: 0; background: none; border: none; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" width="40" height="40" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18.5" stroke="#E3E2DD" stroke-width="2.5"></circle><circle cx="20" cy="20" r="18.5" stroke="#5F646C" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="34.9 117" transform="rotate(-90 20 20)"></circle><circle cx="20" cy="20" r="14.5" fill="#F1F0EC"></circle><path d="M20 26V14" stroke="#5F646C" stroke-width="2" stroke-linecap="round"></path><path d="M15 19l5-5 5 5" stroke="#5F646C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+</button>
+</div>
+
+</div>
+
+</div>
+</body>
+</html>

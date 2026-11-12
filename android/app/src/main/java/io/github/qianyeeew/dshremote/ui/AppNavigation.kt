@@ -17,6 +17,7 @@ import io.github.qianyeeew.dshremote.service.VisibleSession
 import io.github.qianyeeew.dshremote.ui.attention.AttentionScreen
 import io.github.qianyeeew.dshremote.ui.attention.AttentionViewModel
 import io.github.qianyeeew.dshremote.ui.attention.LiveAttentionResponder
+import io.github.qianyeeew.dshremote.ui.attention.attentionSession
 import io.github.qianyeeew.dshremote.ui.chat.ChatScreen
 import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
 import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
@@ -90,7 +91,16 @@ fun AppNavigation(
     val target by container.pendingTarget.collectAsStateWithLifecycle()
     LaunchedEffect(target) {
         when (val t = target) {
-            is NotificationTarget.AttentionPage -> nav.navigate(AttentionRoute(t.hostId, t.attentionId)) { launchSingleTop = true }
+            // 事项所在的会话在列表里时打开会话，面板就在底部（设计规格 7.4、用户确认）；
+            // 子代理发起、或者还没连上时找不到会话，用独立的处理页
+            is NotificationTarget.AttentionPage -> {
+                val sessionId = attentionSession(container.connections.states.value[t.hostId], t.attentionId)
+                if (sessionId != null) {
+                    nav.navigate(SessionRoute(t.hostId, sessionId)) { launchSingleTop = true }
+                } else {
+                    nav.navigate(AttentionRoute(t.hostId, t.attentionId)) { launchSingleTop = true }
+                }
+            }
             is NotificationTarget.SessionPage -> nav.navigate(SessionRoute(t.hostId, t.sessionId)) { launchSingleTop = true }
             null -> return@LaunchedEffect
         }

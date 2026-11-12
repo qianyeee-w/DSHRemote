@@ -3,32 +3,27 @@ package io.github.qianyeeew.dshremote.ui.chat
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -60,7 +55,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,7 +68,10 @@ import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCard
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
 import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
+import io.github.qianyeeew.dshremote.ui.attention.ComposerAttention
 import io.github.qianyeeew.dshremote.ui.attention.Resolution
+import io.github.qianyeeew.dshremote.ui.attention.composerAttention
+import io.github.qianyeeew.dshremote.ui.common.DesignBackBar
 import io.github.qianyeeew.dshremote.ui.common.PillButton
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
@@ -171,21 +168,30 @@ fun ChatContent(
     val confirmingHandler = remember { ConfirmingUriHandler { pendingLink = it } }
 
     Scaffold(topBar = { ChatTopBar(state, actions) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
-            if (!state.online) LinkBanner(state)
-            // 等待处理、但事项还没到（或者不在这台手机能看到的范围）时，至少提示一下
-            if (state.session?.status == SessionStatus.WAITING && state.attention.isEmpty()) WaitingBanner()
-            CompositionLocalProvider(LocalUriHandler provides confirmingHandler) {
-                // Android 13 起系统会自己显示复制成功的提示，不再重复提示
-                val onCopied = {
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
+        // 输入区这一栏的实际高度（已经扣掉键盘），面板最多占一半，其余都给消息列表
+        BoxWithConstraints(Modifier.padding(padding).fillMaxSize().imePadding()) {
+            val panelMax = maxHeight / 2
+            Column(Modifier.fillMaxSize()) {
+                if (!state.online) LinkBanner(state)
+                // 等待处理、但事项还没到（或者不在这台手机能看到的范围）时，至少提示一下
+                if (state.session?.status == SessionStatus.WAITING && state.attention.isEmpty()) WaitingBanner()
+                CompositionLocalProvider(LocalUriHandler provides confirmingHandler) {
+                    // Android 13 起系统会自己显示复制成功的提示，不再重复提示
+                    val onCopied = {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
+                    }
+                    MessageList(state, actions, onCopied = { onCopied() }, modifier = Modifier.weight(1f))
                 }
-                MessageList(state, actions, onCopied = { onCopied() }, modifier = Modifier.weight(1f))
+                // 不能和列表各用一个权重：面板用不完自己那一半时，剩下的空间会空着，输入框就不贴底了
+                AttentionPanel(state, attentionActions, Modifier.heightIn(max = panelMax))
+                ChatComposer(
+                    state,
+                    actions,
+                    pickerOpen = picker != Picker.Closed,
+                    attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
+                    onAnswer = attentionActions.onAnswerWithCustom,
+                )
             }
-            // 和消息列表按同样的权重分剩余空间，并且不强制占满：事项最多占一半，少时只占需要的高度。
-            // 按剩余空间而不是窗口高度计算，打开键盘时输入框不会被挤扁
-            AttentionPanel(state, attentionActions, Modifier.weight(1f, fill = false))
-            ChatComposer(state, actions, pickerOpen = picker != Picker.Closed)
         }
     }
 
@@ -199,51 +205,13 @@ private fun ChatTopBar(
     state: ChatState,
     actions: ChatActions,
 ) {
-    val colors = DesignTheme.colors
     val subtitle =
         listOfNotNull(
             state.hostName,
             state.projectName,
             state.session?.permissionPreset?.let { permissionLabel(it) },
         ).joinToString(" · ")
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(colors.page)
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(start = 4.dp, end = 20.dp, top = 8.dp)
-            .heightIn(min = 52.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        IconButton(onClick = actions.onBack) {
-            Icon(
-                painterResource(R.drawable.ic_dsh_chevron_left),
-                stringResource(R.string.action_back),
-                Modifier.size(20.dp),
-                tint = colors.text,
-            )
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                sessionTitleText(state.session?.title),
-                style = MaterialTheme.typography.titleMedium,
-                color = colors.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (subtitle.isNotEmpty()) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("chat-subtitle"),
-                )
-            }
-        }
-    }
+    DesignBackBar(actions.onBack, sessionTitleText(state.session?.title), subtitle)
 }
 
 /** 最新的消息在底部（reverseLayout），滚到顶部附近时取更早的一页。 */
@@ -362,7 +330,10 @@ private fun LinkBanner(state: ChatState) {
     )
 }
 
-/** 这个会话的审批和提问，显示在输入框上方。事项多或者很长时可以滚动。 */
+/**
+ * 这个会话的审批和提问，压在输入框上方（设计规格 6.8），面板上面仍然能看到 DSH 刚说的话。
+ * 事项多或者很长时可以滚动。在别处处理掉的事项由视图模型过滤掉，面板随之收起。
+ */
 @Composable
 private fun AttentionPanel(
     state: ChatState,
@@ -374,11 +345,12 @@ private fun AttentionPanel(
         modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp)
+            .testTag("attention-panel"),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         state.attention.forEach { attention ->
-            AttentionCard(attention, state.attentionUi[attention.attentionId] ?: AttentionUi(), actions)
+            AttentionCard(attention, state.attentionUi[attention.attentionId] ?: AttentionUi(), actions, cwd = state.session?.cwd)
         }
     }
 }

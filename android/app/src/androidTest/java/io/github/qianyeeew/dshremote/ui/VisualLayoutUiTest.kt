@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -53,8 +54,9 @@ class VisualLayoutUiTest {
     @Test
     fun darkLargeTextKeepsApprovalAndInputReachable() {
         renderChat(dark = true, fontScale = 1.3f, approval = true)
-        compose.onNodeWithTag("chat-input").performClick().performTextInput("保留当前任务")
-        compose.onNodeWithTag("chat-send").assertIsDisplayed()
+        // 审批在等时输入框不能写（DSH 停着等审批），只留停止
+        compose.onNodeWithTag("chat-input").assertIsNotEnabled()
+        compose.onNodeWithTag("chat-stop").assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.attention_allow)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("chat-input").assertIsDisplayed()
         save("chat-dark-large-approval")

@@ -264,5 +264,5 @@ object CodeTextStyles {
     val command = style(CodeFontFamily, 12.5.sp, 18.sp)
 
     /** 审批面板里的命令或文件（设计规格 7.4）。 */
-    val approval = style(CodeFontFamily, 14.sp, 20.sp)
+    val approval = style(CodeFontFamily, 14.sp, 22.sp)
 }

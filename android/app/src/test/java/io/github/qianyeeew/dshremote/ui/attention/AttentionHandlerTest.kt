@@ -151,5 +151,86 @@ class AttentionHandlerTest {
         assertEquals(Resolution.ANSWERED_HERE, ui("a2").resolution)
     }
 
+    private val multiSelect =
+        Attention(
+            "a4",
+            "s1",
+            AttentionKind.QUESTION,
+            question =
+                QuestionSet(
+                    listOf(Question("q1", "要改哪些？", options = listOf(QuestionOption("通知"), QuestionOption("文案")), multiSelect = true)),
+                ),
+            createdAt = 0,
+        )
+    private val twoQuestions =
+        Attention(
+            "a5",
+            "s1",
+            AttentionKind.QUESTION,
+            question =
+                QuestionSet(
+                    listOf(
+                        Question("q1", "第一题", options = listOf(QuestionOption("是"), QuestionOption("否"))),
+                        Question("q2", "第二题", options = listOf(QuestionOption("好"))),
+                    ),
+                ),
+            createdAt = 0,
+        )
+
+    /** 只有一个问题而且是单选：点选项就是回答（设计规格 7.5）。 */
+    @Test
+    fun singleChoiceOptionAnswersImmediately() {
+        handler.answerOption(question, "q1", "方案B")
+        assertEquals(listOf("a2" to AttentionAnswer.Answers(listOf(QuestionAnswer("q1", listOf("方案B"))))), answers)
+        assertEquals(Resolution.ANSWERED_HERE, ui("a2").resolution)
+    }
+
+    /** 多选、多个问题时点选项只是勾选，要按「回答」才提交。 */
+    @Test
+    fun multiSelectAndMultipleQuestionsNeedConfirmation() {
+        handler.answerOption(multiSelect, "q1", "通知")
+        handler.answerOption(multiSelect, "q1", "文案")
+        handler.answerOption(twoQuestions, "q1", "是")
+        assertEquals(emptyList<Pair<String, AttentionAnswer>>(), answers)
+        assertEquals(listOf("通知", "文案"), ui("a4").drafts.getValue("q1").selected)
+        assertTrue(handler.submitAnswers(multiSelect))
+        assertEquals(AttentionAnswer.Answers(listOf(QuestionAnswer("q1", listOf("通知", "文案")))), answers.single().second)
+    }
+
+    /** 用输入框写的答案作为 custom 提交；多选题带上已经勾的选项，单选题不带。 */
+    @Test
+    fun customAnswerFromTheInput() {
+        handler.answerOption(multiSelect, "q1", "通知")
+        assertTrue(handler.answerWithCustom(multiSelect, "q1", "还有图标"))
+        assertEquals(AttentionAnswer.Answers(listOf(QuestionAnswer("q1", listOf("通知"), "还有图标"))), answers.last().second)
+
+        handler.toggle(question, "q1", "方案A")
+        assertTrue(handler.answerWithCustom(question, "q1", "都不要"))
+        assertEquals(AttentionAnswer.Answers(listOf(QuestionAnswer("q1", emptyList(), "都不要"))), answers.last().second)
+    }
+
+    /** 本地校验不通过时不发送，返回 false，输入框保留文字。 */
+    @Test
+    fun customAnswerThatFailsValidationIsNotSent() {
+        assertEquals(false, handler.answerWithCustom(question, "q1", "x".repeat(4_001)))
+        assertEquals(AttentionError.CUSTOM_TOO_LONG, ui("a2").error)
+        assertEquals(false, handler.answerWithCustom(question, "q1", "   "))
+        assertEquals(AttentionError.NOTHING_ANSWERED, ui("a2").error)
+        // 多个问题的提问不能从底部输入框回答
+        assertEquals(false, handler.answerWithCustom(twoQuestions, "q1", "是"))
+        assertTrue(answers.isEmpty())
+    }
+
+    /** 提交中再点不会发第二次。 */
+    @Test
+    fun answeringTwiceWhileSubmittingSendsOnce() {
+        gate = CompletableDeferred()
+        handler.answerOption(question, "q1", "方案A")
+        handler.answerOption(question, "q1", "方案B")
+        assertEquals(false, handler.answerWithCustom(question, "q1", "改主意了"))
+        gate!!.complete(Unit)
+        assertEquals(1, answers.size)
+    }
+
     private fun ui(id: String) = handler.ui.value.getValue(id)
 }

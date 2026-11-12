@@ -34,6 +34,7 @@ import io.github.qianyeeew.dshremote.ui.chat.ChatContent
 import io.github.qianyeeew.dshremote.ui.chat.ChatItem
 import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.Picker
+import io.github.qianyeeew.dshremote.ui.common.TOP_BAR_SUBTITLE_TAG
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -91,7 +92,7 @@ class ChatContentUiTest {
         val base = onlineChatState()
         render(base.copy(session = base.session?.copy(permissionPreset = "workspace-write"), hostName = "工作电脑", projectName = "DSHRemote"))
         compose
-            .onNodeWithTag("chat-subtitle")
+            .onNodeWithTag(TOP_BAR_SUBTITLE_TAG)
             .assertTextEquals("工作电脑 · DSHRemote · ${context.getString(R.string.design_permission_workspace)}")
     }
 

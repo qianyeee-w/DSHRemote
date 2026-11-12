@@ -44,7 +44,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
+import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.ui.DesignTheme
+import io.github.qianyeeew.dshremote.ui.attention.ComposerAttention
 import io.github.qianyeeew.dshremote.ui.common.designPanel
 
 /** 发送键此刻的作用（设计规格 6.3）。 */
@@ -72,6 +74,9 @@ fun sendKeyMode(
 /**
  * 输入框（设计规格 6.3）。收起（没有焦点）时一行：占位文字、发送键；展开（获得焦点）时描边变成主文字色，
  * 上面是输入的文字，下面一行是模型、审批方式、发送键。加号（图片）和发送键外圈（上下文用量）等落地方案 C2、B4。
+ *
+ * 有待处理事项时按 [attention]：审批在等时不能写（DSH 停着等审批，消息不会改变这次审批），只留停止；
+ * 只有一个问题的提问时，写的就是自己的答案，经 [onAnswer] 提交；多个问题时在面板里逐题写。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -79,6 +84,8 @@ fun ChatComposer(
     state: ChatState,
     actions: ChatActions,
     pickerOpen: Boolean = false,
+    attention: ComposerAttention = ComposerAttention.None,
+    onAnswer: (Attention, questionId: String, text: String) -> Boolean = { _, _, _ -> false },
 ) {
     val colors = DesignTheme.colors
     var text by rememberSaveable { mutableStateOf("") }
@@ -97,17 +104,27 @@ fun ChatComposer(
         stringResource(
             when {
                 !state.online -> R.string.chat_input_hint_offline
+                attention is ComposerAttention.Approval -> R.string.chat_input_hint_approval
+                attention is ComposerAttention.AnswerAbove -> R.string.chat_input_hint_answer_above
+                attention is ComposerAttention.Answer -> R.string.chat_input_hint_answer
                 state.running -> R.string.chat_input_hint_running
                 else -> R.string.chat_input_hint
             },
         )
+    val writable = state.canSend && attention !is ComposerAttention.Approval && attention !is ComposerAttention.AnswerAbove
     val send = {
-        if (actions.onSend(text)) {
+        val accepted =
+            when (attention) {
+                is ComposerAttention.Answer -> onAnswer(attention.attention, attention.questionId, text)
+                is ComposerAttention.Approval, is ComposerAttention.AnswerAbove -> false
+                ComposerAttention.None -> actions.onSend(text)
+            }
+        if (accepted) {
             text = ""
             haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
         }
     }
-    val mode = sendKeyMode(state, text.isNotBlank())
+    val mode = sendKeyMode(state, text.isNotBlank() && writable)
     val shape = RoundedCornerShape(if (expanded) 22.dp else 26.dp)
     Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
         Column(
@@ -123,7 +140,7 @@ fun ChatComposer(
                 BasicTextField(
                     value = text,
                     onValueChange = { text = it },
-                    enabled = state.canSend,
+                    enabled = writable,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
                     cursorBrush = SolidColor(colors.text),
                     maxLines = if (expanded) 6 else 1,

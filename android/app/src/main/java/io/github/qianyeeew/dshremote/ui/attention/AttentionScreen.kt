@@ -3,12 +3,10 @@ package io.github.qianyeeew.dshremote.ui.attention
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,8 +23,10 @@ import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.live.LiveEvent
-import io.github.qianyeeew.dshremote.ui.common.BackTopBar
-import io.github.qianyeeew.dshremote.ui.hosts.StatusBadge
+import io.github.qianyeeew.dshremote.ui.DesignTheme
+import io.github.qianyeeew.dshremote.ui.common.DesignBackBar
+import io.github.qianyeeew.dshremote.ui.common.PillButton
+import io.github.qianyeeew.dshremote.ui.hosts.needsAttention
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -91,6 +91,7 @@ fun AttentionScreen(
     AttentionPageContent(state, AttentionCardActions.of(viewModel.handler), onBack, onOpenSession)
 }
 
+/** 独立的处理页（设计规格第 9 节）：只有返回键，内容是 7.4、7.5 的同一个面板。 */
 @Composable
 fun AttentionPageContent(
     state: AttentionPageState,
@@ -98,13 +99,13 @@ fun AttentionPageContent(
     onBack: () -> Unit,
     onOpenSession: (sessionId: String) -> Unit,
 ) {
-    Scaffold(topBar = { BackTopBar(stringResource(R.string.attention_screen_title), onBack) }) { padding ->
+    Scaffold(topBar = { DesignBackBar(onBack) }, containerColor = DesignTheme.colors.page) { padding ->
         Column(
             Modifier
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             val attention = state.attention
@@ -116,15 +117,16 @@ fun AttentionPageContent(
                 attention != null -> Message(stringResource(R.string.attention_done_elsewhere))
                 state.link is LinkStatus.Online -> Message(stringResource(R.string.attention_not_found))
                 else -> {
-                    StatusBadge(state.link)
-                    Text(statusDetail(state.link), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        statusDetail(state.link),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (state.link.needsAttention) DesignTheme.colors.danger else DesignTheme.colors.textSecondary,
+                    )
                     Message(stringResource(R.string.attention_waiting_connection))
                 }
             }
             if (attention != null && state.sessionKnown) {
-                OutlinedButton(onClick = { onOpenSession(attention.sessionId) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.attention_open_session))
-                }
+                PillButton(stringResource(R.string.attention_open_session), { onOpenSession(attention.sessionId) })
             }
         }
     }
@@ -142,5 +144,5 @@ private fun resolutionText(resolution: Resolution): String =
 
 @Composable
 private fun Message(text: String) {
-    Text(text, style = MaterialTheme.typography.bodyLarge)
+    Text(text, style = MaterialTheme.typography.bodyLarge, color = DesignTheme.colors.text, modifier = Modifier.padding(horizontal = 4.dp))
 }

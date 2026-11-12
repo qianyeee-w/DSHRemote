@@ -141,16 +141,75 @@ class AttentionHandler(
         allow: Boolean,
     ) = submit(attention.attentionId, AttentionAnswer.Decision(allow))
 
-    /** 提交提问的回答。先在本地校验，不通过时不发送。 */
-    fun submitAnswers(attention: Attention) {
-        val set = attention.question ?: return
+    /**
+     * 提交提问的回答。先在本地校验，不通过时不发送。返回 true 表示已经发出（结果之后通过 [ui] 反映）。
+     */
+    fun submitAnswers(attention: Attention): Boolean {
+        val set = attention.question ?: return false
         val ui = _ui.value[attention.attentionId] ?: AttentionUi()
-        when (val check = AnswerForm.check(set, ui.drafts)) {
-            AnswerCheck.NothingAnswered -> edit(attention.attentionId) { it.copy(error = AttentionError.NOTHING_ANSWERED) }
-            is AnswerCheck.Invalid ->
+        if (ui.submitting || ui.resolution != null) return false
+        return when (val check = AnswerForm.check(set, ui.drafts)) {
+            AnswerCheck.NothingAnswered -> {
+                edit(attention.attentionId) { it.copy(error = AttentionError.NOTHING_ANSWERED) }
+                false
+            }
+            is AnswerCheck.Invalid -> {
                 edit(attention.attentionId) { it.copy(problems = check.problems, error = AttentionError.CUSTOM_TOO_LONG) }
-            is AnswerCheck.Ok -> submit(attention.attentionId, check.answer)
+                false
+            }
+            is AnswerCheck.Ok -> {
+                submit(attention.attentionId, check.answer)
+                true
+            }
         }
+    }
+
+    /**
+     * 只有一个问题、而且是单选时，点选项就是回答（设计规格 7.5）：选中这一项，丢掉自己写的内容，马上提交。
+     * 不是这种提问时只切换选项，不提交。
+     */
+    fun answerOption(
+        attention: Attention,
+        questionId: String,
+        label: String,
+    ) {
+        val set = attention.question ?: return
+        val question = set.questions.singleOrNull()?.takeIf { it.id == questionId && !it.multiSelect }
+        if (question == null || question.options.none { it.label == label }) {
+            toggle(attention, questionId, label)
+            return
+        }
+        val ui = _ui.value[attention.attentionId] ?: AttentionUi()
+        if (ui.submitting || ui.resolution != null) return
+        edit(attention.attentionId) {
+            it.copy(drafts = mapOf(questionId to QuestionDraft(selected = listOf(label))), problems = emptyMap(), error = null)
+        }
+        submitAnswers(attention)
+    }
+
+    /**
+     * 只有一个问题时，从下面的输入框写的答案（协议里的 `custom`）。多选题已经勾的选项一起提交。
+     * 返回 true 表示通过了本地校验并已发出，输入框可以清空；false 时输入框保留文字，错误显示在面板里。
+     */
+    fun answerWithCustom(
+        attention: Attention,
+        questionId: String,
+        text: String,
+    ): Boolean {
+        val question =
+            attention.question
+                ?.questions
+                ?.singleOrNull()
+                ?.takeIf { it.id == questionId } ?: return false
+        val ui = _ui.value[attention.attentionId] ?: AttentionUi()
+        if (ui.submitting || ui.resolution != null) return false
+        val draft = ui.drafts[question.id] ?: QuestionDraft()
+        // 单选题自己写了答案时，就不再带着之前点过的选项
+        val selected = if (question.multiSelect) draft.selected else emptyList()
+        edit(attention.attentionId) {
+            it.copy(drafts = it.drafts + (question.id to QuestionDraft(selected, text)), problems = emptyMap(), error = null)
+        }
+        return submitAnswers(attention)
     }
 
     fun dismissNotice() {

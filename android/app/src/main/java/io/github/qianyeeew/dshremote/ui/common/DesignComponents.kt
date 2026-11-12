@@ -18,12 +18,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,6 +56,7 @@ import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -503,3 +507,58 @@ private const val DISABLED_ALPHA = 0.38f
 const val STATUS_WAITING_TAG = "status-waiting"
 const val STATUS_RUNNING_TAG = "status-running"
 const val POPUP_TAG = "design-popup"
+
+/**
+ * 顶栏（设计规格 5、7.2）：内容高 44，左边返回（图标 20），右边是对象名和一行灰字。页面不加大标题；
+ * 只有返回键的页面（例如独立的处理页）不传 [title]。
+ */
+@Composable
+fun DesignBackBar(
+    onBack: () -> Unit,
+    title: String? = null,
+    subtitle: String? = null,
+) {
+    val colors = DesignTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.page)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(start = 4.dp, end = 20.dp, top = 8.dp)
+            .heightIn(min = 52.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(
+                painterResource(R.drawable.ic_dsh_chevron_left),
+                stringResource(R.string.action_back),
+                Modifier.size(20.dp),
+                tint = colors.text,
+            )
+        }
+        if (title != null) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!subtitle.isNullOrEmpty()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag(TOP_BAR_SUBTITLE_TAG),
+                    )
+                }
+            }
+        }
+    }
+}
+
+const val TOP_BAR_SUBTITLE_TAG = "top-bar-subtitle"

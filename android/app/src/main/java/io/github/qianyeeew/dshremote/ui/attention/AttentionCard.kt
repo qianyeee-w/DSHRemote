@@ -1,54 +1,63 @@
 package io.github.qianyeeew.dshremote.ui.attention
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Approval
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.Question
+import io.github.qianyeeew.dshremote.data.api.QuestionSet
 import io.github.qianyeeew.dshremote.data.attention.AnswerForm
 import io.github.qianyeeew.dshremote.data.attention.QuestionDraft
 import io.github.qianyeeew.dshremote.data.attention.QuestionProblem
+import io.github.qianyeeew.dshremote.ui.CodeTextStyles
 import io.github.qianyeeew.dshremote.ui.DesignTheme
-import io.github.qianyeeew.dshremote.ui.chat.CodeSection
-import io.github.qianyeeew.dshremote.ui.chat.prettyJson
+import io.github.qianyeeew.dshremote.ui.common.BlockButton
+import io.github.qianyeeew.dshremote.ui.common.DesignDivider
+import io.github.qianyeeew.dshremote.ui.common.PillButton
+import io.github.qianyeeew.dshremote.ui.common.RowChevron
+import io.github.qianyeeew.dshremote.ui.common.StatusMark
+import io.github.qianyeeew.dshremote.ui.common.StatusMarker
+import io.github.qianyeeew.dshremote.ui.common.designPanel
 
 /** 处理一个事项时的操作，由 [AttentionHandler] 实现。 */
 class AttentionCardActions(
     val onToggle: (attention: Attention, questionId: String, label: String) -> Unit = { _, _, _ -> },
+    /** 只有一个问题且是单选时，点选项直接回答（其他情况等同 [onToggle]）。 */
+    val onAnswerOption: (attention: Attention, questionId: String, label: String) -> Unit = { _, _, _ -> },
     val onCustom: (attention: Attention, questionId: String, text: String) -> Unit = { _, _, _ -> },
+    /** 用底部输入框写的答案回答只有一个问题的提问。返回 true 表示已发出。 */
+    val onAnswerWithCustom: (attention: Attention, questionId: String, text: String) -> Boolean = { _, _, _ -> false },
     val onDecide: (attention: Attention, allow: Boolean) -> Unit = { _, _ -> },
     val onSubmit: (attention: Attention) -> Unit = {},
 ) {
@@ -56,16 +65,18 @@ class AttentionCardActions(
         fun of(handler: AttentionHandler) =
             AttentionCardActions(
                 onToggle = handler::toggle,
+                onAnswerOption = handler::answerOption,
                 onCustom = handler::setCustom,
+                onAnswerWithCustom = handler::answerWithCustom,
                 onDecide = handler::decide,
-                onSubmit = handler::submitAnswers,
+                onSubmit = { handler.submitAnswers(it) },
             )
     }
 }
 
 /**
- * 一个待处理事项（m2-android.md 3.5）：审批只有「允许」和「拒绝」，提问支持单选、多选和自由文本。
- * 会话详情页底部和独立的处理页面共用。
+ * 待处理面板（设计规格 6.8、7.4、7.5）：面板底、面板描边、圆角 22，压在输入框上方。第一行是琥珀色圆点加一句琥珀色小字。
+ * 会话页底部、独立处理页共用。[cwd] 是审批的工作目录（会话的工作目录），不知道时为 null。
  */
 @Composable
 fun AttentionCard(
@@ -73,159 +84,321 @@ fun AttentionCard(
     ui: AttentionUi,
     actions: AttentionCardActions,
     modifier: Modifier = Modifier,
+    cwd: String? = null,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth().testTag("attention-${attention.attentionId}"),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    val approval = attention.approval
+    val question = attention.question
+    Column(
+        modifier
+            .fillMaxWidth()
+            .designPanel(RoundedCornerShape(22.dp))
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = if (question != null) 4.dp else 16.dp)
+            .testTag("attention-${attention.attentionId}"),
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            val approval = attention.approval
-            val question = attention.question
-            when {
-                attention.kind == AttentionKind.APPROVAL && approval != null -> ApprovalContent(attention, approval, ui, actions)
-                attention.kind == AttentionKind.QUESTION && question != null -> {
-                    Text(stringResource(R.string.attention_question_title), style = MaterialTheme.typography.titleMedium)
-                    question.questions.forEach { q ->
-                        QuestionContent(attention, q, ui.drafts[q.id] ?: QuestionDraft(), ui.problems[q.id], ui.submitting, actions)
-                    }
-                    if (question.questions.size > 1) {
-                        Text(
-                            stringResource(R.string.attention_partial_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    ErrorText(ui)
-                    Button(onClick = { actions.onSubmit(attention) }, enabled = !ui.submitting, modifier = Modifier.fillMaxWidth()) {
-                        if (ui.submitting) Progress() else Text(stringResource(R.string.attention_submit))
-                    }
-                }
-                else -> Text(stringResource(R.string.attention_unknown_kind))
+        when {
+            attention.kind == AttentionKind.APPROVAL && approval != null -> ApprovalContent(attention, approval, ui, actions, cwd)
+            attention.kind == AttentionKind.QUESTION && question != null -> QuestionContent(attention, question, ui, actions)
+            else -> {
+                Headline(stringResource(R.string.attention_decide))
+                Text(
+                    stringResource(R.string.attention_unknown_kind),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DesignTheme.colors.text,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 12.dp),
+                )
             }
         }
     }
 }
 
+/** 第一行：琥珀色圆点加一句琥珀色小字。 */
+@Composable
+private fun Headline(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatusMarker(StatusMark.WAITING)
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall.copy(lineHeight = MaterialTheme.typography.labelMedium.lineHeight),
+            color = DesignTheme.colors.waitingText,
+        )
+    }
+}
+
+/**
+ * 审批（7.4）：想运行命令 / 想修改文件 / 想使用某工具；命令或文件（等宽 14 号，可以折行）；工作目录（等宽 12 号，灰色）；
+ * 「拒绝」「允许」各占一半。插件没能找到对应的工具调用时，第 2、3 行换成审批的 `reason`。只对这一次有效。
+ */
 @Composable
 private fun ApprovalContent(
     attention: Attention,
     approval: Approval,
     ui: AttentionUi,
     actions: AttentionCardActions,
+    cwd: String?,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(painterResource(R.drawable.ic_dsh_shield), null, Modifier.size(16.dp), tint = DesignTheme.colors.waitingText)
-        Text(
-            stringResource(R.string.attention_approval_title),
-            style = MaterialTheme.typography.labelMedium,
-            color = DesignTheme.colors.waitingText,
-        )
-    }
-    Text(approval.summary ?: stringResource(R.string.attention_tool, approval.toolName), style = MaterialTheme.typography.titleSmall)
-    if (approval.reason.isNotBlank()) Text(approval.reason, style = MaterialTheme.typography.bodyMedium)
-    approval.input?.takeIf { it.isNotEmpty() }?.let { input ->
-        var open by rememberSaveable(attention.attentionId) { mutableStateOf(false) }
-        Text(
-            stringResource(if (open) R.string.attention_hide_input else R.string.attention_show_input),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.clickable { open = !open }.padding(vertical = 4.dp),
-        )
-        if (open) CodeSection(stringResource(R.string.attention_tool, approval.toolName), prettyJson(input))
-    }
-    Text(
-        stringResource(R.string.attention_approval_once),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    val colors = DesignTheme.colors
+    Headline(
+        when (approvalAction(approval.toolName)) {
+            ApprovalAction.RUN -> stringResource(R.string.attention_run)
+            ApprovalAction.EDIT -> stringResource(R.string.attention_edit)
+            ApprovalAction.OTHER -> stringResource(R.string.attention_use, approval.toolName)
+        },
     )
-    ErrorText(ui)
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = { actions.onDecide(attention, false) }, enabled = !ui.submitting, modifier = Modifier.weight(1f)) {
-            Text(stringResource(R.string.attention_reject))
+    val target = approvalTarget(approval)
+    if (target != null) {
+        Text(
+            target,
+            style = CodeTextStyles.approval,
+            color = colors.text,
+            modifier = Modifier.padding(top = 10.dp).testTag("approval-target"),
+        )
+        cwd?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                it,
+                style = CodeTextStyles.diff.copy(lineHeight = CodeTextStyles.command.lineHeight),
+                color = colors.textSecondary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
-        Button(onClick = { actions.onDecide(attention, true) }, enabled = !ui.submitting, modifier = Modifier.weight(1f)) {
-            if (ui.submitting) Progress() else Text(stringResource(R.string.attention_allow))
-        }
+    } else {
+        Text(
+            approval.reason.ifBlank { approval.summary ?: approval.toolName },
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.text,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+    }
+    StatusLine(ui, onRetry = null)
+    Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        BlockButton(stringResource(R.string.attention_reject), {
+            actions.onDecide(attention, false)
+        }, Modifier.weight(1f), enabled = !ui.submitting)
+        BlockButton(stringResource(R.string.attention_allow), {
+            actions.onDecide(attention, true)
+        }, Modifier.weight(1f), primary = true, enabled = !ui.submitting)
+    }
+}
+
+/**
+ * 提问（7.5）：「需要你决定」、问题、选项列表。只有一个问题而且是单选时，点选项就是回答，没有提交按钮；
+ * 多选或多个问题时选项左边是勾选框，底部一个「回答」。只有一个问题时自己写的答案用下面的输入框；
+ * 多个问题时每题下面有自己的输入框（用户确认）。
+ */
+@Composable
+private fun QuestionContent(
+    attention: Attention,
+    set: QuestionSet,
+    ui: AttentionUi,
+    actions: AttentionCardActions,
+) {
+    val direct = set.questions.size == 1 && !set.questions.single().multiSelect
+    Headline(stringResource(R.string.attention_decide))
+    set.questions.forEach { question ->
+        QuestionBlock(
+            attention,
+            question,
+            ui.drafts[question.id] ?: QuestionDraft(),
+            ui.problems[question.id],
+            direct = direct,
+            withCustom = set.questions.size > 1,
+            enabled = !ui.submitting,
+            actions = actions,
+        )
+    }
+    StatusLine(ui, onRetry = if (direct) ({ actions.onSubmit(attention) }) else null)
+    if (set.questions.size > 1) {
+        Text(
+            stringResource(R.string.attention_partial_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = DesignTheme.colors.textSecondary,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+    if (!direct) {
+        BlockButton(
+            stringResource(R.string.attention_answer),
+            { actions.onSubmit(attention) },
+            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 12.dp).testTag("attention-answer"),
+            primary = true,
+            enabled = !ui.submitting,
+        )
+    } else {
+        Box(Modifier.padding(bottom = 4.dp))
     }
 }
 
 @Composable
-private fun QuestionContent(
+private fun QuestionBlock(
     attention: Attention,
     question: Question,
     draft: QuestionDraft,
     problem: QuestionProblem?,
-    submitting: Boolean,
+    direct: Boolean,
+    withCustom: Boolean,
+    enabled: Boolean,
     actions: AttentionCardActions,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        question.header?.takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        }
-        Text(question.question, style = MaterialTheme.typography.bodyLarge)
-        question.options.forEach { option ->
-            val checked = option.label in draft.selected
-            val onClick = { actions.onToggle(attention, question.id, option.label) }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .let {
-                            if (question.multiSelect) {
-                                it.toggleable(value = checked, enabled = !submitting, role = Role.Checkbox, onValueChange = { onClick() })
-                            } else {
-                                it.selectable(selected = checked, enabled = !submitting, role = Role.RadioButton, onClick = onClick)
+    val colors = DesignTheme.colors
+    question.header?.takeIf { it.isNotBlank() && withCustom }?.let {
+        Text(it, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, modifier = Modifier.padding(top = 12.dp))
+    }
+    Text(
+        question.question,
+        style = MaterialTheme.typography.titleSmall,
+        color = colors.text,
+        modifier = Modifier.padding(top = 10.dp, bottom = 6.dp),
+    )
+    question.options.forEach { option ->
+        val checked = option.label in draft.selected
+        DesignDivider()
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .let {
+                    when {
+                        direct ->
+                            it.selectable(selected = checked, enabled = enabled, role = Role.Button) {
+                                actions.onAnswerOption(attention, question.id, option.label)
                             }
-                        }.padding(vertical = 2.dp),
-            ) {
-                if (question.multiSelect) {
-                    Checkbox(checked = checked, onCheckedChange = null, enabled = !submitting)
-                } else {
-                    RadioButton(selected = checked, onClick = null, enabled = !submitting)
-                }
-                Column(Modifier.padding(start = 8.dp)) {
-                    Text(option.label, style = MaterialTheme.typography.bodyLarge)
-                    option.description?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        question.multiSelect ->
+                            it.toggleable(value = checked, enabled = enabled, role = Role.Checkbox) {
+                                actions.onToggle(attention, question.id, option.label)
+                            }
+                        else ->
+                            it.selectable(selected = checked, enabled = enabled, role = Role.RadioButton) {
+                                actions.onToggle(attention, question.id, option.label)
+                            }
                     }
+                }.padding(vertical = 12.dp)
+                .testTag("option-${question.id}-${option.label}"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (!direct) CheckMark(checked, round = !question.multiSelect)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(option.label, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Normal), color = colors.text)
+                option.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = MaterialTheme.typography.labelMedium.lineHeight),
+                        color = colors.textSecondary,
+                    )
                 }
             }
+            if (direct) RowChevron()
         }
-        OutlinedTextField(
-            value = draft.custom,
-            onValueChange = { actions.onCustom(attention, question.id, it) },
-            label = { Text(stringResource(R.string.attention_custom_label)) },
-            enabled = !submitting,
-            isError = problem != null,
-            supportingText =
-                problem?.let {
-                    { Text(stringResource(R.string.attention_error_too_long, AnswerForm.MAX_CUSTOM)) }
-                },
-            maxLines = 4,
-            modifier = Modifier.fillMaxWidth(),
-        )
+    }
+    if (withCustom) {
+        DesignDivider()
+        CustomField(draft.custom, enabled, problem != null) { actions.onCustom(attention, question.id, it) }
     }
 }
 
+/** 多选、多个问题时选项左边的勾选框（多选方形，单选圆形）。 */
 @Composable
-private fun ErrorText(ui: AttentionUi) {
-    val error = ui.error ?: return
-    Text(
-        when (error) {
-            AttentionError.NOTHING_ANSWERED -> stringResource(R.string.attention_error_nothing)
-            AttentionError.CUSTOM_TOO_LONG -> stringResource(R.string.attention_error_too_long, AnswerForm.MAX_CUSTOM)
-            AttentionError.OFFLINE -> stringResource(R.string.attention_error_offline)
-            AttentionError.REJECTED -> stringResource(R.string.attention_error_rejected)
-            AttentionError.FAILED -> stringResource(R.string.attention_error_failed)
+private fun CheckMark(
+    checked: Boolean,
+    round: Boolean,
+) {
+    val colors = DesignTheme.colors
+    val shape = if (round) CircleShape else RoundedCornerShape(5.dp)
+    Box(
+        Modifier
+            .size(20.dp)
+            .clip(shape)
+            .background(if (checked) colors.text else colors.panel)
+            .border(1.5.dp, if (checked) colors.text else colors.textSecondary, shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (checked) {
+            if (round) {
+                Box(Modifier.size(8.dp).background(colors.panel, CircleShape))
+            } else {
+                Icon(painterResource(R.drawable.ic_dsh_check), null, Modifier.size(14.dp), tint = colors.panel)
+            }
+        }
+    }
+}
+
+/** 多个问题时每题下面「自己写」的输入框。 */
+@Composable
+private fun CustomField(
+    value: String,
+    enabled: Boolean,
+    error: Boolean,
+    onChange: (String) -> Unit,
+) {
+    val colors = DesignTheme.colors
+    val hint = stringResource(R.string.attention_custom_hint)
+    BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        enabled = enabled,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+        cursorBrush = SolidColor(colors.text),
+        maxLines = 4,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.fill)
+                .let { if (error) it.border(1.dp, colors.danger, RoundedCornerShape(12.dp)) else it }
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .semantics { contentDescription = hint },
+        decorationBox = { field ->
+            Box {
+                if (value.isEmpty()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                field()
+            }
         },
-        color = MaterialTheme.colorScheme.error,
-        style = MaterialTheme.typography.bodyMedium,
     )
 }
 
+/** 提交中、失败的提示。失败且没有「回答」按钮时（单选直答）给一个「重试」。 */
 @Composable
-private fun Progress() {
-    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+private fun StatusLine(
+    ui: AttentionUi,
+    onRetry: (() -> Unit)?,
+) {
+    val colors = DesignTheme.colors
+    when {
+        ui.submitting ->
+            Row(
+                Modifier.padding(top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StatusMarker(StatusMark.RUNNING)
+                Text(
+                    stringResource(R.string.attention_submitting),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                )
+            }
+        ui.error != null ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    when (ui.error) {
+                        AttentionError.NOTHING_ANSWERED -> stringResource(R.string.attention_error_nothing)
+                        AttentionError.CUSTOM_TOO_LONG -> stringResource(R.string.attention_error_too_long, AnswerForm.MAX_CUSTOM)
+                        AttentionError.OFFLINE -> stringResource(R.string.attention_error_offline)
+                        AttentionError.REJECTED -> stringResource(R.string.attention_error_rejected)
+                        AttentionError.FAILED -> stringResource(R.string.attention_error_failed)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.danger,
+                    modifier = Modifier.weight(1f).testTag("attention-error"),
+                )
+                if (onRetry != null && ui.error in RETRYABLE) PillButton(stringResource(R.string.action_retry), onRetry)
+            }
+    }
 }
+
+/** 换个时间再试可能成功的错误。没回答、太长这类要先改内容。 */
+private val RETRYABLE = setOf(AttentionError.OFFLINE, AttentionError.FAILED, AttentionError.REJECTED)

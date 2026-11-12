@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
+import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePart
 import io.github.qianyeeew.dshremote.data.api.MessageRole
@@ -9,6 +10,8 @@ import io.github.qianyeeew.dshremote.data.api.TextPart
 import io.github.qianyeeew.dshremote.data.api.ThinkingPart
 import io.github.qianyeeew.dshremote.data.api.ToolPart
 import io.github.qianyeeew.dshremote.data.api.ToolStatus
+import io.github.qianyeeew.dshremote.data.api.Turn
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import kotlinx.serialization.json.JsonObject
@@ -38,13 +41,15 @@ class ChatBlocksTest {
     private fun user(
         id: String,
         text: String,
-    ) = ChatItem.Entry(id, Message(id, MessageRole.USER, listOf(TextPart(text)), 0))
+        turn: Int? = null,
+    ) = ChatItem.Entry(id, Message(id, MessageRole.USER, listOf(TextPart(text)), 0, turn = turn))
 
     private fun reply(
         id: String,
         vararg parts: MessagePart,
         draft: Boolean = false,
-    ) = ChatItem.Entry(id, Message(id, MessageRole.ASSISTANT, parts.toList(), 0, draft = draft))
+        turn: Int? = null,
+    ) = ChatItem.Entry(id, Message(id, MessageRole.ASSISTANT, parts.toList(), 0, draft = draft, turn = turn))
 
     @Test
     fun consecutiveThinkingAndToolsAcrossMessagesFoldIntoOneBlock() {
@@ -205,5 +210,84 @@ class ChatBlocksTest {
         assertEquals("npm test", currentStep(blocks)?.target)
         // 后面已经有回复文字：不再有正在做的步骤
         assertNull(currentStep(chatBlocks(listOf(reply("a", running, TextPart("好了"))))))
+    }
+
+    @Test
+    fun finishedTurnsGetAnEndLineAfterTheirLastBlock() {
+        val turns =
+            mapOf(
+                1 to Turn(1, startedAt = 0, endedAt = 290_000, result = TurnResult.COMPLETED),
+                2 to Turn(2, startedAt = 300_000),
+            )
+        val blocks =
+            chatBlocks(
+                listOf(
+                    user("u1", "修一下", turn = 1),
+                    reply("a1", tool("read", "file_path" to "/A.kt"), TextPart("好了"), turn = 1),
+                    user("u2", "再跑一下测试", turn = 2),
+                    reply("a2", tool("bash", "command" to "npm test", status = ToolStatus.RUNNING), turn = 2),
+                ),
+                turns,
+            )
+        // 还在运行的第 2 轮没有结尾
+        assertEquals(listOf("u1", "steps:a1:0", "a1:1", "turn-end:1", "u2", "steps:a2:0"), blocks.map { it.key })
+        assertEquals(turns[1], (blocks[3] as ChatBlock.TurnEnd).turn)
+    }
+
+    @Test
+    fun stepsDoNotCrossATurnBoundary() {
+        // 没有用户消息隔开（例如排队的消息被 DSH 合进了下一轮），步骤也按轮次分开
+        val blocks =
+            chatBlocks(
+                listOf(reply("a1", tool("read", "file_path" to "A"), turn = 1), reply("a2", tool("read", "file_path" to "B"), turn = 2)),
+            )
+        assertEquals(listOf("steps:a1:0", "steps:a2:0"), blocks.map { it.key })
+    }
+
+    @Test
+    fun turnThatFailedBeforeAnyReplyEndsUnderTheUserMessage() {
+        val failed = Turn(1, startedAt = 0, endedAt = 1_000, result = TurnResult.FAILED, error = "invalid request")
+        val blocks = chatBlocks(listOf(user("u1", "FAIL", turn = 1)), mapOf(1 to failed))
+        assertEquals(listOf("u1", "turn-end:1"), blocks.map { it.key })
+    }
+
+    @Test
+    fun localMessageComesAfterTheEndOfThePreviousTurn() {
+        val local = LocalMessage(OutgoingMessage("下一步", PromptMode.QUEUE, "r1"), OutgoingStatus.SENDING)
+        val blocks =
+            chatBlocks(
+                listOf(reply("a1", TextPart("好了"), turn = 1), ChatItem.Local("local:r1", local)),
+                mapOf(1 to Turn(1, endedAt = 1, result = TurnResult.STOPPED)),
+            )
+        assertEquals(listOf("a1:0", "turn-end:1", "local:r1"), blocks.map { it.key })
+    }
+
+    @Test
+    fun messagesWithoutTurnNumbersGetNoEndLine() {
+        // 旧插件，或者一页开头归属不明的消息
+        val blocks =
+            chatBlocks(
+                listOf(user("u1", "x"), reply("a1", TextPart("y"))),
+                mapOf(
+                    1 to Turn(1, endedAt = 1, result = TurnResult.COMPLETED),
+                ),
+            )
+        assertEquals(listOf("u1", "a1:0"), blocks.map { it.key })
+    }
+
+    @Test
+    fun turnEndWordingAndDurations() {
+        assertEquals(R.string.turn_ended, turnEndLabel(TurnResult.COMPLETED))
+        assertEquals(R.string.turn_ended, turnEndLabel(TurnResult.OTHER))
+        assertEquals(R.string.turn_ended, turnEndLabel(null))
+        assertEquals(R.string.turn_stopped, turnEndLabel(TurnResult.STOPPED))
+        assertEquals(R.string.turn_failed, turnEndLabel(TurnResult.FAILED))
+        assertEquals(R.string.turn_interrupted, turnEndLabel(TurnResult.INTERRUPTED))
+        assertEquals(Duration(0, 4, 50), durationOf(290_400))
+        assertEquals(Duration(1, 5, 0), durationOf(3_900_000))
+        assertEquals(Duration(0, 0, 0), durationOf(-5_000))
+        assertEquals("4:12", elapsedClock(252_000))
+        assertEquals("0:07", elapsedClock(7_999))
+        assertEquals("1:04:12", elapsedClock(3_852_000))
     }
 }

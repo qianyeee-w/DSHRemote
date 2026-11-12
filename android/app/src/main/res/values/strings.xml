@@ -188,6 +188,18 @@
     <string name="chat_picker_preset">审批方式</string>
     <string name="chat_running">运行中</string>
     <string name="chat_replying">正在回复</string>
+    <!-- 一轮的结尾（设计规格 6.7）：不写「已完成」，运行结束不等于需求完成 -->
+    <string name="turn_ended">本轮结束</string>
+    <string name="turn_stopped">已停止</string>
+    <string name="turn_failed">失败</string>
+    <string name="turn_failed_reason">失败：%1$s</string>
+    <string name="turn_interrupted">已中断，电脑上的 DSH 中途退出过</string>
+    <string name="turn_unconfirmed">结果待确认，断线前还在运行</string>
+    <string name="chat_turn_elapsed">本轮 %1$s</string>
+    <string name="separator_dot">" · "</string>
+    <string name="duration_seconds">%1$d 秒</string>
+    <string name="duration_minutes">%1$d 分 %2$d 秒</string>
+    <string name="duration_hours">%1$d 小时 %2$d 分</string>
     <string name="chat_steps">%1$d 个步骤</string>
     <string name="chat_steps_files">改了 %1$d 个文件</string>
     <string name="chat_steps_expand">展开过程</string>
@@ -262,12 +274,15 @@
     <!-- 通知 -->
     <string name="channel_attention">需要你处理</string>
     <string name="channel_attention_description">电脑上的任务需要你批准或回答问题</string>
-    <string name="channel_task_done">任务完成</string>
-    <string name="channel_task_done_description">电脑上的任务运行结束</string>
+    <string name="channel_task_done">运行结束</string>
+    <string name="channel_task_done_description">电脑上的任务一轮运行结束，包括失败和被停止</string>
     <string name="channel_link">后台连接</string>
     <string name="channel_link_description">App 不在前台时保持和电脑的连接（常驻通知）</string>
     <string name="notification_attention_public">需要你处理</string>
-    <string name="notification_task_done">任务完成</string>
+    <string name="notification_turn_ended">运行结束</string>
+    <string name="notification_turn_failed">运行失败</string>
+    <string name="notification_turn_stopped">已停止</string>
+    <string name="notification_turn_interrupted">运行中断</string>
     <string name="notification_title_with_host">%1$s · %2$s</string>
     <string name="notification_link_starting">正在连接电脑……</string>
     <string name="notification_link_none">电脑都不在线</string>

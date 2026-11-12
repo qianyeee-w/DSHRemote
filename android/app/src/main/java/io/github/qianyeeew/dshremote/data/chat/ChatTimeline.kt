@@ -2,6 +2,7 @@ package io.github.qianyeeew.dshremote.data.chat
 
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
+import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.live.SessionEvent
 
 /**
@@ -27,6 +28,8 @@ data class ChatTimeline(
     val cursor: String? = null,
     /** 是否已经读到过最新一页。 */
     val loaded: Boolean = false,
+    /** 轮次（protocol.md 5.4）：各页和推送里拿到的同一轮合在一起。旧插件时为空。 */
+    val turns: Map<Int, Turn> = emptyMap(),
     /** 替换了草稿的正式消息 id → 草稿 id，见 [keyOf]。 */
     private val draftKeys: Map<String, String> = emptyMap(),
     /** 每条消息最后接受的 rev（只在一次订阅内有意义）。 */
@@ -58,9 +61,9 @@ data class ChatTimeline(
         val base =
             if (loaded && anchor >= 0) {
                 val pageIds = page.messages.mapTo(HashSet()) { it.id }
-                copy(messages = messages.take(anchor).filterNot { it.id in pageIds } + page.messages)
+                copy(messages = messages.take(anchor).filterNot { it.id in pageIds } + page.messages, turns = mergeTurns(turns, page.turns))
             } else {
-                copy(messages = page.messages, hasMore = page.hasMore, cursor = page.cursor)
+                copy(messages = page.messages, hasMore = page.hasMore, cursor = page.cursor, turns = mergeTurns(turns, page.turns))
             }
         return replay(base.copy(loaded = true, pending = null), pending.orEmpty())
     }
@@ -68,7 +71,12 @@ data class ChatTimeline(
     /** 在前面接上更早的一页。 */
     fun withOlder(page: MessagePage): ChatTimeline {
         val known = messages.mapTo(HashSet()) { it.id }
-        return copy(messages = page.messages.filterNot { it.id in known } + messages, hasMore = page.hasMore, cursor = page.cursor)
+        return copy(
+            messages = page.messages.filterNot { it.id in known } + messages,
+            hasMore = page.hasMore,
+            cursor = page.cursor,
+            turns = mergeTurns(turns, page.turns),
+        )
     }
 
     /** 应用一条推送。正在重新读取时先暂存。[SessionEvent.Resync] 由调用方处理（[startReload]），这里忽略。 */
@@ -78,6 +86,7 @@ data class ChatTimeline(
             is SessionEvent.Resync -> this
             is SessionEvent.Upsert -> upsert(event)
             is SessionEvent.Removed -> remove(event.messageId)
+            is SessionEvent.TurnUpdated -> copy(turns = mergeTurns(turns, listOf(event.turn)))
         }
     }
 
@@ -117,4 +126,14 @@ data class ChatTimeline(
 private fun List<Message>.replaceOrAppend(message: Message): List<Message> {
     val index = indexOfFirst { it.id == message.id }
     return if (index < 0) this + message else toMutableList().also { it[index] = message }
+}
+
+private fun mergeTurns(
+    current: Map<Int, Turn>,
+    incoming: List<Turn>,
+): Map<Int, Turn> {
+    if (incoming.isEmpty()) return current
+    val merged = current.toMutableMap()
+    for (turn in incoming) merged[turn.turn] = merged[turn.turn]?.merge(turn) ?: turn
+    return merged
 }

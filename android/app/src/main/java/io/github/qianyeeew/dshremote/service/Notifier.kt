@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -16,6 +17,7 @@ import io.github.qianyeeew.dshremote.MainActivity
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.ui.common.sessionDisplayTitle
 import java.util.UUID
 
@@ -132,7 +134,7 @@ class Notifier(
         NotificationCompat
             .Builder(context, CHANNEL_TASK_DONE)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(withHost(context.getString(R.string.notification_task_done), action.hostId))
+            .setContentTitle(withHost(context.getString(taskDoneTitle(action.result)), action.hostId))
             .setContentText(sessionDisplayTitle(action.title) ?: context.getString(R.string.sessions_untitled))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
@@ -222,3 +224,13 @@ class Notifier(
         }
     }
 }
+
+/** 运行结束通知的标题：跟着这一轮的真实结果走，不把「运行结束」说成「完成」。 */
+@StringRes
+fun taskDoneTitle(result: TurnResult?): Int =
+    when (result) {
+        TurnResult.FAILED -> R.string.notification_turn_failed
+        TurnResult.STOPPED -> R.string.notification_turn_stopped
+        TurnResult.INTERRUPTED -> R.string.notification_turn_interrupted
+        TurnResult.COMPLETED, TurnResult.OTHER, TurnResult.UNKNOWN, null -> R.string.notification_turn_ended
+    }

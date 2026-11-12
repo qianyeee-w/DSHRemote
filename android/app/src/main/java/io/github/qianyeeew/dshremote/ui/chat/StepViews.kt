@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +48,7 @@ import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.common.DesignDivider
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
+import kotlinx.coroutines.delay
 
 /**
  * 一段连续的思考和工具调用（设计规格 6.6）：默认折成一行灰字「5 个步骤 · 改了 2 个文件 ›」，点了在原地展开成步骤行，
@@ -361,12 +363,17 @@ internal fun OutputBlock(
     }
 }
 
-/** 运行中，对话末尾的一行：转圈标记加正在做的那一步（用时和 token 数等落地方案 B1、B4）。 */
+/**
+ * 运行中，对话末尾的一行（6.7）：转圈标记加正在做的那一步，右边是「本轮 4:12」（[startedAt] 按电脑的时钟，
+ * 拿不到时不显示）。token 数等落地方案 B4。
+ */
 @Composable
 fun RunningLine(
     step: Step?,
     replying: Boolean,
     modifier: Modifier = Modifier,
+    startedAt: Long? = null,
+    clockOffsetMillis: Long = 0,
 ) {
     val colors = DesignTheme.colors
     val text =
@@ -387,6 +394,36 @@ fun RunningLine(
             color = colors.textSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        if (startedAt != null) {
+            // 每秒走一次。直接用估算的时钟差（精确到秒），不像「多久以前」那样忽略一分钟以内的差
+            val now by produceState(System.currentTimeMillis() + clockOffsetMillis, clockOffsetMillis) {
+                while (true) {
+                    value = System.currentTimeMillis() + clockOffsetMillis
+                    delay(ELAPSED_TICK_MILLIS - value % ELAPSED_TICK_MILLIS)
+                }
+            }
+            Text(
+                stringResource(R.string.chat_turn_elapsed, elapsedClock(now - startedAt)),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary,
+                maxLines = 1,
+                modifier = Modifier.testTag("running-elapsed"),
+            )
+        }
     }
 }
+
+/** 断线前还在运行，重新连上之前不知道结果（落地方案 B1）：不转圈，只写一句。 */
+@Composable
+fun UnconfirmedLine(modifier: Modifier = Modifier) {
+    Text(
+        stringResource(R.string.turn_unconfirmed),
+        style = MaterialTheme.typography.labelMedium,
+        color = DesignTheme.colors.textSecondary,
+        modifier = modifier.fillMaxWidth().testTag("unconfirmed-line"),
+    )
+}
+
+private const val ELAPSED_TICK_MILLIS = 1_000L

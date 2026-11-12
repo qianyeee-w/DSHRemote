@@ -3,6 +3,8 @@ package io.github.qianyeeew.dshremote.data.live
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.Turn
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import kotlin.random.Random
 
@@ -106,6 +108,8 @@ sealed interface LiveEvent {
         override val hostId: String,
         val sessionId: String,
         val title: String?,
+        /** 刚结束那一轮的结果；旧插件没有。 */
+        val result: TurnResult? = null,
     ) : LiveEvent
 
     data class AttentionRequested(
@@ -143,6 +147,12 @@ sealed interface SessionEvent {
     data class Removed(
         override val sessionId: String,
         val messageId: String,
+    ) : SessionEvent
+
+    /** 一轮开始或结束（protocol.md 6.1 turn.updated）。 */
+    data class TurnUpdated(
+        override val sessionId: String,
+        val turn: Turn,
     ) : SessionEvent
 }
 

@@ -227,7 +227,7 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
-    val blocks = remember(state.items) { chatBlocks(state.items) }
+    val blocks = remember(state.items, state.turns) { chatBlocks(state.items, state.turns) }
     val reversed = remember(blocks) { blocks.asReversed() }
     // 停在底部时跟随新消息。「是否停在底部」只在用户自己滚动之后更新：新消息连续到达时，
     // 列表会把原来的那一项留在原位，不能拿那一刻的位置来判断
@@ -270,14 +270,24 @@ private fun MessageList(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp, Alignment.Bottom),
     ) {
-        if (state.running) {
-            item(key = "running-line") { RunningLine(currentStep(blocks), replying = blocks.lastOrNull() is ChatBlock.Reply) }
+        if (state.unconfirmed) {
+            item(key = "unconfirmed-line") { UnconfirmedLine() }
+        } else if (state.running) {
+            item(key = "running-line") {
+                RunningLine(
+                    currentStep(blocks),
+                    replying = blocks.lastOrNull() is ChatBlock.Reply,
+                    startedAt = state.runningTurn?.startedAt,
+                    clockOffsetMillis = state.clockOffsetMillis,
+                )
+            }
         }
         items(reversed, key = { it.key }, contentType = { it::class }) { block ->
             when (block) {
                 is ChatBlock.User -> UserBubble(block.text, block.local) { block.local?.let { actions.onRetrySend(it.outgoing.requestId) } }
                 is ChatBlock.Reply -> MarkdownText(block.text, onCopied)
                 is ChatBlock.Steps -> StepsView(block)
+                is ChatBlock.TurnEnd -> TurnEndLine(block.turn)
             }
         }
         item(key = "history-header") { HistoryHeader(state, actions) }

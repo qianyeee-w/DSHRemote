@@ -201,9 +201,11 @@ class PluginApiTest {
                   {"sessionId":"s1","title":null,"workspaceId":null,"cwd":"/p","status":"waiting",
                    "attention":[{"attentionId":"a1","kind":"approval"},{"attentionId":"a2","kind":"future-kind"}],
                    "model":{"provider":"deepseek-official","model":"deepseek-flash"},"permissionPreset":"workspace-write",
-                   "updatedAt":1794107669094,"newField":{"x":1}},
+                   "updatedAt":1794107669094,"newField":{"x":1},
+                   "lastTurn":{"result":"failed","endedAt":5,"error":"boom"},"lastReply":"改好了"},
                   {"sessionId":"s2","title":"T","workspaceId":"w1","cwd":null,"status":"paused",
-                   "attention":[],"model":null,"permissionPreset":null,"updatedAt":1}
+                   "attention":[],"model":null,"permissionPreset":null,"updatedAt":1,
+                   "lastTurn":{"result":"future-result","endedAt":6}}
                 ]}
                 """.trimIndent(),
             )
@@ -217,6 +219,11 @@ class PluginApiTest {
             // 不认识的状态不会让整页解析失败
             assertEquals(SessionStatus.UNKNOWN, sessions[1].status)
             assertNull(sessions[1].model)
+            // 会话摘要里的最近一轮：不认识的结果按 UNKNOWN，旧插件没有这两个字段
+            assertEquals(LastTurn(TurnResult.FAILED, 5, "boom"), first.lastTurn)
+            assertEquals("改好了", first.lastReply)
+            assertEquals(TurnResult.UNKNOWN, sessions[1].lastTurn?.result)
+            assertNull(sessions[1].lastReply)
         }
 
     @Test
@@ -226,14 +233,15 @@ class PluginApiTest {
                 """
                 {"messages":[
                   {"id":"m1","role":"user","parts":[{"type":"text","text":"你好"}],"createdAt":1},
-                  {"id":"m2","role":"assistant","createdAt":2,"parts":[
+                  {"id":"m2","role":"assistant","createdAt":2,"turn":3,"parts":[
                     {"type":"thinking","text":"想一想"},
                     {"type":"tool","callId":"c1","name":"bash","summary":"运行命令：npm test","status":"done",
                      "input":{"command":"npm test"},"output":"ok…","truncated":true},
                     {"type":"image","url":"x"},
                     {"type":"text","text":"完成"}
                   ]}
-                ],"hasMore":true,"cursor":"opaque-cursor/=="}
+                ],"hasMore":true,"cursor":"opaque-cursor/==",
+                "turns":[{"turn":2,"endedAt":9,"result":"stopped","stoppedBy":"user"},{"turn":3,"startedAt":10}]}
                 """.trimIndent(),
             )
             val page = api.messages("s1", before = "prev cursor+/=", limit = 50)
@@ -248,6 +256,13 @@ class PluginApiTest {
             assertEquals(UnknownPart, parts[2])
             assertEquals(TextPart("完成"), parts[3])
             assertEquals(MessageRole.USER, page.messages[0].role)
+            assertEquals(
+                listOf(Turn(2, endedAt = 9, result = TurnResult.STOPPED, stoppedBy = "user"), Turn(3, startedAt = 10)),
+                page.turns,
+            )
+            assertTrue(page.turns[1].running)
+            assertEquals(3, page.messages[1].turn)
+            assertNull(page.messages[0].turn)
 
             val request = server.takeRequest()
             assertEquals("/v1/sessions/s1/messages", request.url.encodedPath)

@@ -13,6 +13,7 @@ import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.chat.ChatTimeline
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
@@ -135,11 +136,24 @@ data class ChatState(
     val hostName: String? = null,
     /** 项目名（顶栏第二行）：电脑上登记的项目名，拿不到时用工作目录的最后一段。 */
     val projectName: String? = null,
+    /** 读到和推送来的轮次（protocol.md 5.4），按编号。 */
+    val turns: Map<Int, Turn> = emptyMap(),
+    /** 电脑的时钟比手机快多少毫秒（[HostLiveState.clockOffsetMillis]），算本轮用时。 */
+    val clockOffsetMillis: Long = 0,
 ) {
     val online: Boolean get() = link is LinkStatus.Online
 
     /** 正在运行：发消息插话。 */
     val running: Boolean get() = session?.status == SessionStatus.RUNNING
+
+    /**
+     * 结果待确认（落地方案 B1）：断线前还在运行，重新连上、拿到新状态之前不知道这一轮怎么样了。
+     * 这时不显示运行状态行。
+     */
+    val unconfirmed: Boolean get() = running && !online
+
+    /** 还在运行的那一轮（编号最大的）。 */
+    val runningTurn: Turn? get() = turns.values.filter { it.running }.maxByOrNull { it.turn }
 
     /** 任务还没结束（运行中，或者在等待审批、回答）：显示「停止」。 */
     val active: Boolean get() = running || session?.status == SessionStatus.WAITING
@@ -233,6 +247,8 @@ class ChatViewModel(
                 loadFailed = f.loadFailed,
                 attention = pendingAttention(host, session, sessionId).filter { attentionUi[it.attentionId]?.resolution == null },
                 attentionUi = attentionUi,
+                turns = t.turns,
+                clockOffsetMillis = host?.clockOffsetMillis ?: 0,
             )
         }.combine(names) { base, (name, projects) ->
             base.copy(hostName = name, projectName = projectName(base.session, projects))

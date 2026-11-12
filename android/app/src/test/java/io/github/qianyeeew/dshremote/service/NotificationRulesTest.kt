@@ -1,11 +1,13 @@
 package io.github.qianyeeew.dshremote.service
 
+import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Approval
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.AttentionRef
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
@@ -99,6 +101,11 @@ class NotificationRulesTest {
     @Test
     fun taskDoneIsNotifiedUnlessWatchingAndWithdrawnWhenOpened() {
         assertEquals(listOf(PostTaskDone("h1", "s1", "修复登录")), rules.onEvent(LiveEvent.SessionIdle("h1", "s1", "修复登录"), null))
+        // 标题跟着这一轮的结果走（落地方案 B1）
+        assertEquals(
+            listOf(PostTaskDone("h1", "s4", null, TurnResult.FAILED)),
+            rules.onEvent(LiveEvent.SessionIdle("h1", "s4", null, TurnResult.FAILED), null),
+        )
         assertEquals(emptyList<NotificationAction>(), rules.onEvent(LiveEvent.SessionIdle("h1", "s2", null), VisibleSession("h1", "s2")))
         assertEquals(listOf(CancelTaskDone("h1", "s1")), rules.onVisible(VisibleSession("h1", "s1"), emptyMap()))
         assertEquals(emptyList<NotificationAction>(), rules.onVisible(VisibleSession("h1", "s1"), emptyMap()))
@@ -125,4 +132,15 @@ class NotificationRulesTest {
         sessionId: String,
         createdAt: Long,
     ) = Attention(id, sessionId, AttentionKind.APPROVAL, approval = Approval("bash"), createdAt = createdAt)
+
+    @Test
+    fun taskDoneTitleNeverSaysCompleted() {
+        assertEquals(R.string.notification_turn_ended, taskDoneTitle(TurnResult.COMPLETED))
+        assertEquals(R.string.notification_turn_ended, taskDoneTitle(TurnResult.OTHER))
+        assertEquals(R.string.notification_turn_ended, taskDoneTitle(TurnResult.UNKNOWN))
+        assertEquals(R.string.notification_turn_ended, taskDoneTitle(null))
+        assertEquals(R.string.notification_turn_failed, taskDoneTitle(TurnResult.FAILED))
+        assertEquals(R.string.notification_turn_stopped, taskDoneTitle(TurnResult.STOPPED))
+        assertEquals(R.string.notification_turn_interrupted, taskDoneTitle(TurnResult.INTERRUPTED))
+    }
 }

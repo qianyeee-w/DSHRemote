@@ -157,7 +157,69 @@ data class SessionSummary(
     val model: ModelRef? = null,
     val permissionPreset: String? = null,
     val updatedAt: Long,
+    /** 最近一轮已经结束的结果（protocol.md 5.1）。插件还没读到或者旧插件时为 null。 */
+    val lastTurn: LastTurn? = null,
+    /** 那一轮模型最后一段回复的开头。 */
+    val lastReply: String? = null,
 )
+
+/** 会话摘要里的最近一轮。 */
+@Serializable
+data class LastTurn(
+    val result: TurnResult = TurnResult.UNKNOWN,
+    val endedAt: Long? = null,
+    val error: String? = null,
+)
+
+/** 一轮怎么结束的（protocol.md 5.4）。 */
+@Serializable
+enum class TurnResult {
+    /** 正常结束。**不表示需求已经完成**，界面写「本轮结束」。 */
+    @SerialName("completed")
+    COMPLETED,
+
+    @SerialName("stopped")
+    STOPPED,
+
+    @SerialName("failed")
+    FAILED,
+
+    /** DSH 中途退出（崩溃、重启）后补记的结束。 */
+    @SerialName("interrupted")
+    INTERRUPTED,
+
+    /** DSH 以后新增的结束原因。 */
+    @SerialName("other")
+    OTHER,
+
+    /** 这个版本的 App 不认识的值。 */
+    UNKNOWN,
+}
+
+/** 一轮（protocol.md 5.4）。还在运行的没有 [endedAt] 和 [result]。 */
+@Serializable
+data class Turn(
+    val turn: Int,
+    val startedAt: Long? = null,
+    val endedAt: Long? = null,
+    val result: TurnResult? = null,
+    val error: String? = null,
+    /** `user` 表示用户点了停止。 */
+    val stoppedBy: String? = null,
+) {
+    val running: Boolean get() = result == null && endedAt == null
+
+    /** 同一轮从不同的页、推送里拿到的信息合在一起：后来的有值的字段覆盖前面的。 */
+    fun merge(newer: Turn): Turn =
+        Turn(
+            turn = turn,
+            startedAt = newer.startedAt ?: startedAt,
+            endedAt = newer.endedAt ?: endedAt,
+            result = newer.result ?: result,
+            error = newer.error ?: error,
+            stoppedBy = newer.stoppedBy ?: stoppedBy,
+        )
+}
 
 @Serializable
 internal data class SessionList(
@@ -195,6 +257,8 @@ data class Message(
     val createdAt: Long,
     /** 流式输出中的草稿（只出现在实时推送中，id 以 `draft:` 开头），见 protocol.md 6.4。 */
     val draft: Boolean = false,
+    /** 属于第几轮（protocol.md 5.2）；无法确定或者旧插件时为 null。 */
+    val turn: Int? = null,
 )
 
 @Serializable(with = MessagePartSerializer::class)
@@ -260,6 +324,8 @@ data class MessagePage(
     val messages: List<Message>,
     val hasMore: Boolean,
     val cursor: String? = null,
+    /** 这一页出现的轮次（protocol.md 5.4）；旧插件没有。 */
+    val turns: List<Turn> = emptyList(),
 )
 
 // ---------------------------------------------------------------- 发消息

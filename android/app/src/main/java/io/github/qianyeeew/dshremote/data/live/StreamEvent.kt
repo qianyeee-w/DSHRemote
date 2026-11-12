@@ -5,6 +5,8 @@ import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.Turn
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
@@ -44,11 +46,12 @@ sealed interface StreamEvent {
         val sessionId: String,
     ) : StreamEvent
 
-    /** 会话从运行变为空闲并持续了 8 秒，用于「任务完成」通知（T11）。 */
+    /** 会话从运行变为空闲并持续了 8 秒，用于「任务结束」通知（T11）。[result] 是刚结束那一轮的结果，旧插件没有。 */
     data class SessionIdle(
         override val eventId: String,
         val sessionId: String,
         val title: String?,
+        val result: TurnResult? = null,
     ) : StreamEvent
 
     data class AttentionRequested(
@@ -76,6 +79,13 @@ sealed interface StreamEvent {
         override val eventId: String,
         val sessionId: String,
         val messageId: String,
+    ) : StreamEvent
+
+    /** 只对已订阅的会话发送：一轮开始或结束（protocol.md 6.1）。 */
+    data class TurnUpdated(
+        override val eventId: String,
+        val sessionId: String,
+        val turn: Turn,
     ) : StreamEvent
 
     /** 插件报告的错误。[message] 由插件保证不含敏感信息。 */
@@ -113,7 +123,16 @@ sealed interface StreamEvent {
                         )
                     "session.updated" -> SessionUpdated(eventId, json.decode("session", SessionSummary.serializer()) ?: return null)
                     "session.removed" -> SessionRemoved(eventId, json.string("sessionId") ?: return null)
-                    "session.idle" -> SessionIdle(eventId, json.string("sessionId") ?: return null, json.string("title"))
+                    "session.idle" ->
+                        SessionIdle(
+                            eventId,
+                            json.string("sessionId") ?: return null,
+                            json.string("title"),
+                            json.string("result")?.let { value ->
+                                TurnResult.entries.firstOrNull { it.serialName() == value }
+                                    ?: TurnResult.UNKNOWN
+                            },
+                        )
                     "attention.requested" -> AttentionRequested(eventId, json.decode("attention", Attention.serializer()) ?: return null)
                     "attention.resolved" ->
                         AttentionResolved(
@@ -135,6 +154,12 @@ sealed interface StreamEvent {
                             eventId,
                             sessionId = json.string("sessionId") ?: return null,
                             messageId = json.string("messageId") ?: return null,
+                        )
+                    "turn.updated" ->
+                        TurnUpdated(
+                            eventId,
+                            sessionId = json.string("sessionId") ?: return null,
+                            turn = json.decode("turn", Turn.serializer()) ?: return null,
                         )
                     "error" -> Error(eventId, ErrorCode.of(json.string("code")), json.string("message"))
                     else -> Unknown(eventId, type)
@@ -206,3 +231,6 @@ private fun <T> JsonObject.decode(
     if (element is JsonPrimitive && element.contentOrNull == null) return null
     return ApiJson.decodeFromJsonElement(serializer, element)
 }
+
+/** 枚举在协议里的名字（@SerialName）。 */
+internal fun TurnResult.serialName(): String = TurnResult.serializer().descriptor.getElementName(ordinal)

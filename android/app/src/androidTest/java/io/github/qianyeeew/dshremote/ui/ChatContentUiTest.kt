@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
@@ -27,8 +28,12 @@ import io.github.qianyeeew.dshremote.data.api.TextPart
 import io.github.qianyeeew.dshremote.data.api.ThinkingPart
 import io.github.qianyeeew.dshremote.data.api.ToolPart
 import io.github.qianyeeew.dshremote.data.api.ToolStatus
+import io.github.qianyeeew.dshremote.data.api.Turn
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
+import io.github.qianyeeew.dshremote.data.live.LinkStatus
+import io.github.qianyeeew.dshremote.data.live.OfflineReason
 import io.github.qianyeeew.dshremote.ui.chat.ChatActions
 import io.github.qianyeeew.dshremote.ui.chat.ChatContent
 import io.github.qianyeeew.dshremote.ui.chat.ChatItem
@@ -38,6 +43,7 @@ import io.github.qianyeeew.dshremote.ui.common.TOP_BAR_SUBTITLE_TAG
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -192,5 +198,62 @@ class ChatContentUiTest {
         compose.onNodeWithText(context.getString(R.string.chat_local_failed)).assertIsDisplayed()
         compose.onNodeWithTag("chat-retry").performClick()
         compose.runOnIdle { assertEquals(failed.outgoing.requestId, retried) }
+    }
+
+    /** 每一轮的结尾（设计规格 6.7）：结果加用时，不写「已完成」；失败是红字加原因。 */
+    @Test
+    fun finishedTurnsEndWithResultAndDuration() {
+        val numbered = turn.map { (it as ChatItem.Entry).let { e -> e.copy(message = e.message.copy(turn = 1)) } }
+        val failed =
+            listOf(
+                ChatItem.Entry("u2", Message("u2", MessageRole.USER, listOf(TextPart("再试一次")), 2, turn = 2)),
+            )
+        val turns =
+            mapOf(
+                1 to Turn(1, startedAt = 0, endedAt = 290_000, result = TurnResult.COMPLETED),
+                2 to Turn(2, startedAt = 300_000, endedAt = 301_000, result = TurnResult.FAILED, error = "invalid request"),
+            )
+        render(onlineChatState().copy(items = numbered + failed, turns = turns))
+        val dot = context.getString(R.string.separator_dot)
+        compose
+            .onNodeWithText("${context.getString(R.string.turn_ended)}$dot${context.getString(R.string.duration_minutes, 4, 50)}")
+            .assertIsDisplayed()
+        compose
+            .onNodeWithText(
+                "${context.getString(
+                    R.string.turn_failed_reason,
+                    "invalid request",
+                )}$dot${context.getString(R.string.duration_seconds, 1)}",
+            ).assertIsDisplayed()
+        save("chat-turn-end")
+    }
+
+    /** 运行状态行右边是本轮已经运行的时间，按电脑的时钟算。 */
+    @Test
+    fun runningLineShowsTheElapsedTime() {
+        val clockOffset = 3_600_000L
+        val startedAt = System.currentTimeMillis() + clockOffset - 252_000
+        render(
+            onlineChatState(SessionStatus.RUNNING).copy(
+                turns = mapOf(5 to Turn(5, startedAt = startedAt)),
+                clockOffsetMillis = clockOffset,
+            ),
+        )
+        val shown =
+            compose
+                .onNodeWithTag("running-elapsed")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.Text]
+                .joinToString("")
+        assertTrue(shown, shown.startsWith(context.getString(R.string.chat_turn_elapsed, "4:1")))
+    }
+
+    /** 断线前还在运行：不知道结果，不再转圈，写「结果待确认」。 */
+    @Test
+    fun runningSessionWithoutLinkIsUnconfirmed() {
+        render(onlineChatState(SessionStatus.RUNNING).copy(link = LinkStatus.Offline(OfflineReason.UNREACHABLE, 1_000)))
+        compose.onNodeWithTag("unconfirmed-line").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.turn_unconfirmed)).assertIsDisplayed()
+        compose.onNodeWithTag("running-line").assertDoesNotExist()
     }
 }

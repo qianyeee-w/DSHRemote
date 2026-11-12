@@ -4,6 +4,7 @@ import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.PluginApi
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.TextPart
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.host.Credentials
 import io.github.qianyeeew.dshremote.data.host.Host
@@ -12,11 +13,13 @@ import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.net.ClientFactory
 import io.github.qianyeeew.dshremote.ui.attention.LiveAttentionResponder
+import io.github.qianyeeew.dshremote.ui.chat.ChatBlock
 import io.github.qianyeeew.dshremote.ui.chat.ChatItem
 import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
 import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
 import io.github.qianyeeew.dshremote.ui.chat.Picker
+import io.github.qianyeeew.dshremote.ui.chat.chatBlocks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
@@ -43,7 +46,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * 会话详情对真实 dev-server 的集成测试（m2-android.md T9）：用真实的 ChatViewModel 和实时连接，
  * 走一遍流式输出、Markdown、插话、停止、切换模型和权限模式。只由 `./gradlew devServerTest` 运行。
- * 需要 dev-server 的假模型支持 MARKDOWN 关键词（改了 fake-llm.mjs 后要重启 dev-server）。
+ * 需要 dev-server 的假模型支持 MARKDOWN、SLOW、FAIL 关键词（改了 fake-llm.mjs 后要重启 dev-server）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatDevServerTest {
@@ -108,6 +111,36 @@ class ChatDevServerTest {
             val history = api.messages(sessionId).messages
             assertEquals(history.map { it.id }, final.entries().map { it.message.id })
             assertEquals(history.map { it.parts }, final.entries().map { it.message.parts })
+
+            // 轮次（落地方案 B1）：推送来的这一轮正常结束，消息都归到这一轮；会话摘要带上结果和最后一句回复
+            val ended = await("本轮结束") { state -> state.turns.values.any { it.result == TurnResult.COMPLETED && it.startedAt != null } }
+            val number =
+                ended.turns.values
+                    .single { it.result == TurnResult.COMPLETED }
+                    .turn
+            assertTrue(ended.entries().all { it.message.turn == number })
+            assertTrue(chatBlocks(ended.items, ended.turns).last() is ChatBlock.TurnEnd)
+            val summary = await("摘要里的最近一轮") { it.session?.lastTurn?.result == TurnResult.COMPLETED }.session!!
+            assertTrue("最后一句回复：${summary.lastReply}", summary.lastReply.orEmpty().isNotBlank())
+        }
+
+    @Test
+    fun failedTurnEndsWithTheError() =
+        runBlocking<Unit> {
+            // 假模型对 FAIL 关键词返回 400（不重试），这一轮失败
+            assertTrue(withContext(main) { vm.send("FAIL 请失败") })
+            val state = await("本轮失败", timeoutMillis = 60_000) { s -> s.turns.values.any { it.result == TurnResult.FAILED } }
+            val failed = state.turns.values.single { it.result == TurnResult.FAILED }
+            assertTrue("错误说明：${failed.error}", failed.error.orEmpty().contains(FAIL_MESSAGE))
+            val end = chatBlocks(state.items, state.turns).filterIsInstance<ChatBlock.TurnEnd>().single()
+            assertEquals(failed.turn, end.turn.turn)
+            val summary = await("摘要里的失败") { it.session?.lastTurn?.result == TurnResult.FAILED }.session!!
+            assertTrue(
+                summary.lastTurn
+                    ?.error
+                    .orEmpty()
+                    .contains(FAIL_MESSAGE),
+            )
         }
 
     @Test
@@ -126,6 +159,13 @@ class ChatDevServerTest {
 
             withContext(main) { vm.cancelRun() }
             await("停止后空闲", timeoutMillis = 30_000) { it.session?.status == SessionStatus.IDLE }
+            val stopped = await("本轮已停止") { s -> s.turns.values.any { it.result == TurnResult.STOPPED } }
+            assertEquals(
+                "user",
+                stopped.turns.values
+                    .single { it.result == TurnResult.STOPPED }
+                    .stoppedBy,
+            )
         }
 
     @Test
@@ -162,7 +202,9 @@ class ChatDevServerTest {
         check: (ChatState) -> Boolean,
     ): ChatState =
         kotlinx.coroutines.withTimeoutOrNull(timeoutMillis) { vm.state.first(check) }
-            ?: throw AssertionError("等待超时：$what（当前：${vm.state.value.session?.status}，${vm.state.value.items.size} 项）")
+            ?: throw AssertionError(
+                "等待超时：$what（当前：${vm.state.value.session?.status}，${vm.state.value.items.size} 项，轮次 ${vm.state.value.turns.values}）",
+            )
 
     private fun ChatState.entries() = items.filterIsInstance<ChatItem.Entry>()
 
@@ -170,6 +212,9 @@ class ChatDevServerTest {
 
     companion object {
         private const val HOST_ID = "dev"
+
+        /** 和 plugin/test/contract/fake-llm.mjs 的 FAIL_MESSAGE 一致。 */
+        private const val FAIL_MESSAGE = "fake failure for DSHRemote tests"
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private lateinit var manager: ConnectionManager
         private lateinit var api: PluginApi

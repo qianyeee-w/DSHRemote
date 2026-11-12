@@ -4,6 +4,8 @@ import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
 import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.TextPart
+import io.github.qianyeeew.dshremote.data.api.Turn
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.live.SessionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -135,6 +137,36 @@ class ChatTimelineTest {
         t = t.startReload().apply(upsert(msg("m2"), rev = 1)).reloadFailed()
         assertFalse(t.reloading)
         assertEquals(listOf("m1", "m2"), t.ids())
+    }
+
+    @Test
+    fun turnsFromPagesAndPushesAreMergedByNumber() {
+        // 最新一页：第 3 轮开始在更早的一页（没有 startedAt），第 4 轮还在运行
+        var t =
+            ChatTimeline().withLatest(
+                MessagePage(
+                    listOf(msg("m3")),
+                    hasMore = true,
+                    cursor = "c",
+                    turns = listOf(Turn(3, endedAt = 30, result = TurnResult.COMPLETED), Turn(4, startedAt = 40)),
+                ),
+            )
+        t = t.withOlder(MessagePage(listOf(msg("m1")), hasMore = false, turns = listOf(Turn(3, startedAt = 20))))
+        assertEquals(Turn(3, startedAt = 20, endedAt = 30, result = TurnResult.COMPLETED), t.turns[3])
+        // 推送：第 4 轮失败了
+        t = t.apply(SessionEvent.TurnUpdated(SESSION, Turn(4, startedAt = 40, endedAt = 50, result = TurnResult.FAILED, error = "boom")))
+        assertEquals(Turn(4, startedAt = 40, endedAt = 50, result = TurnResult.FAILED, error = "boom"), t.turns[4])
+        // 之后再读到的旧一页说它还在运行：已经知道的结束不会丢
+        t = t.withLatest(MessagePage(listOf(msg("m3")), hasMore = true, cursor = "c", turns = listOf(Turn(4, startedAt = 40))))
+        assertEquals(TurnResult.FAILED, t.turns[4]?.result)
+    }
+
+    @Test
+    fun turnPushedWhileReloadingIsKept() {
+        var t = loaded(msg("m1")).startReload()
+        t = t.apply(SessionEvent.TurnUpdated(SESSION, Turn(2, startedAt = 1, endedAt = 2, result = TurnResult.STOPPED)))
+        t = t.withLatest(page(listOf(msg("m1"))))
+        assertEquals(TurnResult.STOPPED, t.turns[2]?.result)
     }
 
     @Test

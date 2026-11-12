@@ -5,6 +5,7 @@ import io.github.qianyeeew.dshremote.data.api.TextPart
 import io.github.qianyeeew.dshremote.data.api.ThinkingPart
 import io.github.qianyeeew.dshremote.data.api.ToolPart
 import io.github.qianyeeew.dshremote.data.api.ToolStatus
+import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -42,6 +43,12 @@ sealed interface ChatBlock {
                     .mapNotNullTo(HashSet()) { it.target }
                     .size
     }
+
+    /** 一轮的结尾（6.7）：结束了的轮次才有，放在这一轮的最后一块下面。 */
+    data class TurnEnd(
+        override val key: String,
+        val turn: Turn,
+    ) : ChatBlock
 }
 
 /** 步骤行左边的动作（6.6 的对应表）。 */
@@ -79,14 +86,20 @@ data class Step(
 
 /**
  * 把消息列表换成显示用的块：用户消息一块；回复里的每段文字一块；文字之间连续的思考和工具调用
- * （可以跨越几条回复消息）合成一块。用户消息是轮次的分界，跨过它的步骤不会合在一起。
+ * （可以跨越几条回复消息）合成一块。步骤不跨过用户消息，也不跨过轮次的分界。
  *
- * 暂时没有轮次数据（落地方案 B1），两条用户消息之间的内容就是一轮。
+ * 消息带轮次编号（protocol.md 5.2）时，[turns] 里已经结束的轮次在它最后一块下面加一个 [ChatBlock.TurnEnd]。
+ * 不带编号的消息（旧插件，或者一页开头归属不明的消息）算在前面最近的一轮里。
  */
-fun chatBlocks(items: List<ChatItem>): List<ChatBlock> {
+fun chatBlocks(
+    items: List<ChatItem>,
+    turns: Map<Int, Turn> = emptyMap(),
+): List<ChatBlock> {
     val blocks = ArrayList<ChatBlock>()
     var steps = ArrayList<Step>()
     var stepsKey: String? = null
+    var openTurn: Int? = null
+    val ended = HashSet<Int>()
 
     fun flush() {
         val key = stepsKey
@@ -95,14 +108,32 @@ fun chatBlocks(items: List<ChatItem>): List<ChatBlock> {
         stepsKey = null
     }
 
+    fun closeTurn() {
+        val number = openTurn ?: return
+        val turn = turns[number]?.takeUnless { it.running } ?: return
+        if (!ended.add(number)) return
+        flush()
+        blocks += ChatBlock.TurnEnd("turn-end:$number", turn)
+    }
+
+    fun enter(turn: Int?) {
+        if (turn == null || turn == openTurn) return
+        flush()
+        closeTurn()
+        openTurn = turn
+    }
+
     for (item in items) {
         when (item) {
             is ChatItem.Local -> {
                 flush()
+                // 本地发出的消息在日志里出现之前没有轮次：前一轮已经结束的话，结尾先放在它上面
+                closeTurn()
                 blocks += ChatBlock.User(item.key, item.local.outgoing.text, item.local)
             }
             is ChatItem.Entry -> {
                 val message = item.message
+                enter(message.turn)
                 if (message.role == MessageRole.USER) {
                     flush()
                     blocks += ChatBlock.User(item.key, message.parts.filterIsInstance<TextPart>().joinToString("") { it.text })
@@ -140,6 +171,7 @@ fun chatBlocks(items: List<ChatItem>): List<ChatBlock> {
         }
     }
     flush()
+    closeTurn()
     return blocks
 }
 

@@ -1,11 +1,14 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
+import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Approval
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.AttentionRef
+import io.github.qianyeeew.dshremote.data.api.LastTurn
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -19,7 +22,19 @@ class HomeSectionsTest {
         workspaceId: String? = null,
         cwd: String? = null,
         attention: List<AttentionRef> = emptyList(),
-    ) = SessionSummary(id, title = id, workspaceId = workspaceId, cwd = cwd, status = status, attention = attention, updatedAt = updatedAt)
+        lastTurn: LastTurn? = null,
+        lastReply: String? = null,
+    ) = SessionSummary(
+        id,
+        title = id,
+        workspaceId = workspaceId,
+        cwd = cwd,
+        status = status,
+        attention = attention,
+        updatedAt = updatedAt,
+        lastTurn = lastTurn,
+        lastReply = lastReply,
+    )
 
     private fun approval(
         id: String,
@@ -103,5 +118,42 @@ class HomeSectionsTest {
         assertEquals("a", homeHost(listOf("a", "b"), "removed"))
         assertEquals("a", homeHost(listOf("a", "b"), null))
         assertNull(homeHost(emptyList(), "a"))
+    }
+
+    @Test
+    fun offlineRunningSessionsMoveToRecent() {
+        val sessions =
+            listOf(session("running", SessionStatus.RUNNING, updatedAt = 2), session("waiting", SessionStatus.WAITING, updatedAt = 1))
+        val sections = homeSections(sessions, emptyList(), workspaces, null, online = false) { null }
+        assertEquals(listOf("waiting:waiting"), sections.active.map { it.key })
+        assertEquals(listOf("running"), sections.recent.map { it.sessionId })
+    }
+
+    @Test
+    fun recentLineFollowsTheLastTurn() {
+        fun line(
+            result: TurnResult?,
+            reply: String? = "改好了，\n  测试都过了",
+            error: String? = null,
+        ) = recentLine(session("s", lastTurn = result?.let { LastTurn(it, 1, error) }, lastReply = reply), online = true)
+
+        assertEquals(RecentLine.Reply("改好了， 测试都过了"), line(TurnResult.COMPLETED))
+        assertEquals(RecentLine.Reply("改好了， 测试都过了"), line(TurnResult.OTHER))
+        // 正常结束但没有回复文字
+        assertEquals(RecentLine.Status(R.string.turn_ended), line(TurnResult.COMPLETED, reply = null))
+        assertEquals(RecentLine.Failed("rate limited"), line(TurnResult.FAILED, error = " rate\nlimited "))
+        assertEquals(RecentLine.Failed(null), line(TurnResult.FAILED))
+        assertEquals(RecentLine.Status(R.string.turn_stopped), line(TurnResult.STOPPED))
+        assertEquals(RecentLine.Status(R.string.turn_interrupted), line(TurnResult.INTERRUPTED))
+        // 旧插件：没有轮次数据，只显示项目名
+        assertEquals(RecentLine.None, line(null, reply = null))
+    }
+
+    @Test
+    fun runningWhenTheLinkDroppedIsUnconfirmed() {
+        val running = session("s", SessionStatus.RUNNING, lastTurn = LastTurn(TurnResult.COMPLETED, 1), lastReply = "上一轮")
+        assertEquals(RecentLine.Status(R.string.turn_unconfirmed), recentLine(running, online = false))
+        // 断线时已经不在运行：照常显示最后的结果
+        assertEquals(RecentLine.Reply("上一轮"), recentLine(running.copy(status = SessionStatus.IDLE), online = false))
     }
 }

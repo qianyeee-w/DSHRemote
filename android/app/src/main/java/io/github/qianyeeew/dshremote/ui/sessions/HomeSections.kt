@@ -1,8 +1,11 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
+import androidx.annotation.StringRes
+import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.ui.chat.fileName
 
@@ -62,7 +65,8 @@ fun projectNameOf(
 /**
  * 分段（设计规格 7.1）：
  * - 进行中：等你处理的会话在前（按更新时间倒序），然后是不属于任何会话的事项（按出现的先后），最后是运行中的会话。
- *   这张卡片回答「有没有事等我」，不受项目筛选影响。
+ *   这张卡片回答「有没有事等我」，不受项目筛选影响。没连上电脑时（[online] 为 false）不知道运行中的会话现在怎么样，
+ *   放回最近列表，第二行写「结果待确认」（见 [recentLine]）。
  * - 最近：其余会话按更新时间倒序，同一件事不在两处出现。按 [filter] 只看一个项目。
  *
  * [attentionOf] 给出一个会话最早的待处理事项（见 `pendingAttention`）。
@@ -72,11 +76,12 @@ fun homeSections(
     otherAttention: List<Attention>,
     workspaces: List<Workspace>,
     filter: String?,
+    online: Boolean = true,
     attentionOf: (SessionSummary) -> Attention?,
 ): HomeSections {
     val byTime = sessions.sortedWith(compareByDescending<SessionSummary> { it.updatedAt }.thenBy { it.sessionId })
     val waiting = byTime.filter { it.status == SessionStatus.WAITING || it.attention.isNotEmpty() }
-    val running = byTime.filter { it.status == SessionStatus.RUNNING && it !in waiting }
+    val running = if (online) byTime.filter { it.status == SessionStatus.RUNNING && it !in waiting } else emptyList()
     val activeIds = (waiting + running).mapTo(HashSet()) { it.sessionId }
     val rest = byTime.filter { it.sessionId !in activeIds }
 
@@ -97,6 +102,60 @@ fun homeSections(
         filter = effective,
     )
 }
+
+/** 最近列表每行第二行左边：这个会话最后的结果（设计规格 7.1 的表）。 */
+sealed interface RecentLine {
+    /** 正常结束：DSH 最后一句话的开头。 */
+    data class Reply(
+        val text: String,
+    ) : RecentLine
+
+    /** 一句状态：已停止、已中断、结果待确认，或者正常结束但没有回复文字时的「本轮结束」。 */
+    data class Status(
+        @param:StringRes val text: Int,
+    ) : RecentLine
+
+    /** 红色「失败」，后面跟原因（拿得到时）。 */
+    data class Failed(
+        val reason: String?,
+    ) : RecentLine
+
+    /** 没有轮次数据（旧插件、还没运行过）：只显示项目名。 */
+    data object None : RecentLine
+}
+
+/**
+ * 最近列表一行的第二行。没连上电脑而会话断线前还在运行，是「结果待确认」（落地方案 B1：由 App 判断，
+ * 重新连上、拿到新状态之后就换成真实结果）。
+ */
+fun recentLine(
+    session: SessionSummary,
+    online: Boolean,
+): RecentLine {
+    if (!online && session.status == SessionStatus.RUNNING) return RecentLine.Status(R.string.turn_unconfirmed)
+    val reply =
+        session.lastReply
+            ?.replace(WHITESPACE, " ")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    return when (session.lastTurn?.result) {
+        TurnResult.FAILED ->
+            RecentLine.Failed(
+                session.lastTurn.error
+                    ?.replace(WHITESPACE, " ")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() },
+            )
+        TurnResult.STOPPED -> RecentLine.Status(R.string.turn_stopped)
+        TurnResult.INTERRUPTED -> RecentLine.Status(R.string.turn_interrupted)
+        null -> reply?.let { RecentLine.Reply(it) } ?: RecentLine.None
+        TurnResult.COMPLETED, TurnResult.OTHER, TurnResult.UNKNOWN ->
+            reply?.let { RecentLine.Reply(it) }
+                ?: RecentLine.Status(R.string.turn_ended)
+    }
+}
+
+private val WHITESPACE = Regex("\\s+")
 
 /**
  * 首页显示哪台电脑（用户确认：多台时直接进上次用的那台）：上次用的那台还在就用它，否则第一台。没有电脑时为 null。

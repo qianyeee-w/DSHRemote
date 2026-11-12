@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -262,6 +263,7 @@ fun SessionListContent(
                     RecentRow(
                         session,
                         project = if (sections.filter == null) projectNameOf(session, workspaces) else null,
+                        online = online,
                         now = now,
                         modifier = Modifier.alpha(if (online) 1f else STALE_ALPHA),
                     ) { navigation.onOpenSession(session.sessionId) }
@@ -666,7 +668,7 @@ private fun AttentionRow(
     }
 }
 
-/** 运行中的一行：转圈标记、会话名；第二行是在做什么（拿到轮次数据之前写「运行中」，落地方案 B1）。 */
+/** 运行中的一行：转圈标记、会话名；第二行是在做什么（会话摘要里还没有当前步骤，先写「运行中」）。 */
 @Composable
 private fun RunningRow(
     session: SessionSummary,
@@ -776,13 +778,14 @@ private fun RecentHeading(
 }
 
 /**
- * 最近的一行：会话名（拿到未读数据之前都按已读，400）、右边时间；第二行靠左是项目名，筛选到单个项目时不显示。
- * 最后一句回复、失败、已停止等落地方案 B1。
+ * 最近的一行：会话名（拿到未读数据之前都按已读，400）、右边时间；第二行左边是最后的结果（[recentLine]），
+ * 右边是项目名，筛选到单个项目时不显示。
  */
 @Composable
 private fun RecentRow(
     session: SessionSummary,
     project: String?,
+    online: Boolean,
     now: Long,
     modifier: Modifier,
     onOpen: () -> Unit,
@@ -809,14 +812,40 @@ private fun RecentRow(
                 )
                 Text(relativeTime(session.updatedAt, now), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
             }
-            if (project != null) {
-                Text(
-                    project,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            val line = recentLine(session, online)
+            if (line != RecentLine.None || project != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val (text, color) =
+                        when (line) {
+                            is RecentLine.Reply -> line.text to colors.textSecondary
+                            is RecentLine.Status -> stringResource(line.text) to colors.textSecondary
+                            is RecentLine.Failed ->
+                                (
+                                    line.reason?.let { stringResource(R.string.turn_failed_reason, it) }
+                                        ?: stringResource(R.string.turn_failed)
+                                ) to
+                                    colors.danger
+                            RecentLine.None -> "" to colors.textSecondary
+                        }
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = color,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).testTag("recent-line:${session.sessionId}"),
+                    )
+                    if (project != null) {
+                        Text(
+                            project,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 140.dp),
+                        )
+                    }
+                }
             }
         }
     }

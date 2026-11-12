@@ -3,6 +3,8 @@ package io.github.qianyeeew.dshremote.data.live
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
+import io.github.qianyeeew.dshremote.data.api.Turn
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.live.FakePlugin.Companion.approval
 import io.github.qianyeeew.dshremote.data.live.FakePlugin.Companion.event
 import io.github.qianyeeew.dshremote.data.live.FakePlugin.Companion.message
@@ -33,6 +35,18 @@ class StreamEventTest {
         assertEquals("s1", (parse("session.updated", """"session":${session("s1")}""") as StreamEvent.SessionUpdated).session.sessionId)
         assertEquals(StreamEvent.SessionRemoved("e", "s1"), parse("session.removed", """"sessionId":"s1""""))
         assertEquals(StreamEvent.SessionIdle("e", "s1", null), parse("session.idle", """"sessionId":"s1","title":null"""))
+        assertEquals(
+            StreamEvent.SessionIdle("e", "s1", "T", TurnResult.FAILED),
+            parse("session.idle", """"sessionId":"s1","title":"T","result":"failed""""),
+        )
+        assertEquals(
+            StreamEvent.SessionIdle("e", "s1", null, TurnResult.UNKNOWN),
+            parse("session.idle", """"sessionId":"s1","title":null,"result":"future""""),
+        )
+        assertEquals(
+            StreamEvent.TurnUpdated("e", "s1", Turn(4, startedAt = 1, endedAt = 2, result = TurnResult.COMPLETED)),
+            parse("turn.updated", """"sessionId":"s1","turn":{"turn":4,"startedAt":1,"endedAt":2,"result":"completed"}"""),
+        )
         assertEquals(
             "a1",
             (parse("attention.requested", """"attention":${approval("a1")}""") as StreamEvent.AttentionRequested).attention.attentionId,

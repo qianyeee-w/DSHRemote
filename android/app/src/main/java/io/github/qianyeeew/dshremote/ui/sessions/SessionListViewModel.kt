@@ -167,7 +167,13 @@ class SessionListViewModel(
                 clockOffsetMillis = hostState?.clockOffsetMillis ?: 0,
                 otherAttention = others,
                 sections =
-                    homeSections(sessions, others, workspaces.workspaces, filter) { session ->
+                    homeSections(
+                        sessions,
+                        others,
+                        workspaces.workspaces,
+                        filter,
+                        online = hostState?.status is LinkStatus.Online,
+                    ) { session ->
                         pendingAttention(hostState, session, session.sessionId).firstOrNull { !done(it) }
                     },
                 workspaces = workspaces.workspaces,

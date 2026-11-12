@@ -425,7 +425,7 @@ class HostConnection internal constructor(
             is StreamEvent.SessionUpdated ->
                 _state.update { it.copy(sessions = it.sessions + (event.session.sessionId to event.session)) }
             is StreamEvent.SessionRemoved -> _state.update { it.copy(sessions = it.sessions - event.sessionId) }
-            is StreamEvent.SessionIdle -> liveEvents.emit(LiveEvent.SessionIdle(hostId, event.sessionId, event.title))
+            is StreamEvent.SessionIdle -> liveEvents.emit(LiveEvent.SessionIdle(hostId, event.sessionId, event.title, event.result))
             is StreamEvent.AttentionRequested -> {
                 _state.update { it.copy(attention = it.attention + (event.attention.attentionId to event.attention)) }
                 liveEvents.emit(LiveEvent.AttentionRequested(hostId, event.attention))
@@ -437,6 +437,7 @@ class HostConnection internal constructor(
             is StreamEvent.MessageUpsert ->
                 sessionEvents.emit(SessionEvent.Upsert(event.sessionId, event.rev, event.message, event.replaces))
             is StreamEvent.MessageRemoved -> sessionEvents.emit(SessionEvent.Removed(event.sessionId, event.messageId))
+            is StreamEvent.TurnUpdated -> sessionEvents.emit(SessionEvent.TurnUpdated(event.sessionId, event.turn))
             is StreamEvent.Error -> log("主机 $hostId：插件报告错误 ${event.code.name}")
             is StreamEvent.Unknown, is StreamEvent.Hello -> Unit
         }

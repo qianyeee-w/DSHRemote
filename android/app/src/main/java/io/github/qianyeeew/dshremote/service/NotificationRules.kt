@@ -1,6 +1,7 @@
 package io.github.qianyeeew.dshremote.service
 
 import io.github.qianyeeew.dshremote.data.api.Attention
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.live.LiveEvent
@@ -24,10 +25,12 @@ sealed interface NotificationAction {
         val attentionId: String,
     ) : NotificationAction
 
+    /** 一轮运行结束。[result] 决定标题的说法（不说「完成」），旧插件没有。 */
     data class PostTaskDone(
         val hostId: String,
         val sessionId: String,
         val title: String?,
+        val result: TurnResult? = null,
     ) : NotificationAction
 
     data class CancelTaskDone(
@@ -46,7 +49,7 @@ sealed interface NotificationAction {
  *   断线期间状态可能过时，不据此撤回。
  * - 用户正在看这个事项所在的会话时不通知（卡片就在眼前），打开会话时撤回它的通知。
  *
- * 「任务完成」：收到 `session.idle` 时通知（插件已经做了 8 秒防抖），用户正在看这个会话时不通知；打开这个会话时撤回。
+ * 「运行结束」：收到 `session.idle` 时通知（插件已经做了 8 秒防抖），用户正在看这个会话时不通知；打开这个会话时撤回。
  */
 class NotificationRules {
     private val seen = RecentIds(SEEN_CAPACITY)
@@ -91,7 +94,7 @@ class NotificationRules {
                     emptyList()
                 } else {
                     activeTaskDone += Key(event.hostId, event.sessionId)
-                    listOf(NotificationAction.PostTaskDone(event.hostId, event.sessionId, event.title))
+                    listOf(NotificationAction.PostTaskDone(event.hostId, event.sessionId, event.title, event.result))
                 }
             }
             // 新的事项由 onStates 处理（实时连接先更新状态，再发事件）

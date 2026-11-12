@@ -23,11 +23,13 @@ import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Approval
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
+import io.github.qianyeeew.dshremote.data.api.LastTurn
 import io.github.qianyeeew.dshremote.data.api.Question
 import io.github.qianyeeew.dshremote.data.api.QuestionOption
 import io.github.qianyeeew.dshremote.data.api.QuestionSet
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
@@ -85,8 +87,21 @@ class HomeLayoutUiTest {
             SessionSummary("waiting", workspaceId = "p1", title = "检查连接恢复逻辑", status = SessionStatus.WAITING, updatedAt = 5),
             SessionSummary("asking", workspaceId = "p1", title = "导入旧笔记", status = SessionStatus.WAITING, updatedAt = 4),
             SessionSummary("working", workspaceId = "p1", title = "优化通知展示", status = SessionStatus.RUNNING, updatedAt = 3),
-            SessionSummary("recent", workspaceId = "p1", title = "## 解释 Markdown 渲染流程", updatedAt = 2),
-            SessionSummary("tools", workspaceId = "p2", title = "清理临时目录", updatedAt = 1),
+            SessionSummary(
+                "recent",
+                workspaceId = "p1",
+                title = "## 解释 Markdown 渲染流程",
+                updatedAt = 2,
+                lastTurn = LastTurn(TurnResult.COMPLETED, 2),
+                lastReply = "Markdown 先解析成语法树，再逐块渲染。",
+            ),
+            SessionSummary(
+                "tools",
+                workspaceId = "p2",
+                title = "清理临时目录",
+                updatedAt = 1,
+                lastTurn = LastTurn(TurnResult.FAILED, 1, "rate limited"),
+            ),
         )
     private val workspaces = listOf(Workspace("p1", "DSHRemote", "E:/Project/DSHRemote"), Workspace("p2", "工具脚本", "E:/tools"))
 
@@ -104,6 +119,22 @@ class HomeLayoutUiTest {
         compose.onNodeWithText("解释 Markdown 渲染流程").assertIsDisplayed()
         compose.onNodeWithText("## 解释 Markdown 渲染流程").assertDoesNotExist()
         save("home")
+    }
+
+    /** 最近列表的第二行是最后的结果（落地方案 B1）：最后一句回复，失败是红字加原因。 */
+    @Test fun recentRowsShowTheLastResult() {
+        render()
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
+        compose.onNodeWithText("Markdown 先解析成语法树，再逐块渲染。").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.turn_failed_reason, "rate limited")).assertIsDisplayed()
+    }
+
+    /** 断线前还在运行的会话：回到最近列表，写「结果待确认」，不再转圈。 */
+    @Test fun offlineRunningSessionIsUnconfirmed() {
+        render(offline = true)
+        compose.onNodeWithText(text(R.string.home_running)).assertDoesNotExist()
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:working"))
+        compose.onNodeWithText(text(R.string.turn_unconfirmed)).assertIsDisplayed()
     }
 
     /** 卡片里直接允许和拒绝，复用会话页的提交逻辑。 */
@@ -266,7 +297,7 @@ class HomeLayoutUiTest {
                 hostName = "开发电脑",
                 status = if (offline) LinkStatus.Stopped else online,
                 sessions = sessions,
-                sections = homeSections(sessions, emptyList(), workspaces, filter) { attention[it.sessionId] },
+                sections = homeSections(sessions, emptyList(), workspaces, filter, online = !offline) { attention[it.sessionId] },
                 workspaces = workspaces,
                 hostId = "first",
             )

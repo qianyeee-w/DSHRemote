@@ -1,18 +1,19 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
-import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.Approval
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.AttentionRef
-import io.github.qianyeeew.dshremote.data.api.ErrorCode
+import io.github.qianyeeew.dshremote.data.api.ModelList
+import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
+import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
-import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.data.live.OfflineReason
 import io.github.qianyeeew.dshremote.data.live.PairingReason
 import io.github.qianyeeew.dshremote.ui.FakePairer.Companion.host
@@ -29,10 +30,8 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.io.IOException
 
 /** 会话列表：排序、状态、新建会话的流程和错误。 */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -94,65 +93,6 @@ class SessionListViewModelTest {
             hosts.value = emptyList()
             assertNull(withTimeout(5_000) { vm.state.first { it == null } })
         }
-
-    @Test
-    fun newSessionLoadsWorkspacesThenCreatesInTheChosenOne() {
-        val vm = viewModel()
-        creator.workspaces = listOf(Workspace("w1", "app", "/home/me/app"))
-        vm.startNewSession()
-        assertEquals(NewSession.Choose(creator.workspaces), vm.newSession.value)
-
-        creator.gate = CompletableDeferred()
-        vm.create("w1")
-        assertEquals(NewSession.Creating, vm.newSession.value)
-        // 创建中：再点、关闭对话框都不会重复创建
-        vm.create("w1")
-        vm.startNewSession()
-        vm.dismissNewSession()
-        assertEquals(NewSession.Creating, vm.newSession.value)
-        creator.gate!!.complete(Unit)
-
-        assertEquals(NewSession.Created("s_new"), vm.newSession.value)
-        assertEquals(listOf<String?>("w1"), creator.created)
-        vm.dismissNewSession()
-        assertEquals(NewSession.Closed, vm.newSession.value)
-    }
-
-    @Test
-    fun newSessionWithoutWorkspace() {
-        val vm = viewModel()
-        vm.startNewSession()
-        vm.create(null)
-        assertEquals(listOf<String?>(null), creator.created)
-    }
-
-    @Test
-    fun errorsAreMappedAndCanBeRetried() {
-        val cases =
-            listOf(
-                OfflineException() to CreateError.OFFLINE,
-                ApiException.Network(IOException("x")) to CreateError.OFFLINE,
-                ApiException.Http(401, ErrorCode.TOKEN_INVALID, null) to CreateError.NEEDS_PAIRING,
-                ApiException.Http(503, ErrorCode.DSH_UNAVAILABLE, null) to CreateError.DSH_UNAVAILABLE,
-                ApiException.Http(502, ErrorCode.DSH_ERROR, null) to CreateError.FAILED,
-                ApiException.BadResponse("x") to CreateError.FAILED,
-            )
-        for ((error, expected) in cases) {
-            val vm = viewModel()
-            creator.workspacesError = error
-            vm.startNewSession()
-            assertEquals(NewSession.Failed(expected), vm.newSession.value)
-
-            // 读取工作区成功、创建失败
-            creator.workspacesError = null
-            vm.startNewSession()
-            assertTrue(vm.newSession.value is NewSession.Choose)
-            creator.createError = error
-            vm.create(null)
-            assertEquals(NewSession.Failed(expected), vm.newSession.value)
-            creator.createError = null
-        }
-    }
 
     @Test
     fun attentionOutsideAnyListedSessionIsShownSeparately() {
@@ -256,5 +196,24 @@ class SessionListViewModelTest {
             createError?.let { throw it }
             return "s_new"
         }
+
+        override suspend fun models() = ModelList(default = null, models = emptyList())
+
+        override suspend fun presets() = PermissionPresetList(default = null, presets = emptyList())
+
+        override suspend fun setModel(
+            sessionId: String,
+            model: ModelRef,
+        ) = Unit
+
+        override suspend fun setPreset(
+            sessionId: String,
+            preset: String,
+        ) = Unit
+
+        override suspend fun prompt(
+            sessionId: String,
+            message: OutgoingMessage,
+        ) = Unit
     }
 }

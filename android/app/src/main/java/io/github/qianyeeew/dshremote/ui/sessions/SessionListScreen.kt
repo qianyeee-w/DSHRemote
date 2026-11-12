@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,8 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,32 +22,25 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -105,6 +99,8 @@ class SessionListNavigation(
     /** 已配对的电脑，左上角菜单里切换用。 */
     val hosts: List<HostRow> = emptyList(),
     val onSwitchHost: (hostId: String) -> Unit = {},
+    /** 新任务已经开始（会话已创建）：把没完成的步骤交给会话页，然后进入会话。 */
+    val onTaskStarted: (StartedTask) -> Unit = { onOpenSession(it.sessionId) },
 )
 
 @Composable
@@ -113,15 +109,10 @@ fun SessionListScreen(
     navigation: SessionListNavigation,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val newSession by viewModel.newSession.collectAsStateWithLifecycle()
+    val newTask by viewModel.newTask.state.collectAsStateWithLifecycle()
+    val defaultProject by viewModel.defaultProject.collectAsStateWithLifecycle()
     val project by viewModel.projects.state.collectAsStateWithLifecycle()
     val attentionNotice by viewModel.attention.notice.collectAsStateWithLifecycle()
-    LaunchedEffect(newSession) {
-        (newSession as? NewSession.Created)?.let {
-            navigation.onOpenSession(it.sessionId)
-            viewModel.dismissNewSession()
-        }
-    }
     // 项目名来自电脑上登记的项目：页面可见并且在线时刷新一次
     val online = state?.status is LinkStatus.Online
     LifecycleStartEffect(online) {
@@ -135,15 +126,25 @@ fun SessionListScreen(
     }
     SessionListContent(
         state = current,
-        newSession = newSession,
         navigation = navigation,
-        onNewSession = viewModel::startNewSession,
-        onChooseWorkspace = viewModel::create,
-        onDismissNewSession = viewModel::dismissNewSession,
-        onProject = { mode ->
-            viewModel.dismissNewSession()
-            viewModel.projects.open(mode)
-        },
+        newTask = newTask,
+        defaultProject = defaultProject,
+        newTaskActions =
+            NewTaskActions(
+                onExpand = {
+                    viewModel.newTask.loadOptions()
+                    viewModel.catalog.refresh()
+                },
+                onChooseProject = viewModel.newTask::chooseProject,
+                onChooseModel = viewModel.newTask::chooseModel,
+                onChoosePreset = viewModel.newTask::choosePreset,
+                onStart = viewModel.newTask::start,
+                onStarted = {
+                    navigation.onTaskStarted(it)
+                    viewModel.newTask.consumeStarted()
+                },
+            ),
+        onProject = viewModel.projects::open,
         attentionActions = AttentionCardActions.of(viewModel.attention),
         onFilter = viewModel::chooseProjectFilter,
         attentionNotice = attentionNotice,
@@ -157,7 +158,7 @@ fun SessionListScreen(
             onName = viewModel.projects::name,
             onSubmit = viewModel.projects::submit,
             onDismiss = viewModel.projects::dismiss,
-            onStartSession = { selection.workspace?.let(viewModel::startProjectSession) },
+            onStartSession = { selection.workspace?.let(viewModel::useProject) },
         )
     }
 }
@@ -169,11 +170,10 @@ fun SessionListScreen(
 @Composable
 fun SessionListContent(
     state: SessionListState,
-    newSession: NewSession,
     navigation: SessionListNavigation,
-    onNewSession: () -> Unit,
-    onChooseWorkspace: (workspaceId: String?) -> Unit,
-    onDismissNewSession: () -> Unit,
+    newTask: NewTaskState = NewTaskState(),
+    defaultProject: ProjectPick = ProjectPick.None,
+    newTaskActions: NewTaskActions = NewTaskActions(),
     onProject: (ProjectMode) -> Unit = {},
     attentionActions: AttentionCardActions = AttentionCardActions(),
     onFilter: (String?) -> Unit = {},
@@ -181,6 +181,17 @@ fun SessionListContent(
     onDismissAttentionNotice: () -> Unit = {},
 ) {
     var choosingRepair by remember { mutableStateOf(false) }
+    // 新任务：写过的字在收起后保留（设计规格 7.6）
+    var taskText by rememberSaveable { mutableStateOf("") }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(newTask.started) {
+        newTask.started?.let {
+            taskText = ""
+            expanded = false
+            newTaskActions.onStarted(it)
+        }
+    }
+    BackHandler(enabled = expanded) { expanded = false }
     var choosingAdd by remember { mutableStateOf(false) }
     val online = state.status is LinkStatus.Online
     val colors = DesignTheme.colors
@@ -194,7 +205,14 @@ fun SessionListContent(
     }
     Scaffold(
         topBar = { HomeTopBar(state, navigation, onAddHost = { choosingAdd = true }) },
-        bottomBar = { NewTaskBar(enabled = online, onClick = onNewSession) },
+        bottomBar = {
+            if (!expanded) {
+                NewTaskBar(taskText, enabled = online) {
+                    expanded = true
+                    newTaskActions.onExpand()
+                }
+            }
+        },
         snackbarHost = { SnackbarHost(snackbar) },
         containerColor = colors.page,
     ) { padding ->
@@ -240,8 +258,36 @@ fun SessionListContent(
             }
         }
     }
-    if (newSession != NewSession.Closed && newSession !is NewSession.Created) {
-        NewSessionDialog(newSession, onChooseWorkspace, onRetry = onNewSession, onDismiss = onDismissNewSession, onProject = onProject)
+    if (expanded) {
+        // 展开时后面的首页盖一层页面底色，点外面收起，已输入的内容保留
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(colors.page.copy(alpha = SCRIM_ALPHA))
+                    .clickable(interactionSource = null, indication = null, onClickLabel = stringResource(R.string.new_task_collapse)) {
+                        expanded =
+                            false
+                    }.testTag("new-task-scrim"),
+            )
+            NewTaskComposer(
+                text = taskText,
+                onText = { taskText = it },
+                state = newTask,
+                project = newTask.project ?: defaultProject,
+                workspaces = state.workspaces,
+                online = online,
+                actions = newTaskActions,
+                onProject = onProject,
+                modifier =
+                    Modifier
+                        .align(
+                            Alignment.BottomCenter,
+                        ).navigationBarsPadding()
+                        .imePadding()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+            )
+        }
     }
     if (choosingAdd) {
         PairMethodDialog(
@@ -773,111 +819,7 @@ private fun EmptySessions() {
     }
 }
 
-/** 底部：收起的输入框，占位文字「新任务」，右边带加号的实心圆。原地展开的新任务输入框在落地方案 A5。 */
-@Composable
-private fun NewTaskBar(
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val colors = DesignTheme.colors
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(colors.page)
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .designPanel(RoundedCornerShape(26.dp))
-                .clickable(enabled = enabled, onClickLabel = stringResource(R.string.home_new_task), role = Role.Button, onClick = onClick)
-                .alpha(if (enabled) 1f else STALE_ALPHA)
-                .padding(start = 18.dp, end = 6.dp)
-                .testTag("home-new-session"),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                stringResource(R.string.home_new_task),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary,
-                modifier = Modifier.weight(1f),
-            )
-            Box(Modifier.size(40.dp).background(colors.text, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(painterResource(R.drawable.ic_add), null, Modifier.size(20.dp), tint = colors.panel)
-            }
-        }
-    }
-}
-
-@Composable
-private fun NewSessionDialog(
-    state: NewSession,
-    onChoose: (workspaceId: String?) -> Unit,
-    onRetry: () -> Unit,
-    onDismiss: () -> Unit,
-    onProject: (ProjectMode) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.new_session_title)) },
-        text = {
-            when (state) {
-                NewSession.Loading -> Progress(stringResource(R.string.new_session_loading))
-                NewSession.Creating -> Progress(stringResource(R.string.new_session_creating))
-                is NewSession.Choose ->
-                    Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                        TextButton(onClick = { onProject(ProjectMode.CREATE) }) { Text(stringResource(R.string.project_create)) }
-                        TextButton(onClick = { onProject(ProjectMode.IMPORT) }) { Text(stringResource(R.string.project_import)) }
-                        Text(stringResource(R.string.new_session_choose), style = MaterialTheme.typography.bodyMedium)
-                        state.workspaces.forEach { workspace ->
-                            ListItem(
-                                headlineContent = { Text(workspace.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                supportingContent = { Text(workspace.path, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                                modifier = Modifier.clickable { onChoose(workspace.workspaceId) },
-                            )
-                            HorizontalDivider()
-                        }
-                        ListItem(
-                            headlineContent = { Text(stringResource(R.string.new_session_no_workspace)) },
-                            supportingContent = { Text(stringResource(R.string.new_session_no_workspace_hint)) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier.clickable { onChoose(null) },
-                        )
-                    }
-                is NewSession.Failed ->
-                    Text(
-                        stringResource(
-                            when (state.error) {
-                                CreateError.OFFLINE -> R.string.new_session_offline
-                                CreateError.DSH_UNAVAILABLE -> R.string.new_session_dsh_unavailable
-                                CreateError.NEEDS_PAIRING -> R.string.new_session_needs_pairing
-                                CreateError.FAILED -> R.string.new_session_failed
-                            },
-                        ),
-                    )
-                NewSession.Closed, is NewSession.Created -> Unit
-            }
-        },
-        confirmButton = {
-            if (state is NewSession.Failed && state.error != CreateError.NEEDS_PAIRING) {
-                TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
-            }
-        },
-        dismissButton = {
-            if (state != NewSession.Creating) TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
-        },
-    )
-}
-
-@Composable
-private fun Progress(text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        CircularProgressIndicator()
-        Text(text)
-    }
-}
-
 private const val STALE_ALPHA = 0.6f
+
+/** 输入框展开时盖在首页上的那层页面底色（设计规格第 3 节：60%–78%）。 */
+private const val SCRIM_ALPHA = 0.78f

@@ -133,6 +133,7 @@ fun ChatScreen(
         attentionActions = AttentionCardActions.of(viewModel.attention),
         attentionNotice = attentionNotice,
         onDismissAttentionNotice = viewModel.attention::dismissNotice,
+        initialDraft = viewModel.initialDraft,
     )
 }
 
@@ -145,6 +146,7 @@ fun ChatContent(
     attentionActions: AttentionCardActions = AttentionCardActions(),
     attentionNotice: Resolution? = null,
     onDismissAttentionNotice: () -> Unit = {},
+    initialDraft: String? = null,
 ) {
     val snackbar = remember { SnackbarHostState() }
     val elsewhere = stringResource(R.string.attention_elsewhere)
@@ -188,6 +190,7 @@ fun ChatContent(
                     state,
                     actions,
                     pickerOpen = picker != Picker.Closed,
+                    initialText = initialDraft.orEmpty(),
                     attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
                     onAnswer = attentionActions.onAnswerWithCustom,
                 )
@@ -493,6 +496,7 @@ private fun noticeText(notice: ChatNotice): Int =
         ChatNotice.CANCEL_FAILED -> R.string.chat_notice_cancel_failed
         ChatNotice.LOAD_OLDER_FAILED -> R.string.chat_notice_older_failed
         ChatNotice.CHANGE_FAILED -> R.string.chat_notice_change_failed
+        ChatNotice.SETUP_FAILED -> R.string.chat_notice_setup_failed
     }
 
 /** 离底部不到这么多像素也算停在底部。 */

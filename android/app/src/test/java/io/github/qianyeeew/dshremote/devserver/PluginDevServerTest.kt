@@ -16,6 +16,11 @@ import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.net.ClientFactory
 import io.github.qianyeeew.dshremote.data.net.Fingerprint
 import io.github.qianyeeew.dshremote.data.net.PairingProbe
+import io.github.qianyeeew.dshremote.ui.sessions.NewTaskFlow
+import io.github.qianyeeew.dshremote.ui.sessions.PluginSessionCreator
+import io.github.qianyeeew.dshremote.ui.sessions.ProjectPick
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
@@ -134,6 +139,31 @@ class PluginDevServerTest {
                     .first()
                     .id
             assertEquals(preset, api.setPermissionPreset(sessionId, preset))
+        }
+
+    /** 新任务的三步走在真实的 DSH 上（落地方案 A5）：换成非默认的审批方式，会话创建、设置生效、第一条消息进入会话。 */
+    @Test
+    fun newTaskCreatesConfiguresAndSendsTheFirstMessage() =
+        runBlocking<Unit> {
+            val flow = NewTaskFlow(CoroutineScope(Dispatchers.Unconfined), PluginSessionCreator { api })
+            flow.loadOptions()
+            val presets = waitFor("审批方式列表") { flow.state.value.presets }
+            val other = presets.presets.map { it.id }.firstOrNull { it != presets.default }
+            if (other != null) flow.choosePreset(other)
+            val text = "newTask ${System.nanoTime()}"
+            assertTrue(flow.start(text, ProjectPick.None))
+            val started = waitFor("任务开始", attempts = 100) { flow.state.value.started }
+            assertEquals(null, started.handoff)
+            val session = api.sessions().first { it.sessionId == started.sessionId }
+            if (other != null) assertEquals(other, session.permissionPreset)
+            val first =
+                waitFor("第一条消息进入会话") {
+                    api.messages(started.sessionId).messages.firstOrNull { m ->
+                        m.role == MessageRole.USER &&
+                            m.parts.any { it == TextPart(text) }
+                    }
+                }
+            assertEquals(MessageRole.USER, first.role)
         }
 
     @Test

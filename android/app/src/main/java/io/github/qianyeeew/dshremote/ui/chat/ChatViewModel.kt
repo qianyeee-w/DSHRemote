@@ -154,6 +154,9 @@ enum class ChatNotice {
     CANCEL_FAILED,
     LOAD_OLDER_FAILED,
     CHANGE_FAILED,
+
+    /** 新任务：会话已经创建，但模型或审批方式没设置成功，消息还没发。 */
+    SETUP_FAILED,
 }
 
 /** 切换模型或权限模式的选择框。 */
@@ -184,12 +187,26 @@ class ChatViewModel(
     responder: AttentionResponder,
     resolvedEvents: Flow<LiveEvent.AttentionResolved>,
     hostName: Flow<String?> = flowOf(null),
+    /** 首页开始新任务时没有完成的步骤（见 [ChatHandoff]）。 */
+    handoff: ChatHandoff? = null,
 ) : ViewModel() {
+    /** 模型或审批方式没设置成功、消息还没发时，放回输入框的文字。 */
+    val initialDraft: String? = (handoff as? ChatHandoff.NotSent)?.text
+
     /** 这个会话的审批和提问（T10）。 */
     val attention = AttentionHandler(viewModelScope, responder, resolvedEvents)
 
     private val timeline = MutableStateFlow(ChatTimeline())
-    private val outbox = MutableStateFlow(Outbox())
+    private val outbox =
+        MutableStateFlow(
+            when (handoff) {
+                // 第一条消息发送失败：显示成失败的气泡，重试沿用同一个 requestId。
+                // 新会话里的用户消息都是这条，所以第一次读到历史时就按文字对应（可能其实已经送到了）
+                is ChatHandoff.FailedFirstMessage ->
+                    Outbox(items = listOf(LocalMessage(handoff.message, OutgoingStatus.FAILED)), seenUserIds = emptySet())
+                else -> Outbox()
+            },
+        )
     private val flags = MutableStateFlow(Flags())
     private val workspaces = MutableStateFlow<List<Workspace>>(emptyList())
     private var subscription: Job? = null
@@ -226,7 +243,7 @@ class ChatViewModel(
         viewModelScope.launch { state.collect { s -> attention.shown(s.attention.map { it.attentionId }) } }
     }
 
-    private val _notice = MutableStateFlow<ChatNotice?>(null)
+    private val _notice = MutableStateFlow(if (handoff is ChatHandoff.NotSent) ChatNotice.SETUP_FAILED else null)
     val notice: StateFlow<ChatNotice?> = _notice.asStateFlow()
 
     private val _picker = MutableStateFlow<Picker>(Picker.Closed)

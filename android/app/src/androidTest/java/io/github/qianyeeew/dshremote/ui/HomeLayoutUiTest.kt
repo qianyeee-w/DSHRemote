@@ -1,9 +1,13 @@
 package io.github.qianyeeew.dshremote.ui
 
 import android.graphics.Bitmap
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -13,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Approval
@@ -28,7 +33,11 @@ import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
 import io.github.qianyeeew.dshremote.ui.hosts.HostRow
-import io.github.qianyeeew.dshremote.ui.sessions.NewSession
+import io.github.qianyeeew.dshremote.ui.sessions.CreateError
+import io.github.qianyeeew.dshremote.ui.sessions.NewTaskActions
+import io.github.qianyeeew.dshremote.ui.sessions.NewTaskState
+import io.github.qianyeeew.dshremote.ui.sessions.ProjectMode
+import io.github.qianyeeew.dshremote.ui.sessions.ProjectPick
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListContent
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListNavigation
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListState
@@ -147,11 +156,68 @@ class HomeLayoutUiTest {
         compose.runOnIdle { assertEquals("second", switched) }
     }
 
-    @Test fun newTaskOpensTheNewSessionFlow() {
-        var created = 0
-        render(onNew = { created++ })
+    /** 点底部输入框原地展开；点外面收起，已经写的字保留（设计规格 7.6）。 */
+    @Test fun newTaskExpandsInPlaceAndKeepsTheTextWhenCollapsed() {
+        var expanded = 0
+        render(newTaskActions = NewTaskActions(onExpand = { expanded++ }))
+        compose.onNodeWithTag("new-task").assertDoesNotExist()
         compose.onNodeWithTag("home-new-session").performClick()
-        compose.runOnIdle { assertEquals(1, created) }
+        compose.onNodeWithTag("new-task").assertIsDisplayed()
+        compose.onNodeWithTag("new-task-input").performTextInput("给通知加按钮")
+        save("new-task")
+        compose.onNodeWithTag("new-task-scrim").performClick()
+        compose.onNodeWithTag("new-task").assertDoesNotExist()
+        compose.onNodeWithText("给通知加按钮").assertIsDisplayed()
+        compose.onNodeWithTag("home-new-session").performClick()
+        compose.onNodeWithTag("new-task-input").assertTextContains("给通知加按钮")
+        compose.runOnIdle { assertEquals(2, expanded) }
+    }
+
+    /** 默认用上一次的项目；可以换项目；发送键带上内容和项目。 */
+    @Test fun startUsesTheChosenProject() {
+        val started = mutableListOf<Pair<String, ProjectPick>>()
+        var project: ProjectPick by mutableStateOf(ProjectPick.Existing(workspaces[0]))
+        render(
+            newTaskProject = { project },
+            newTaskActions =
+                NewTaskActions(
+                    onChooseProject = { project = it },
+                    onStart = { text, pick ->
+                        started += text to pick
+                        true
+                    },
+                ),
+        )
+        compose.onNodeWithTag("home-new-session").performClick()
+        compose.onNodeWithTag("new-task-start").assertIsNotEnabled()
+        compose.onNodeWithTag("new-task-project").assertTextContains("DSHRemote", substring = true)
+        compose.onNodeWithTag("new-task-project").performClick()
+        compose.onNodeWithTag("new-task-project:p2").performClick()
+        compose.onNodeWithTag("new-task-input").performTextInput("清理脚本")
+        compose.onNodeWithTag("new-task-start").performClick()
+        compose.runOnIdle { assertEquals(listOf("清理脚本" to ProjectPick.Existing(workspaces[1])), started) }
+    }
+
+    /** 项目列表里有「不指定项目」，最后一项「新建或导入项目」进入现有的创建／导入流程。 */
+    @Test fun projectListOffersNoProjectAndCreateOrImport() {
+        val modes = mutableListOf<ProjectMode>()
+        var picked: ProjectPick? = null
+        render(onProject = { modes += it }, newTaskActions = NewTaskActions(onChooseProject = { picked = it }))
+        compose.onNodeWithTag("home-new-session").performClick()
+        compose.onNodeWithTag("new-task-project").performClick()
+        compose.onNodeWithTag("new-task-project:none").performClick()
+        compose.runOnIdle { assertEquals(ProjectPick.None, picked) }
+        compose.onNodeWithTag("new-task-project").performClick()
+        compose.onNodeWithTag("new-task-create-or-import").performClick()
+        compose.onNodeWithTag("new-task-import").performClick()
+        compose.runOnIdle { assertEquals(listOf(ProjectMode.IMPORT), modes) }
+    }
+
+    /** 会话没能创建：留在首页，提示原因，写的字还在。 */
+    @Test fun createFailureIsShownInTheComposer() {
+        render(newTask = NewTaskState(error = CreateError.OFFLINE))
+        compose.onNodeWithTag("home-new-session").performClick()
+        compose.onNodeWithTag("new-task-error").assertIsDisplayed()
     }
 
     @Test fun disconnectedHostCannotCreateSessionButRetainsCachedConversations() {
@@ -168,8 +234,11 @@ class HomeLayoutUiTest {
         actions: AttentionCardActions = AttentionCardActions(),
         onSession: (String) -> Unit = {},
         onSwitch: (String) -> Unit = {},
-        onNew: () -> Unit = {},
         onFilter: (String?) -> Unit = {},
+        newTask: NewTaskState = NewTaskState(),
+        newTaskProject: () -> ProjectPick = { ProjectPick.Existing(workspaces[0]) },
+        newTaskActions: NewTaskActions = NewTaskActions(),
+        onProject: (ProjectMode) -> Unit = {},
     ) {
         val attention = mapOf("waiting" to shell, "asking" to ask)
         val state =
@@ -185,7 +254,10 @@ class HomeLayoutUiTest {
             DshRemoteTheme {
                 SessionListContent(
                     state = state,
-                    newSession = NewSession.Closed,
+                    newTask = newTask,
+                    defaultProject = newTaskProject(),
+                    newTaskActions = newTaskActions,
+                    onProject = onProject,
                     navigation =
                         SessionListNavigation(
                             onBack = null,
@@ -198,9 +270,6 @@ class HomeLayoutUiTest {
                             hosts = listOf(HostRow("first", "开发电脑", null, online), HostRow("second", "笔记本", null, LinkStatus.Stopped)),
                             onSwitchHost = onSwitch,
                         ),
-                    onNewSession = onNew,
-                    onChooseWorkspace = {},
-                    onDismissNewSession = {},
                     attentionActions = actions,
                     onFilter = onFilter,
                 )

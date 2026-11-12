@@ -84,11 +84,13 @@ fun ChatComposer(
     state: ChatState,
     actions: ChatActions,
     pickerOpen: Boolean = false,
+    /** 打开页面时输入框里已有的文字（新任务的消息没发出去时放回来）。 */
+    initialText: String = "",
     attention: ComposerAttention = ComposerAttention.None,
     onAnswer: (Attention, questionId: String, text: String) -> Boolean = { _, _, _ -> false },
 ) {
     val colors = DesignTheme.colors
-    var text by rememberSaveable { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf(initialText) }
     var focused by remember { mutableStateOf(false) }
     val expanded = focused || pickerOpen
     val focus = LocalFocusManager.current

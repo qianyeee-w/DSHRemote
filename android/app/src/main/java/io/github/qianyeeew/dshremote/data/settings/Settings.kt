@@ -46,6 +46,16 @@ class SettingsRepository internal constructor(
         store.edit { if (filter == null) it.remove(filterKey(hostId)) else it[filterKey(hostId)] = filter }
     }
 
+    /** 新任务上一次用的项目（每台电脑各自记）：项目 id，空串是「不指定项目」，null 是还没用过。 */
+    fun lastProject(hostId: String): Flow<String?> = store.data.map { it[projectKey(hostId)] }
+
+    suspend fun setLastProject(
+        hostId: String,
+        workspaceId: String,
+    ) {
+        store.edit { it[projectKey(hostId)] = workspaceId }
+    }
+
     suspend fun setLastHost(hostId: String) {
         store.edit { it[LAST_HOST] = hostId }
     }
@@ -70,6 +80,8 @@ class SettingsRepository internal constructor(
         private val LAST_HOST = stringPreferencesKey("last_host_id")
 
         private fun filterKey(hostId: String) = stringPreferencesKey("project_filter:$hostId")
+
+        private fun projectKey(hostId: String) = stringPreferencesKey("new_task_project:$hostId")
 
         /** 每个进程只调用一次（DataStore 的要求）。 */
         fun create(context: Context): SettingsRepository =

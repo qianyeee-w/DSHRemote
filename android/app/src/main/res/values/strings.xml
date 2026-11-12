@@ -129,6 +129,11 @@
     <string name="time_just_now">刚刚</string>
     <string name="menu_manage_host">管理这台电脑</string>
     <string name="home_new_task">新任务</string>
+    <string name="new_task_project">项目</string>
+    <string name="new_task_no_project">不指定项目</string>
+    <string name="new_task_create_or_import">新建或导入项目</string>
+    <string name="new_task_start">开始任务</string>
+    <string name="new_task_collapse">收起输入框</string>
     <string name="home_all_projects">全部项目</string>
     <string name="home_running">运行中</string>
     <string name="home_waiting">等你处理</string>
@@ -143,12 +148,6 @@
     <string name="sessions_stale">不在线，下面是上次连接时的内容。</string>
 
     <!-- 新建会话 -->
-    <string name="new_session_title">新建会话</string>
-    <string name="new_session_loading">正在读取工作区……</string>
-    <string name="new_session_choose">选择工作区：</string>
-    <string name="new_session_no_workspace">不指定工作区</string>
-    <string name="new_session_no_workspace_hint">由 DeepSeek Harness 决定工作目录</string>
-    <string name="new_session_creating">正在新建……</string>
     <string name="new_session_offline">电脑不在线，连上后再试。</string>
     <string name="new_session_dsh_unavailable">DeepSeek Harness 暂时不可用，请稍后再试。</string>
     <string name="new_session_needs_pairing">这台手机需要重新配对。</string>
@@ -208,6 +207,7 @@
     <string name="chat_notice_offline">电脑不在线</string>
     <string name="chat_notice_cancel_failed">停止失败，请稍后再试</string>
     <string name="chat_notice_older_failed">读取更早的消息失败</string>
+    <string name="chat_notice_setup_failed">模型或审批方式没有设置成功，消息还没发出，检查后再发送。</string>
     <string name="chat_notice_change_failed">操作失败，请稍后再试</string>
     <string name="chat_link_title">打开链接？</string>
     <string name="chat_link_open">打开</string>
@@ -294,7 +294,7 @@
     <string name="project_import_here">导入当前目录</string>
     <string name="project_retry_register">重试登记工作区</string>
     <string name="project_ready">工作区已准备好</string>
-    <string name="project_start_session">开始会话</string>
+    <string name="project_start_session">用这个项目</string>
     <string name="project_partial">目录已创建，工作区尚未登记成功。重试只登记这个目录。</string>
     <string name="project_uncertain">创建结果待确认。请刷新父目录；若已出现同名目录，返回并选择「导入已有项目」。</string>
     <string name="project_upgrade">电脑端插件尚不支持此功能，请先升级插件。</string>

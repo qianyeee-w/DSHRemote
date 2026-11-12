@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qianyeeew.dshremote.data.api.DirectoryEntry
 import io.github.qianyeeew.dshremote.data.api.DirectoryListing
 import io.github.qianyeeew.dshremote.data.api.Workspace
@@ -95,7 +96,13 @@ class ProjectPickerUiTest {
             }
         }
         assertEquals(0, started)
-        compose.onNodeWithText("开始会话").performClick()
+        compose
+            .onNodeWithText(
+                InstrumentationRegistry
+                    .getInstrumentation()
+                    .targetContext
+                    .getString(io.github.qianyeeew.dshremote.R.string.project_start_session),
+            ).performClick()
         assertEquals(1, started)
     }
 }

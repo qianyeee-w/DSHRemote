@@ -18,7 +18,8 @@ data class WorkspaceCatalogState(
 /** 页面可见时更新项目名称与空项目；断线不清空上次成功的内容。 */
 class WorkspaceCatalog(
     private val scope: CoroutineScope,
-    private val creator: SessionCreator,
+    /** 读取电脑上登记的项目。不在线时抛出 [OfflineException]。 */
+    private val load: suspend () -> List<Workspace>,
 ) {
     private val mutable = MutableStateFlow(WorkspaceCatalogState())
     val state = mutable.asStateFlow()
@@ -30,7 +31,7 @@ class WorkspaceCatalog(
         request =
             scope.launch {
                 try {
-                    mutable.value = WorkspaceCatalogState(creator.workspaces())
+                    mutable.value = WorkspaceCatalogState(load())
                 } catch (_: OfflineException) {
                     mutable.value = mutable.value.copy(loading = false, failed = true)
                 } catch (_: ApiException) {

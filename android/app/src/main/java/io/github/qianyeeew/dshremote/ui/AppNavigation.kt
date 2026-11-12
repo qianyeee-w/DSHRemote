@@ -163,6 +163,7 @@ fun AppNavigation(
                             responder = LiveAttentionResponder(container.connections, route.hostId),
                             resolvedEvents = container.connections.resolvedEvents(route.hostId),
                             hostName = container.hosts.hosts.map { list -> list.firstOrNull { it.hostId == route.hostId }?.name },
+                            handoff = container.handoffs.take(route.hostId, route.sessionId),
                         )
                     },
                 onBack = { nav.popBackStack() },
@@ -248,6 +249,8 @@ private fun SessionList(
                     resolvedEvents = container.connections.resolvedEvents(hostId),
                     projectFilter = container.settings.projectFilter(hostId),
                     saveProjectFilter = { container.settings.setProjectFilter(hostId, it) },
+                    lastProject = container.settings.lastProject(hostId),
+                    saveLastProject = { container.settings.setLastProject(hostId, it) },
                 )
             },
         navigation =
@@ -263,6 +266,10 @@ private fun SessionList(
                 hint = hint,
                 hosts = hosts,
                 onSwitchHost = onSwitchHost,
+                onTaskStarted = { started ->
+                    started.handoff?.let { container.handoffs.put(hostId, started.sessionId, it) }
+                    nav.navigate(SessionRoute(hostId, started.sessionId))
+                },
             ),
     )
 }

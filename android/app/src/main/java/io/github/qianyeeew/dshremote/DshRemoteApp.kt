@@ -66,6 +66,11 @@ class AppContainer(
 
     val settings: SettingsRepository = SettingsRepository.create(appContext)
 
+    /** 首页开始新任务时没有完成的步骤，交给会话页（只在内存里）。 */
+    val handoffs =
+        io.github.qianyeeew.dshremote.ui.chat
+            .ChatHandoffs()
+
     /** App 的界面是否在前台（MainActivity 的 onStart 到 onStop）。 */
     val foreground = MutableStateFlow(false)
 

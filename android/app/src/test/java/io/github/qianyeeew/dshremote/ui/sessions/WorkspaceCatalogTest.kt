@@ -17,13 +17,7 @@ class WorkspaceCatalogTest {
         runTest {
             var offline = false
             val projects = listOf(Workspace("p1", "工程", "E:/work/app"))
-            val creator =
-                object : SessionCreator {
-                    override suspend fun workspaces(): List<Workspace> = if (offline) throw OfflineException() else projects
-
-                    override suspend fun create(workspaceId: String?) = error("不应创建会话")
-                }
-            val catalog = WorkspaceCatalog(backgroundScope, creator)
+            val catalog = WorkspaceCatalog(backgroundScope) { if (offline) throw OfflineException() else projects }
             catalog.refresh()
             runCurrent()
             assertEquals(projects, catalog.state.value.workspaces)
@@ -43,16 +37,11 @@ class WorkspaceCatalogTest {
         runTest {
             var calls = 0
             val result = CompletableDeferred<List<Workspace>>()
-            val creator =
-                object : SessionCreator {
-                    override suspend fun workspaces(): List<Workspace> {
-                        calls++
-                        return result.await()
-                    }
-
-                    override suspend fun create(workspaceId: String?) = error("不应创建会话")
+            val catalog =
+                WorkspaceCatalog(backgroundScope) {
+                    calls++
+                    result.await()
                 }
-            val catalog = WorkspaceCatalog(backgroundScope, creator)
             catalog.refresh()
             catalog.refresh()
             runCurrent()

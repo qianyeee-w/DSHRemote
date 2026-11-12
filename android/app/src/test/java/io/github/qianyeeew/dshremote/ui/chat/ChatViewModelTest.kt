@@ -328,6 +328,51 @@ class ChatViewModelTest {
             extraBufferCapacity = 8,
         )
 
+    /** 新任务的第一条消息没发出去：会话里是发送失败的气泡，重试沿用同一个 requestId。 */
+    @Test
+    fun failedFirstMessageFromNewTaskIsRetriedWithTheSameRequestId() {
+        val first = OutgoingMessage("给通知加按钮", PromptMode.QUEUE)
+        states.value = live(SessionStatus.IDLE)
+        val vm = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved, handoff = ChatHandoff.FailedFirstMessage(first))
+        val local =
+            vm.state.value.items
+                .filterIsInstance<ChatItem.Local>()
+                .single()
+                .local
+        assertEquals(OutgoingStatus.FAILED, local.status)
+        assertEquals(first.requestId, local.outgoing.requestId)
+        assertNull(vm.initialDraft)
+        vm.retrySend(first.requestId)
+        assertEquals(first.requestId, backend.prompts.single().requestId)
+    }
+
+    /** 其实已经送到了：第一次读到历史时按文字对应上，失败气泡消失，不会重复显示。 */
+    @Test
+    fun failedFirstMessageThatActuallyArrivedDisappearsOnFirstLoad() {
+        val first = OutgoingMessage("给通知加按钮", PromptMode.QUEUE)
+        backend.pages[null] = MessagePage(listOf(msg("u1", "给通知加按钮", MessageRole.USER)), hasMore = false, cursor = null)
+        val vm = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved, handoff = ChatHandoff.FailedFirstMessage(first))
+        vm.onVisible()
+        backend.push(SessionEvent.Resync(SESSION))
+        assertTrue(
+            vm.state.value.items
+                .none { it is ChatItem.Local },
+        )
+    }
+
+    /** 模型或审批方式没设置成功：消息还没发，文字放回输入框并提示。 */
+    @Test
+    fun notSentTextComesBackAsADraftWithANotice() {
+        val vm = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved, handoff = ChatHandoff.NotSent("任务"))
+        assertEquals("任务", vm.initialDraft)
+        assertEquals(ChatNotice.SETUP_FAILED, vm.notice.value)
+        assertTrue(
+            vm.state.value.items
+                .isEmpty(),
+        )
+        assertTrue(backend.prompts.isEmpty())
+    }
+
     private fun viewModel() = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved)
 
     private fun visible(page: MessagePage = MessagePage(emptyList(), hasMore = false, cursor = null)): ChatViewModel {

@@ -1,17 +1,23 @@
 package io.github.qianyeeew.dshremote.ui
 
 import android.graphics.Bitmap
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -24,6 +30,11 @@ import io.github.qianyeeew.dshremote.data.api.Approval
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.LastTurn
+import io.github.qianyeeew.dshremote.data.api.ModelList
+import io.github.qianyeeew.dshremote.data.api.ModelOption
+import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.PermissionPreset
+import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.Question
 import io.github.qianyeeew.dshremote.data.api.QuestionOption
 import io.github.qianyeeew.dshremote.data.api.QuestionSet
@@ -34,6 +45,8 @@ import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
+import io.github.qianyeeew.dshremote.ui.common.COVER_TAG
+import io.github.qianyeeew.dshremote.ui.common.INLINE_CHOICES_TAG
 import io.github.qianyeeew.dshremote.ui.hosts.HostRow
 import io.github.qianyeeew.dshremote.ui.sessions.CreateError
 import io.github.qianyeeew.dshremote.ui.sessions.NewTaskActions
@@ -56,6 +69,7 @@ class HomeLayoutUiTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val online = LinkStatus.Online(HostAddress("192.168.1.12", 3290))
+    private var back: OnBackPressedDispatcher? = null
 
     private val shell =
         Attention(
@@ -167,8 +181,13 @@ class HomeLayoutUiTest {
         render(onFilter = { chosen = it })
         compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("home-filter"))
         compose.onNodeWithText(text(R.string.home_all_projects)).performClick()
+        // 在这一行下面展开，每个项目右边是它在最近列表里的会话数
+        compose.onNodeWithTag("home-filter-panel").assertIsDisplayed()
+        compose.onNodeWithTag("home-filter:all").assertIsSelected()
+        compose.onNodeWithTag("home-filter:p1").assertTextContains("1")
         compose.onNodeWithTag("home-filter:p2").performClick()
         compose.runOnIdle { assertEquals("p2", chosen) }
+        compose.onNodeWithTag("home-filter-panel").assertDoesNotExist()
     }
 
     @Test fun filteredRecentListHidesOtherProjectsAndTheProjectName() {
@@ -185,6 +204,95 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("home-host").performClick()
         compose.onNodeWithTag("home-host:second").performClick()
         compose.runOnIdle { assertEquals("second", switched) }
+    }
+
+    /** 电脑列表在顶栏下面原地展开，其余内容盖一层底色：点被盖住的内容只是收起，不会打开它（设计规格 6.10）。 */
+    @Test fun hostListExpandsInPlaceAndTheRestOnlyCollapsesIt() {
+        val opened = mutableListOf<String>()
+        render(onSession = { opened += it })
+        compose.onNodeWithTag("home-host").performClick()
+        compose.onNodeWithTag("home-host-panel").assertIsDisplayed()
+        compose.onNodeWithTag("home-host:first").assertIsSelected()
+        save("host-panel")
+        compose.onAllNodesWithTag(COVER_TAG)[0].performClick()
+        compose.onNodeWithTag("home-host-panel").assertDoesNotExist()
+        compose.onAllNodesWithTag(COVER_TAG).assertCountEquals(0)
+        compose.onNodeWithText("优化通知展示").performClick()
+        compose.runOnIdle { assertEquals(listOf("working"), opened) }
+    }
+
+    /** 返回键先收起电脑列表。 */
+    @Test fun backCollapsesTheHostList() {
+        render()
+        compose.onNodeWithTag("home-host").performClick()
+        compose.runOnIdle { back!!.onBackPressed() }
+        compose.onNodeWithTag("home-host-panel").assertDoesNotExist()
+    }
+
+    /** 只配对了一台电脑：点电脑名直接进「电脑与设置」，不展开只有一行的列表（设计规格 7.7）。 */
+    @Test fun singleComputerOpensSettingsDirectly() {
+        var settings = 0
+        render(onSettings = { settings++ }, hosts = listOf(HostRow("first", "开发电脑", null, online)))
+        compose.onNodeWithTag("home-host-settings", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("home-host").performClick()
+        compose.onNodeWithTag("home-host-panel").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, settings) }
+    }
+
+    /**
+     * 新任务的项目、模型、审批方式在输入框卡片里展开（设计规格 6.10）：输入框一直有焦点，写的字不变；
+     * 一次只展开一个；点输入的文字收起；返回键先收起选项，再按一次才收起输入框。
+     */
+    @Test fun newTaskChoicesOpenInsideTheCardAndKeepTheFocus() {
+        val chosen = mutableListOf<String>()
+        render(
+            newTask =
+                NewTaskState(
+                    models =
+                        ModelList(
+                            ModelRef("p", "m1"),
+                            listOf(ModelOption("p", "来源", "m1", "模型一"), ModelOption("p", "来源", "m2", "模型二")),
+                        ),
+                    presets =
+                        PermissionPresetList(
+                            "workspace-write",
+                            listOf(PermissionPreset("read-only", "r"), PermissionPreset("workspace-write", "w")),
+                        ),
+                ),
+            newTaskActions =
+                NewTaskActions(
+                    onChooseModel = { chosen += it.model },
+                    onChoosePreset = { chosen += it },
+                ),
+        )
+        compose.onNodeWithTag("home-new-session").performClick()
+        compose.onNodeWithTag("new-task-input").performTextInput("给通知加按钮")
+        compose.onNodeWithTag("new-task-preset").performClick()
+        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertIsDisplayed()
+        compose.onNodeWithTag("new-task-input").assertIsFocused()
+        compose.onNodeWithText(text(R.string.design_permission_workspace_hint)).assertIsDisplayed()
+        save("new-task-preset")
+        // 换成模型：只有一个选项区
+        compose.onNodeWithTag("new-task-model").performClick()
+        compose.onAllNodesWithTag(INLINE_CHOICES_TAG).assertCountEquals(1)
+        compose.onNodeWithText("模型二").performClick()
+        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
+        compose.onNodeWithTag("new-task-input").assertIsFocused().assertTextContains("给通知加按钮")
+        // 项目在「项目」那一行上方展开
+        compose.onNodeWithTag("new-task-project").performClick()
+        compose.onNodeWithTag("new-task-project:p1").assertIsSelected()
+        compose.onNodeWithTag("new-task-input").assertIsFocused()
+        save("new-task-project")
+        compose.onNodeWithTag("new-task-input").performClick()
+        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
+        // 返回键：先收起选项，再收起输入框
+        compose.onNodeWithTag("new-task-model").performClick()
+        compose.runOnIdle { back!!.onBackPressed() }
+        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
+        compose.onNodeWithTag("new-task").assertIsDisplayed()
+        compose.runOnIdle { back!!.onBackPressed() }
+        compose.onNodeWithTag("new-task").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf("m2"), chosen) }
     }
 
     /** 有问题的电脑在菜单里带短状态，点了不切换，进它的详情页；最后一行「电脑与设置」（设计规格 7.7）。 */
@@ -290,6 +398,12 @@ class HomeLayoutUiTest {
         onProject: (ProjectMode) -> Unit = {},
         onHostDetail: (String) -> Unit = {},
         onSettings: () -> Unit = {},
+        hosts: List<HostRow> =
+            listOf(
+                HostRow("first", "开发电脑", null, online),
+                HostRow("second", "笔记本", null, LinkStatus.Stopped),
+                HostRow("third", "实验室服务器", null, LinkStatus.FingerprintMismatch),
+            ),
     ) {
         val attention = mapOf("waiting" to shell, "asking" to ask)
         val state =
@@ -302,6 +416,7 @@ class HomeLayoutUiTest {
                 hostId = "first",
             )
         compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
             DshRemoteTheme {
                 SessionListContent(
                     state = state,
@@ -319,12 +434,7 @@ class HomeLayoutUiTest {
                             onRepair = {},
                             onRetry = {},
                             onOpenSettings = onSettings,
-                            hosts =
-                                listOf(
-                                    HostRow("first", "开发电脑", null, online),
-                                    HostRow("second", "笔记本", null, LinkStatus.Stopped),
-                                    HostRow("third", "实验室服务器", null, LinkStatus.FingerprintMismatch),
-                                ),
+                            hosts = hosts,
                             onSwitchHost = onSwitch,
                             onOpenHostDetail = onHostDetail,
                         ),

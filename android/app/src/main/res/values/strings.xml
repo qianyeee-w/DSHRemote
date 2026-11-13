@@ -156,7 +156,7 @@
     <string name="home_wants_run">想运行</string>
     <string name="home_wants_edit">想修改</string>
     <string name="home_switch_host">切换电脑</string>
-    <string name="home_current_host">正在使用</string>
+    <string name="choice_selected">当前选中</string>
     <string name="sessions_empty_title">还没有会话</string>
     <string name="sessions_empty_body">点「新建会话」开始。在电脑上的 DeepSeek Harness 中新建的会话也会出现在这里。</string>
     <string name="sessions_untitled">新会话</string>
@@ -184,8 +184,6 @@
     <string name="chat_input_hint_answer_above">在上面逐题回答</string>
     <string name="chat_local_steered">已送出，DSH 下一步会读到</string>
     <string name="chat_local_retry">重试</string>
-    <string name="chat_picker_model">模型</string>
-    <string name="chat_picker_preset">审批方式</string>
     <string name="chat_running">运行中</string>
     <string name="chat_replying">正在回复</string>
     <!-- 一轮的结尾（设计规格 6.7）：不写「已完成」，运行结束不等于需求完成 -->

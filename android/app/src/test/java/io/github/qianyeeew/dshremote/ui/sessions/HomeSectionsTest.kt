@@ -80,10 +80,12 @@ class HomeSectionsTest {
                 session("c", updatedAt = 1, cwd = "/tmp/scratch"),
                 session("d", SessionStatus.RUNNING, workspaceId = "w2"),
                 session("e"),
+                session("f", updatedAt = 0, workspaceId = "w1"),
             )
         val all = homeSections(sessions, emptyList(), workspaces, null) { null }
+        // 会话数只算最近列表里的（运行中的 d 在卡片里，不算）
         assertEquals(
-            listOf(ProjectOption("w1", "DSHRemote"), ProjectOption("cwd:/tmp/scratch", "scratch"), ProjectOption("w2", "工具脚本")),
+            listOf(ProjectOption("w1", "DSHRemote", 2), ProjectOption("cwd:/tmp/scratch", "scratch", 1), ProjectOption("w2", "工具脚本", 1)),
             all.projects,
         )
         val tools = homeSections(sessions, emptyList(), workspaces, "w2") { null }

@@ -35,10 +35,14 @@ sealed interface ActiveItem {
     }
 }
 
-/** 项目筛选里的一项。[key] 是已登记项目的 id；没登记的会话按工作目录归到 `cwd:` 开头的项。 */
+/**
+ * 项目筛选里的一项。[key] 是已登记项目的 id；没登记的会话按工作目录归到 `cwd:` 开头的项。
+ * [count] 是最近列表里属于它的会话数，显示在选项右边（设计规格 7.1）。
+ */
 data class ProjectOption(
     val key: String,
     val name: String,
+    val count: Int,
 )
 
 /** 首页的两段：进行中卡片和最近列表。 */
@@ -88,8 +92,9 @@ fun homeSections(
     val known = workspaces.associateBy { it.workspaceId }
     val projects =
         rest
-            .mapNotNull { session -> projectKey(session)?.let { key -> projectNameOf(session, known)?.let { ProjectOption(key, it) } } }
-            .distinctBy { it.key }
+            .mapNotNull { session -> projectKey(session)?.let { key -> projectNameOf(session, known)?.let { key to it } } }
+            .groupBy({ it.first }, { it.second })
+            .map { (key, names) -> ProjectOption(key, names.first(), names.size) }
             .sortedWith(compareBy<ProjectOption> { it.name.lowercase() }.thenBy { it.key })
     val effective = filter?.takeIf { key -> projects.any { it.key == key } }
     return HomeSections(

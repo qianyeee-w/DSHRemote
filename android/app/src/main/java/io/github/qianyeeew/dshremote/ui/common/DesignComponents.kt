@@ -13,7 +13,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,19 +34,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.shadow.Shadow
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -58,12 +53,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 
@@ -359,7 +351,7 @@ fun DesignSwitch(
     }
 }
 
-/** 面板：进行中卡片、待处理面板、输入框和浮层共用的白底加 1dp 描边。[focused] 时描边换成主文字色（展开的输入框）。 */
+/** 面板：进行中卡片、待处理面板、输入框和首页的选择面板共用的白底加 1dp 描边。[focused] 时描边换成主文字色（展开的输入框）。 */
 @Composable
 fun Modifier.designPanel(
     shape: Shape,
@@ -372,51 +364,10 @@ fun Modifier.designPanel(
         .border(1.dp, if (focused) colors.focusBorder else colors.panelBorder, shape)
 }
 
-/**
- * 浮层（设计规格 6.10）：用量卡片和电脑菜单。面板底、描边、圆角 18、阴影 0 10dp 30dp（主文字的 10%），
- * 贴着触发它的控件出现，点外面收起。
- *
- * 放在触发控件的同一个父布局里调用；[alignment] 和 [offset] 相对于那个父布局。
- * 盖在页面上的那层底色（设计规格第 3 节）由调用方决定要不要画。
- */
-@Composable
-fun DesignPopup(
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-    alignment: Alignment = Alignment.TopStart,
-    offset: IntOffset = IntOffset.Zero,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val colors = DesignTheme.colors
-    val shape = RoundedCornerShape(18.dp)
-    val room = with(LocalDensity.current) { PopupShadowRoom.roundToPx() }
-    val bias = alignment as? BiasAlignment
-    Popup(
-        alignment = alignment,
-        // 四周留给阴影的空白会把浮层推离锚点，按对齐方向抵消回来。
-        offset = offset + IntOffset(((bias?.horizontalBias ?: 0f) * room).toInt(), ((bias?.verticalBias ?: 0f) * room).toInt()),
-        onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true),
-    ) {
-        Column(
-            modifier
-                .padding(PopupShadowRoom)
-                .dropShadow(shape, Shadow(radius = 30.dp, color = colors.shadow, offset = DpOffset(0.dp, 10.dp)))
-                .designPanel(shape)
-                .testTag(POPUP_TAG),
-            content = content,
-        )
-    }
-}
-
-/** 浮层四周留出画阴影的位置，否则阴影会被弹出窗口的边界裁掉。 */
-private val PopupShadowRoom = 40.dp
-
 private const val DISABLED_ALPHA = 0.38f
 
 const val STATUS_WAITING_TAG = "status-waiting"
 const val STATUS_RUNNING_TAG = "status-running"
-const val POPUP_TAG = "design-popup"
 
 /**
  * 顶栏（设计规格 5、7.2）：内容高 44，左边返回（图标 20），右边是对象名和一行灰字。页面不加大标题；

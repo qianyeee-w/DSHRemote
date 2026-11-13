@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,13 +43,23 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Attention
+import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.attention.ComposerAttention
+import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
+import io.github.qianyeeew.dshremote.ui.common.ChoiceList
+import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
+import io.github.qianyeeew.dshremote.ui.common.DesignDivider
+import io.github.qianyeeew.dshremote.ui.common.InlineChoices
+import io.github.qianyeeew.dshremote.ui.common.StatusMark
+import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
+import io.github.qianyeeew.dshremote.ui.common.onTap
 
 /** 发送键此刻的作用（设计规格 6.3）。 */
 enum class SendKeyMode {
@@ -83,7 +95,8 @@ fun sendKeyMode(
 fun ChatComposer(
     state: ChatState,
     actions: ChatActions,
-    pickerOpen: Boolean = false,
+    /** 输入框里展开的模型或审批方式的选项（设计规格 6.10）。 */
+    picker: Picker = Picker.Closed,
     /** 打开页面时输入框里已有的文字（新任务的消息没发出去时放回来）。 */
     initialText: String = "",
     attention: ComposerAttention = ComposerAttention.None,
@@ -92,7 +105,13 @@ fun ChatComposer(
     val colors = DesignTheme.colors
     var text by rememberSaveable { mutableStateOf(initialText) }
     var focused by remember { mutableStateOf(false) }
+    val pickerOpen = picker != Picker.Closed
     val expanded = focused || pickerOpen
+    // 收起的动画期间还要画最后一次展开的选项
+    var lastPicker by remember { mutableStateOf<Picker>(Picker.Closed) }
+    if (pickerOpen) lastPicker = picker
+    // 返回键先收起选项，再按一次才收起输入框
+    BackHandler(enabled = pickerOpen) { actions.onClosePicker() }
     val focus = LocalFocusManager.current
     val haptic = LocalHapticFeedback.current
     val imeVisible = WindowInsets.isImeVisible
@@ -150,6 +169,7 @@ fun ChatComposer(
                         Modifier
                             .weight(1f)
                             .onFocusChanged { focused = it.isFocused }
+                            .onTap { if (pickerOpen) actions.onClosePicker() }
                             .padding(end = 10.dp)
                             .testTag("chat-input")
                             .semantics { contentDescription = hint },
@@ -170,6 +190,12 @@ fun ChatComposer(
                 )
                 if (!expanded) SendKey(mode, onSend = send, onStop = actions.onCancelRun)
             }
+            // 选项在最下面一行的正上方展开，输入框卡片向上长；不另开窗口，焦点和键盘都不变
+            InlineChoices(visible = expanded && pickerOpen) {
+                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp, bottom = 4.dp))
+                PickerChoices(lastPicker, state, actions)
+                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
+            }
             if (expanded) {
                 Row(
                     Modifier.fillMaxWidth().testTag("chat-composer-options"),
@@ -184,15 +210,17 @@ fun ChatComposer(
                             model,
                             stringResource(R.string.design_model_value, model),
                             state.online,
+                            open = picker.kind == PickerKind.MODELS,
                             actions.onOpenModels,
-                            Modifier.weight(1f, fill = false),
+                            Modifier.weight(1f, fill = false).testTag("chat-model"),
                         )
                         ComposerChoice(
                             preset,
                             stringResource(R.string.design_permission_value, preset),
                             state.online,
+                            open = picker.kind == PickerKind.PRESETS,
                             actions.onOpenPresets,
-                            Modifier.weight(1f, fill = false),
+                            Modifier.weight(1f, fill = false).testTag("chat-preset"),
                         )
                     }
                     SendKey(mode, onSend = send, onStop = actions.onCancelRun)
@@ -202,12 +230,84 @@ fun ChatComposer(
     }
 }
 
-/** 模型、审批方式：带小箭头的灰字，点了打开选择。 */
+/** 选项区的内容：读取中、没有可选的、或者模型（下面一行灰字写来源）和审批方式（下面一行写说明）。 */
+@Composable
+private fun PickerChoices(
+    picker: Picker,
+    state: ChatState,
+    actions: ChatActions,
+) {
+    val haptic = LocalHapticFeedback.current
+    val choose = { action: () -> Unit ->
+        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+        action()
+    }
+    when (picker) {
+        Picker.Closed -> Unit
+        is Picker.Loading -> PickerMessage(stringResource(R.string.chat_picker_loading), loading = true)
+        is Picker.Models ->
+            if (picker.list.models.isEmpty()) {
+                PickerMessage(stringResource(R.string.chat_picker_empty), loading = false)
+            } else {
+                ChoiceList(withSubtitles = true) {
+                    val current = state.session?.model
+                    picker.list.models.forEach { option ->
+                        val ref = ModelRef(option.provider, option.model)
+                        ChoiceRow(
+                            option.name,
+                            { choose { actions.onChooseModel(ref) } },
+                            Modifier.testTag("chat-model:${option.provider}/${option.model}"),
+                            subtitle = listOfNotNull(option.providerName, option.description).joinToString(" · "),
+                            selected = ref == current,
+                            contentPadding = PaddingValues(end = 10.dp),
+                        )
+                    }
+                }
+            }
+        is Picker.Presets ->
+            if (picker.list.presets.isEmpty()) {
+                PickerMessage(stringResource(R.string.chat_picker_empty), loading = false)
+            } else {
+                ChoiceList(withSubtitles = true) {
+                    picker.list.presets.forEach { preset ->
+                        val known = permissionHint(preset.id)
+                        ChoiceRow(
+                            if (known != null) permissionLabel(preset.id) else preset.name,
+                            { choose { actions.onChoosePreset(preset.id) } },
+                            Modifier.testTag("chat-preset:${preset.id}"),
+                            subtitle = known,
+                            selected = preset.id == state.session?.permissionPreset,
+                            contentPadding = PaddingValues(end = 10.dp),
+                        )
+                    }
+                }
+            }
+    }
+}
+
+/** 选项区里的一句话：正在读取（带转圈标记），或者没有可选的。 */
+@Composable
+private fun PickerMessage(
+    text: String,
+    loading: Boolean,
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("chat-picker-message"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (loading) StatusMarker(StatusMark.RUNNING)
+        Text(text, style = MaterialTheme.typography.bodySmall, color = DesignTheme.colors.textSecondary)
+    }
+}
+
+/** 模型、审批方式：带小箭头的灰字，点了在上方展开选项；展开时文字换成主文字色、字重 500，小箭头朝上。 */
 @Composable
 private fun ComposerChoice(
     label: String,
     description: String,
     enabled: Boolean,
+    open: Boolean,
     onClick: () -> Unit,
     modifier: Modifier,
 ) {
@@ -223,13 +323,13 @@ private fun ComposerChoice(
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary.copy(alpha = if (enabled) 1f else 0.5f),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (open) FontWeight.Medium else FontWeight.Normal),
+            color = (if (open) colors.text else colors.textSecondary).copy(alpha = if (enabled) 1f else 0.5f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
         )
-        Icon(painterResource(R.drawable.ic_dsh_chevron_down), null, Modifier.size(12.dp), tint = colors.textSecondary)
+        ChoiceChevron(open, Modifier.size(12.dp), tint = if (open) colors.text else colors.textSecondary)
     }
 }
 

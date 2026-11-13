@@ -2,7 +2,7 @@
 
 > 给新加入的 agent：读完根目录的 `AGENTS.md` 后读这一份。它记录项目做到了哪里、我们怎么协作，以及开发中踩过的坑。每完成一个阶段或做出重要决定，都要更新这份文件。
 
-最后更新：2026-11-13（新版界面第一批 A1–A6 和第二批的 B1 完成，等用户确认后做 B2；M3 进行中：T1–T5 完成，`v0.1.0-rc.1` 已发布；新增开发优先级建议）
+最后更新：2026-11-13（新版界面第一批 A1–A7 和第二批的 B1 完成，等用户确认后做 B2；M3 进行中：T1–T5 完成，`v0.1.0-rc.1` 已发布；新增开发优先级建议）
 
 ## 1. 进度
 
@@ -21,7 +21,7 @@
 
 创建／导入项目（[`plans/project-create-import.md`](plans/project-create-import.md)）和 Android 视觉改版（[`plans/android-visual-refresh.md`](plans/android-visual-refresh.md)）已实现，自动化检查都通过。还差的人工验证并入 M3：Windows Desktop 上创建／导入的手动流程并入 T7；视觉改版的人工走查和截图并入 T6。M3 的范围仍是自用、私有仓库、中文文档。
 
-**新版界面的选择方式改了（2026-11-13）**：用户在真机上走查后认为选项菜单不协调、位置跳动。设计规格 6.10 从「浮层」改成「在原地展开」，落地方案新增任务 A7（[`plans/ui-redesign.md`](plans/ui-redesign.md)），**代码还没有改**。同一批截图里还有一个没查原因的问题：键盘弹出时，展开的新任务输入框停在屏幕中间，没有贴着键盘。
+**新版界面的选择方式改了（2026-11-13）**：用户在真机上走查后认为选项菜单不协调、位置跳动。设计规格 6.10 从「浮层」改成「在原地展开」，**A7 已完成**（[`plans/ui-redesign.md`](plans/ui-redesign.md) 末尾的结果）：输入框里的选项在卡片里展开、键盘不收起，首页的电脑列表和项目筛选在触发行下方展开。同时修了键盘弹出时新任务输入框停在屏幕中间的问题（原因是窗口被 adjustPan 推了一次、`imePadding` 又算了一次）。
 
 **开发优先级**：M3 之后各项功能的排序见 [`roadmap.md`](roadmap.md) 开头的「开发优先级」。这份排序是 2026-11-12 的建议稿，**用户确认前不按它开工**。
 
@@ -106,6 +106,8 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
 - **DSH 会把没有完整回复的两条用户消息合在一起发给模型**：上一轮被停止或失败、没有完整的模型回复时，下一轮请求里最后一条用户消息包含两次输入的文字。假模型按关键词分派时，`FAIL` 只看用户自己的最后一段文字（`test/contract/fake-llm.mjs`）。另外 DSH 每轮会在用户消息后面追加「Current runtime context…」「Time sampled while preparing turn…」两段注入的文字（会话第一轮两段都有），按「最后一段」取文字时要跳过它们；其他关键词仍按整条消息匹配，在被停止的一轮之后发消息时要注意。
 - **DSH 的轮次**：大多数事件的 `data` 都带 `turn`，只有 `user/message` 不带；按 2 条消息分页时，可能有一页以用户消息开头、里面一个带 `turn` 的事件都没有，插件这时往前多读一小段（`facade.messages`）。LLM 返回 400 时 DSH 归为 `INVALID_REQUEST`，不重试，这一轮以 `error` 结束；默认可重试的是 `RATE_LIMIT`、`SERVER` 等，最多 5 次。
 - **Compose 的可点区域**：比 48dp 小的可点控件，Compose 的触摸命中会自动把可点区域扩到 48dp，所以新组件的布局按样稿的大小（胶囊 32/34），不为点击区域撑高。Material3 的 `minimumInteractiveComponentSize()` 在当前版本的实测中没有把布局撑到 48dp，不要靠它；要验证点击区域，用 `performTouchInput { click(...) }` 在控件外几 dp 处点（`DesignComponentsUiTest`）。
+- **键盘和 insets**：Activity 必须是 `windowSoftInputMode="adjustResize"`。不写时系统可能选 adjustPan，把整个窗口往上推，再加上 Compose 的 `imePadding`，键盘高度就算了两次（输入框停在屏幕中间）。在 `Scaffold` 的内容里用 `imePadding` 时，先 `consumeWindowInsets(padding)`，否则导航条的高度也会再算一次。截图测试拿不到键盘，改了键盘相关的布局要在真机上实际弹出键盘看。键盘弹出时第一次按返回由系统收起键盘，App 的 `BackHandler` 收不到。
+- **选择一律原地展开**（设计规格 6.10）：用 `ui/common/InlineChoices.kt` 里的组件，不要用 `Popup`、`DropdownMenu` 或居中的选择对话框。弹出窗口会抢走输入框的焦点，键盘随之收起。
 - **没有放在 `Surface` 或 `Scaffold` 里的 `Text` 默认是黑字**，深色模式下看不见。新页面都要有 `Scaffold` 或 `Surface` 提供内容颜色。
 - **真机上已有的测试包**：手机上的 `io.github.qianyeeew.dshremote.debug` 是这台开发机的调试密钥签的，可以直接用默认包名跑真机测试（覆盖安装，数据和配对保留）；`.projecttest.test` 是别的电脑签的，用 `.projecttest` 后缀会安装失败。
 - **Compose 聊天列表「停在底部时跟随新消息」**：新的一项插入后，LazyColumn 会把原来的那一项留在原位；消息连续到达时（用户消息和回复几乎同时），不能用那一刻的滚动位置判断「是否在底部」。现在只在用户自己滚动结束后更新「停在底部」，列表变化时据此滚动（`ui/chat/ChatScreen.kt`）。输入框上方的面板用 `weight(1f, fill = false)` 和列表分剩余空间，不要用窗口高度算上限（打开键盘时会把输入框挤扁）。

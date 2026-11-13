@@ -46,15 +46,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.unit.dp
 import androidx.core.content.res.ResourcesCompat
-import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.ui.common.BlockButton
 import io.github.qianyeeew.dshremote.ui.common.DesignDivider
-import io.github.qianyeeew.dshremote.ui.common.DesignPopup
 import io.github.qianyeeew.dshremote.ui.common.DesignSwitch
-import io.github.qianyeeew.dshremote.ui.common.POPUP_TAG
 import io.github.qianyeeew.dshremote.ui.common.PillButton
 import io.github.qianyeeew.dshremote.ui.common.PillPair
 import io.github.qianyeeew.dshremote.ui.common.PillSize
@@ -206,30 +203,6 @@ class DesignComponentsUiTest {
         compose.onNodeWithText("已连接，正在使用").assertIsDisplayed()
         compose.onNodeWithTag("row").assertHeightIsAtLeast(48.dp).performClick()
         assertEquals(1, opened)
-    }
-
-    /** 浮层贴着触发控件出现，返回键收起。 */
-    @Test
-    fun popupShowsAndDismisses() {
-        var shown by mutableStateOf(true)
-        compose.setContent {
-            DshRemoteTheme {
-                Box(Modifier.padding(24.dp)) {
-                    Text("工作电脑")
-                    if (shown) {
-                        DesignPopup(onDismiss = { shown = false }) {
-                            Text("电脑与设置", Modifier.padding(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-        compose.onNodeWithTag(POPUP_TAG).assertIsDisplayed()
-        compose.onNodeWithText("电脑与设置").assertIsDisplayed()
-        Espresso.pressBack()
-        compose.waitForIdle()
-        assertEquals(false, shown)
-        compose.onNodeWithTag(POPUP_TAG).assertDoesNotExist()
     }
 
     /**

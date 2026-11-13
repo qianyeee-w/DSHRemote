@@ -214,6 +214,21 @@ class ChatViewModelTest {
         assertEquals(listOf("read-only"), backend.presetChanges)
     }
 
+    /** 设计规格 6.10：一次只展开一个；点另一个触发项换成它的选项，再点一次同一个收起。 */
+    @Test
+    fun pickerSwitchesBetweenKindsAndClosesOnSecondTap() {
+        val vm = visible()
+        vm.openModels()
+        assertEquals(PickerKind.MODELS, vm.picker.value.kind)
+        vm.openPresets()
+        assertEquals(Picker.Presets(backend.presets), vm.picker.value)
+        vm.openPresets()
+        assertEquals(Picker.Closed, vm.picker.value)
+        vm.openModels()
+        vm.closePicker()
+        assertEquals(Picker.Closed, vm.picker.value)
+    }
+
     @Test
     fun itemKeysAreUniqueEvenIfADraftIdIsReused() {
         val vm = visible()

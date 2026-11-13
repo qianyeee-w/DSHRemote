@@ -1,10 +1,12 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,12 +14,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,11 +47,15 @@ import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.chat.permissionHint
 import io.github.qianyeeew.dshremote.ui.chat.permissionLabel
+import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
+import io.github.qianyeeew.dshremote.ui.common.ChoiceList
+import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
 import io.github.qianyeeew.dshremote.ui.common.DesignDivider
-import io.github.qianyeeew.dshremote.ui.common.DesignPopup
+import io.github.qianyeeew.dshremote.ui.common.InlineChoices
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
+import io.github.qianyeeew.dshremote.ui.common.onTap
 
 /** 新任务输入框上的操作。 */
 class NewTaskActions(
@@ -128,7 +131,23 @@ internal fun NewTaskComposer(
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     var menu by remember { mutableStateOf<Menu?>(null) }
+    // 收起的动画期间还要画最后一次展开的选项
+    var lastMenu by remember { mutableStateOf(Menu.PROJECT) }
+    val toggle = { which: Menu ->
+        menu = if (menu == which || (which == Menu.PROJECT && menu == Menu.CREATE)) null else which
+        menu?.let { lastMenu = it }
+    }
+    // 返回键先收起选项，再按一次才收起输入框（这个后注册，比首页收起输入框的那个先拿到返回键）
+    BackHandler(enabled = menu != null) { menu = null }
     val noProject = stringResource(R.string.new_task_no_project)
+    val models = state.models
+    val model = state.model ?: models?.default
+    val presets = state.presets
+    val preset = state.preset ?: presets?.default
+    val choose = { action: () -> Unit ->
+        menu = null
+        action()
+    }
     Column(
         modifier
             .fillMaxWidth()
@@ -136,61 +155,77 @@ internal fun NewTaskComposer(
             .padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 6.dp)
             .testTag("new-task"),
     ) {
-        Box {
-            Row(
-                Modifier
-                    .heightIn(min = 44.dp)
-                    .clickable(enabled = !state.starting, role = Role.Button) { menu = Menu.PROJECT }
-                    .testTag("new-task-project"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(stringResource(R.string.new_task_project), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                Text(
-                    when (project) {
-                        is ProjectPick.Existing -> project.workspace.title
-                        ProjectPick.None -> noProject
-                    },
-                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                    color = colors.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Icon(painterResource(R.drawable.ic_dsh_chevron_down), null, Modifier.size(12.dp), tint = colors.textSecondary)
-            }
-            if (menu == Menu.PROJECT || menu == Menu.CREATE) {
-                DesignPopup(onDismiss = { menu = null }, modifier = Modifier.width(280.dp)) {
-                    Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(vertical = 6.dp)) {
-                        if (menu == Menu.CREATE) {
-                            PickRow(stringResource(R.string.project_create), testTag = "new-task-create") {
-                                menu = null
-                                onProject(ProjectMode.CREATE)
-                            }
-                            PickRow(stringResource(R.string.project_import), testTag = "new-task-import") {
-                                menu = null
-                                onProject(ProjectMode.IMPORT)
-                            }
-                        } else {
-                            workspaces.forEach { workspace ->
-                                val current = (project as? ProjectPick.Existing)?.workspace?.workspaceId == workspace.workspaceId
-                                PickRow(workspace.title, selected = current, testTag = "new-task-project:${workspace.workspaceId}") {
-                                    menu = null
-                                    actions.onChooseProject(ProjectPick.Existing(workspace))
-                                }
-                            }
-                            PickRow(noProject, selected = project == ProjectPick.None, testTag = "new-task-project:none") {
-                                menu = null
-                                actions.onChooseProject(ProjectPick.None)
-                            }
-                            DesignDivider(Modifier.padding(vertical = 4.dp))
-                            PickRow(stringResource(R.string.new_task_create_or_import), testTag = "new-task-create-or-import") {
-                                menu =
-                                    Menu.CREATE
-                            }
-                        }
+        // 项目：在「项目」那一行的正上方展开，卡片向上长
+        InlineChoices(visible = menu == Menu.PROJECT || menu == Menu.CREATE) {
+            ChoiceList(Modifier.padding(top = 6.dp)) {
+                if ((menu ?: lastMenu) == Menu.CREATE) {
+                    ChoiceRow(
+                        stringResource(R.string.project_create),
+                        { choose { onProject(ProjectMode.CREATE) } },
+                        Modifier.testTag("new-task-create"),
+                        contentPadding = InCard,
+                    )
+                    ChoiceRow(
+                        stringResource(R.string.project_import),
+                        { choose { onProject(ProjectMode.IMPORT) } },
+                        Modifier.testTag("new-task-import"),
+                        contentPadding = InCard,
+                    )
+                } else {
+                    workspaces.forEach { workspace ->
+                        val current = (project as? ProjectPick.Existing)?.workspace?.workspaceId == workspace.workspaceId
+                        ChoiceRow(
+                            workspace.title,
+                            { choose { actions.onChooseProject(ProjectPick.Existing(workspace)) } },
+                            Modifier.testTag("new-task-project:${workspace.workspaceId}"),
+                            selected = current,
+                            contentPadding = InCard,
+                        )
                     }
+                    ChoiceRow(
+                        noProject,
+                        { choose { actions.onChooseProject(ProjectPick.None) } },
+                        Modifier.testTag("new-task-project:none"),
+                        selected = project == ProjectPick.None,
+                        muted = project != ProjectPick.None,
+                        contentPadding = InCard,
+                    )
+                    ChoiceRow(
+                        stringResource(R.string.new_task_create_or_import),
+                        {
+                            menu = Menu.CREATE
+                            lastMenu = Menu.CREATE
+                        },
+                        Modifier.testTag("new-task-create-or-import"),
+                        leadingIcon = R.drawable.ic_add,
+                        contentPadding = InCard,
+                    )
                 }
             }
+            DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
+        }
+        val projectOpen = menu == Menu.PROJECT || menu == Menu.CREATE
+        Row(
+            Modifier
+                .heightIn(min = 44.dp)
+                .clickable(enabled = !state.starting, role = Role.Button) { toggle(Menu.PROJECT) }
+                .testTag("new-task-project"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(stringResource(R.string.new_task_project), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            Text(
+                when (project) {
+                    is ProjectPick.Existing -> project.workspace.title
+                    ProjectPick.None -> noProject
+                },
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                color = colors.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            ChoiceChevron(projectOpen, Modifier.size(12.dp))
         }
         val hint = stringResource(R.string.home_new_task)
         BasicTextField(
@@ -206,6 +241,7 @@ internal fun NewTaskComposer(
                     .fillMaxWidth()
                     .padding(end = 10.dp)
                     .focusRequester(focus)
+                    .onTap { menu = null }
                     .testTag("new-task-input")
                     .semantics { contentDescription = hint },
             decorationBox = { field ->
@@ -230,68 +266,57 @@ internal fun NewTaskComposer(
                 modifier = Modifier.padding(top = 8.dp).testTag("new-task-error"),
             )
         }
+        // 模型和审批方式：在最下面一行的正上方展开
+        InlineChoices(visible = (menu == Menu.MODEL && models != null) || (menu == Menu.PRESET && presets != null)) {
+            DesignDivider(Modifier.padding(end = 10.dp, top = 8.dp, bottom = 4.dp))
+            ChoiceList(withSubtitles = true) {
+                if ((menu ?: lastMenu) == Menu.MODEL) {
+                    models?.models?.forEach { option ->
+                        val ref = ModelRef(option.provider, option.model)
+                        ChoiceRow(
+                            option.name,
+                            { choose { actions.onChooseModel(ref) } },
+                            subtitle = option.providerName,
+                            selected = ref == model,
+                            contentPadding = InCard,
+                        )
+                    }
+                } else {
+                    presets?.presets?.forEach { option ->
+                        val known = permissionHint(option.id)
+                        ChoiceRow(
+                            if (known != null) permissionLabel(option.id) else option.name,
+                            { choose { actions.onChoosePreset(option.id) } },
+                            subtitle = known,
+                            selected = option.id == preset,
+                            contentPadding = InCard,
+                        )
+                    }
+                }
+            }
+            DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
+        }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).padding(start = 0.dp), verticalAlignment = Alignment.CenterVertically) {
-                val models = state.models
-                val model = state.model ?: models?.default
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 val modelName =
                     model?.let { ref ->
                         models?.models?.firstOrNull { it.provider == ref.provider && it.model == ref.model }?.name
                             ?: ref.model
                     }
-                Box(Modifier.weight(1f, fill = false)) {
-                    Choice(
-                        modelName ?: stringResource(R.string.design_choose_model),
-                        enabled = models != null && !state.starting,
-                        tag = "new-task-model",
-                    ) {
-                        menu = Menu.MODEL
-                    }
-                    if (menu == Menu.MODEL && models != null) {
-                        DesignPopup(onDismiss = { menu = null }, alignment = Alignment.BottomStart, modifier = Modifier.width(280.dp)) {
-                            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(vertical = 6.dp)) {
-                                models.models.forEach { option ->
-                                    val ref = ModelRef(option.provider, option.model)
-                                    PickRow(option.name, subtitle = option.providerName, selected = ref == model) {
-                                        menu = null
-                                        actions.onChooseModel(ref)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                val presets = state.presets
-                val preset = state.preset ?: presets?.default
-                Box(Modifier.weight(1f, fill = false)) {
-                    Choice(permissionLabel(preset), enabled = presets != null && !state.starting, tag = "new-task-preset") {
-                        menu =
-                            Menu.PRESET
-                    }
-                    if (menu == Menu.PRESET && presets != null) {
-                        DesignPopup(onDismiss = { menu = null }, alignment = Alignment.BottomStart, modifier = Modifier.width(280.dp)) {
-                            Column(Modifier.padding(vertical = 6.dp)) {
-                                presets.presets.forEach { option ->
-                                    val hint = permissionHint(option.id)
-                                    PickRow(
-                                        if (hint !=
-                                            null
-                                        ) {
-                                            permissionLabel(option.id)
-                                        } else {
-                                            option.name
-                                        },
-                                        subtitle = hint,
-                                        selected = option.id == preset,
-                                    ) {
-                                        menu = null
-                                        actions.onChoosePreset(option.id)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                Choice(
+                    modelName ?: stringResource(R.string.design_choose_model),
+                    enabled = models != null && !state.starting,
+                    open = menu == Menu.MODEL,
+                    tag = "new-task-model",
+                    modifier = Modifier.weight(1f, fill = false),
+                ) { toggle(Menu.MODEL) }
+                Choice(
+                    permissionLabel(preset),
+                    enabled = presets != null && !state.starting,
+                    open = menu == Menu.PRESET,
+                    tag = "new-task-preset",
+                    modifier = Modifier.weight(1f, fill = false),
+                ) { toggle(Menu.PRESET) }
             }
             StartKey(
                 enabled = online && text.isNotBlank() && !state.starting,
@@ -301,18 +326,23 @@ internal fun NewTaskComposer(
     }
 }
 
+/** 卡片左边已经有 16 的内边距，右边只有 6：选项行左边不再加，右边补到和左边对称。 */
+private val InCard = PaddingValues(end = 10.dp)
+
 private enum class Menu { PROJECT, CREATE, MODEL, PRESET }
 
 @Composable
 private fun Choice(
     label: String,
     enabled: Boolean,
+    open: Boolean,
     tag: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val colors = DesignTheme.colors
     Row(
-        Modifier
+        modifier
             .heightIn(min = 48.dp)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 4.dp)
@@ -320,15 +350,16 @@ private fun Choice(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
+        // 展开时文字换成主文字色、字重 500，小箭头朝上（设计规格 6.10）
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary.copy(alpha = if (enabled) 1f else DISABLED),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (open) FontWeight.Medium else FontWeight.Normal),
+            color = (if (open) colors.text else colors.textSecondary).copy(alpha = if (enabled) 1f else DISABLED),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
         )
-        Icon(painterResource(R.drawable.ic_dsh_chevron_down), null, Modifier.size(12.dp), tint = colors.textSecondary)
+        ChoiceChevron(open, Modifier.size(12.dp), tint = if (open) colors.text else colors.textSecondary)
     }
 }
 
@@ -373,45 +404,6 @@ private fun StartKey(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun PickRow(
-    title: String,
-    subtitle: String? = null,
-    selected: Boolean = false,
-    testTag: String? = null,
-    onClick: () -> Unit,
-) {
-    val colors = DesignTheme.colors
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .let { if (testTag != null) it.testTag(testTag) else it },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal),
-                color = colors.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            subtitle?.takeIf { it.isNotBlank() }?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary,
-                )
-            }
-        }
-        if (selected) Icon(painterResource(R.drawable.ic_dsh_check), null, Modifier.size(18.dp), tint = colors.text)
     }
 }
 

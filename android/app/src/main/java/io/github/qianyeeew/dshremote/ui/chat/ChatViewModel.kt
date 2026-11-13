@@ -173,11 +173,14 @@ enum class ChatNotice {
     SETUP_FAILED,
 }
 
-/** 切换模型或权限模式的选择框。 */
+/** 输入框里原地展开的模型或审批方式的选项（设计规格 6.10）。 */
 sealed interface Picker {
     data object Closed : Picker
 
-    data object Loading : Picker
+    /** 正在读取 [kind] 的选项。 */
+    data class Loading(
+        val kind: PickerKind,
+    ) : Picker
 
     data class Models(
         val list: ModelList,
@@ -187,6 +190,18 @@ sealed interface Picker {
         val list: PermissionPresetList,
     ) : Picker
 }
+
+enum class PickerKind { MODELS, PRESETS }
+
+/** 展开的是哪一种选项；收起时为 null。 */
+val Picker.kind: PickerKind?
+    get() =
+        when (this) {
+            Picker.Closed -> null
+            is Picker.Loading -> kind
+            is Picker.Models -> PickerKind.MODELS
+            is Picker.Presets -> PickerKind.PRESETS
+        }
 
 /**
  * 会话详情（m2-android.md 3.4、T9）。界面可见期间（[onVisible] 到 [onHidden]）订阅这个会话的推送，
@@ -225,6 +240,7 @@ class ChatViewModel(
     private val workspaces = MutableStateFlow<List<Workspace>>(emptyList())
     private var subscription: Job? = null
     private var reload: Job? = null
+    private var pickerLoad: Job? = null
 
     private data class Flags(
         val loadingOlder: Boolean = false,
@@ -342,11 +358,13 @@ class ChatViewModel(
         }
     }
 
-    fun openModels() = openPicker { Picker.Models(backend.models()) }
+    /** 点了模型：展开它的选项；已经展开时收起；展开着审批方式时换成模型。 */
+    fun openModels() = openPicker(PickerKind.MODELS) { Picker.Models(backend.models()) }
 
-    fun openPresets() = openPicker { Picker.Presets(backend.permissionPresets()) }
+    fun openPresets() = openPicker(PickerKind.PRESETS) { Picker.Presets(backend.permissionPresets()) }
 
     fun closePicker() {
+        pickerLoad?.cancel()
         _picker.value = Picker.Closed
     }
 
@@ -418,25 +436,33 @@ class ChatViewModel(
         outbox.update { it.reconcile(next) }
     }
 
-    private fun openPicker(load: suspend () -> Picker) {
-        if (_picker.value != Picker.Closed) return
-        _picker.value = Picker.Loading
-        viewModelScope.launch {
-            _picker.value =
-                try {
-                    load()
-                } catch (_: ApiException) {
-                    _notice.value = ChatNotice.CHANGE_FAILED
-                    Picker.Closed
-                } catch (_: OfflineException) {
-                    _notice.value = ChatNotice.OFFLINE
-                    Picker.Closed
-                }
+    private fun openPicker(
+        kind: PickerKind,
+        load: suspend () -> Picker,
+    ) {
+        if (_picker.value.kind == kind) {
+            closePicker()
+            return
         }
+        pickerLoad?.cancel()
+        _picker.value = Picker.Loading(kind)
+        pickerLoad =
+            viewModelScope.launch {
+                _picker.value =
+                    try {
+                        load()
+                    } catch (_: ApiException) {
+                        _notice.value = ChatNotice.CHANGE_FAILED
+                        Picker.Closed
+                    } catch (_: OfflineException) {
+                        _notice.value = ChatNotice.OFFLINE
+                        Picker.Closed
+                    }
+            }
     }
 
     private fun change(action: suspend () -> Unit) {
-        _picker.value = Picker.Closed
+        closePicker()
         viewModelScope.launch {
             try {
                 action()

@@ -3,7 +3,6 @@ package io.github.qianyeeew.dshremote.ui.chat
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -24,8 +24,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -45,18 +43,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -170,8 +164,15 @@ fun ChatContent(
     val confirmingHandler = remember { ConfirmingUriHandler { pendingLink = it } }
 
     Scaffold(topBar = { ChatTopBar(state, actions) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        // 输入区这一栏的实际高度（已经扣掉键盘），面板最多占一半，其余都给消息列表
-        BoxWithConstraints(Modifier.padding(padding).fillMaxSize().imePadding()) {
+        // 输入区这一栏的实际高度（已经扣掉键盘），面板最多占一半，其余都给消息列表。
+        // consumeWindowInsets：Scaffold 的内边距里已经有导航条，不让 imePadding 再算一次（否则输入框和键盘之间空一截）
+        BoxWithConstraints(
+            Modifier
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .fillMaxSize()
+                .imePadding(),
+        ) {
             val panelMax = maxHeight / 2
             Column(Modifier.fillMaxSize()) {
                 if (!state.online) LinkBanner(state)
@@ -189,7 +190,7 @@ fun ChatContent(
                 ChatComposer(
                     state,
                     actions,
-                    pickerOpen = picker != Picker.Closed,
+                    picker = picker,
                     initialText = initialDraft.orEmpty(),
                     attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
                     onAnswer = attentionActions.onAnswerWithCustom,
@@ -199,7 +200,6 @@ fun ChatContent(
     }
 
     pendingLink?.let { link -> LinkDialog(link, onDismiss = { pendingLink = null }) }
-    PickerDialog(picker, state, actions)
 }
 
 /** 顶栏（设计规格 7.2）：返回、会话名，下面一行灰字「电脑名 · 项目名 · 审批方式」。没有「更多」按钮。 */
@@ -414,83 +414,6 @@ private fun LinkDialog(
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
-    )
-}
-
-@Composable
-private fun PickerDialog(
-    picker: Picker,
-    state: ChatState,
-    actions: ChatActions,
-) {
-    if (picker == Picker.Closed) return
-    AlertDialog(
-        onDismissRequest = actions.onClosePicker,
-        title = {
-            Text(stringResource(if (picker is Picker.Presets) R.string.chat_picker_preset else R.string.chat_picker_model))
-        },
-        text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                when (picker) {
-                    Picker.Closed -> Unit
-                    Picker.Loading ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            StatusMarker(StatusMark.RUNNING)
-                            Text(stringResource(R.string.chat_picker_loading))
-                        }
-                    is Picker.Models -> {
-                        if (picker.list.models.isEmpty()) Text(stringResource(R.string.chat_picker_empty))
-                        val current = state.session?.model
-                        picker.list.models.forEach { option ->
-                            val ref = ModelRef(option.provider, option.model)
-                            PickerRow(
-                                title = option.name,
-                                subtitle = listOfNotNull(option.providerName, option.description).joinToString(" · "),
-                                selected = ref == current,
-                            ) { actions.onChooseModel(ref) }
-                        }
-                    }
-                    is Picker.Presets -> {
-                        if (picker.list.presets.isEmpty()) Text(stringResource(R.string.chat_picker_empty))
-                        picker.list.presets.forEach { preset ->
-                            val known = permissionHint(preset.id)
-                            PickerRow(
-                                title = if (known != null) permissionLabel(preset.id) else preset.name,
-                                subtitle = known,
-                                selected = preset.id == state.session?.permissionPreset,
-                            ) {
-                                actions.onChoosePreset(preset.id)
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = actions.onClosePicker) { Text(stringResource(R.string.action_cancel)) } },
-    )
-}
-
-@Composable
-private fun PickerRow(
-    title: String,
-    subtitle: String?,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val haptic = LocalHapticFeedback.current
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = subtitle?.takeIf { it.isNotBlank() }?.let { { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
-        colors =
-            ListItemDefaults.colors(
-                containerColor = if (selected) DesignTheme.colors.fill else Color.Transparent,
-            ),
-        modifier =
-            Modifier.clickable {
-                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
-                onClick()
-            },
     )
 }
 

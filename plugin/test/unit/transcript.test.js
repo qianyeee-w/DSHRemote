@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { convertRecords, convertPage, extractTurns, turnBefore, turnDigest, turnResult, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT, TURN_ERROR_LIMIT, LAST_REPLY_LIMIT } from '../../src/dsh/transcript.js'
+import { convertRecords, convertPage, extractTurns, turnUsage, turnBefore, turnDigest, turnResult, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT, TURN_ERROR_LIMIT, LAST_REPLY_LIMIT } from '../../src/dsh/transcript.js'
 
 /** @param {string} name */
 const fixture = (name) => JSON.parse(readFileSync(new URL(`../fixtures/dsh-0.2.2-rc.1/${name}`, import.meta.url), 'utf8'))
@@ -172,7 +172,29 @@ test('轮次：每条消息带上所属的轮次，录制的 6 轮里最后一�
   assert.equal(turns[5]?.stoppedBy, 'user')
   for (const t of turns) assert.ok(t.startedAt !== undefined && t.endedAt !== undefined && t.endedAt >= t.startedAt)
   // 只输出协议规定的字段
-  for (const t of turns) for (const key of Object.keys(t)) assert.ok(['turn', 'startedAt', 'endedAt', 'result', 'error', 'stoppedBy'].includes(key), key)
+  for (const t of turns) for (const key of Object.keys(t)) assert.ok(['turn', 'startedAt', 'endedAt', 'result', 'error', 'stoppedBy', 'usage'].includes(key), key)
+})
+
+test('本轮用量（落地方案 B4）：按 DSH 的算法从完整的一轮算出，多步的一轮是各次请求的合计；被中途停止的一轮没有', () => {
+  const turns = extractTurns(full.records)
+  // 假模型每次请求报告输入 10，输出 5 / 8 / 20+5
+  assert.deepEqual(turns[0]?.usage, { totalTokens: 15, uncachedInputTokens: 10, outputTokens: 5 })
+  assert.deepEqual(turns[1]?.usage, { totalTokens: 18, uncachedInputTokens: 10, outputTokens: 8 })
+  assert.deepEqual(turns[2]?.usage, { totalTokens: 45, uncachedInputTokens: 20, outputTokens: 25 })
+  // 停止时这一步没有结束，事件不完整：不给小计
+  assert.equal(turns[5]?.usage, undefined)
+  // 只转发协议里的几项（routes、reasoningTokens 等不转发）
+  for (const t of turns) for (const key of Object.keys(t.usage ?? {})) {
+    assert.ok(['totalTokens', 'uncachedInputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'].includes(key), key)
+  }
+})
+
+test('本轮用量：缺了开头的一轮、格式对不上的事件，都不给用量，也不会抛出', () => {
+  const start = full.records.findIndex((r) => r.event.type === 'step/start')
+  const tail = extractTurns(full.records.slice(start + 1))
+  assert.equal(tail[0]?.usage, undefined)
+  assert.equal(turnUsage([{ type: 'turn/start' }, { type: 'turn/end' }]), undefined)
+  assert.equal(turnUsage([{ type: 'turn/start', data: { turn: 1 } }, { type: 'step/start', data: { turn: 1, step: 1 } }, { type: 'turn/end', data: { turn: 1 } }]), undefined)
 })
 
 test('轮次：分页切在任何位置，各页的轮次合起来和整段一致；一页开头的消息由第一个轮次事件推断所属的轮次', () => {
@@ -183,7 +205,15 @@ test('轮次：分页切在任何位置，各页的轮次合起来和整段一�
     /** @type {Map<number, any>} */
     const merged = new Map()
     for (const t of [...older.turns, ...newer.turns]) merged.set(t.turn, { ...merged.get(t.turn), ...t })
-    assert.deepEqual([...merged.values()].sort((a, b) => a.turn - b.turn), expected, `cut=${cut}`)
+    const withoutUsage = (/** @type {any[]} */ list) => list.map(({ usage: _, ...rest }) => rest)
+    assert.deepEqual(withoutUsage([...merged.values()].sort((a, b) => a.turn - b.turn)), withoutUsage(expected), `cut=${cut}`)
+    // 用量只在某一页包含整轮时给出，而且和整段算出的一样；一轮被切开时不给不完整的小计
+    for (const t of [...older.turns, ...newer.turns]) {
+      if (t.usage !== undefined) assert.deepEqual(t.usage, expected.find((e) => e.turn === t.turn)?.usage, `cut=${cut} turn=${t.turn}`)
+    }
+    for (const page of [older, newer]) {
+      for (const t of page.turns) if (t.startedAt === undefined || t.endedAt === undefined) assert.equal(t.usage, undefined, `cut=${cut} turn=${t.turn}`)
+    }
   }
 })
 

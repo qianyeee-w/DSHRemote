@@ -141,6 +141,22 @@ test('Facade：DSH 的错误映射成外观层错误，原始错误信息不外�
   await assert.rejects(facade.permissionPresets(ACTOR), DshUnavailableError)
 })
 
+test('Facade：用量只读 session/projections；投影暂时不可用时两项为 null，会话不存在时 404', async () => {
+  const ok = fakeConnection({
+    'session/projections': { ok: true, value: { kind: 'sequenced', asOfSeq: 3, values: { tokenUsage: { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 }, contextPressure: { projectedTokens: 9, contextWindow: 100 } } } },
+  })
+  assert.deepEqual(await new Facade(ok.connection).usage(ACTOR, 'session-a'), {
+    context: { tokens: 9, window: 100 },
+    total: { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 },
+  })
+  assert.deepEqual(ok.calls.map((c) => [c.endpoint, c.args, c.actor]), [['session/projections', { request: { sessionId: 'session-a' } }, ACTOR]])
+  const unavailable = fakeConnection({ 'session/projections': { ok: false, error: { code: 'session/projections-unavailable', message: '' } } })
+  assert.deepEqual(await new Facade(unavailable.connection).usage(ACTOR, 'session-a'), { context: null, total: null })
+  const missing = fakeConnection({ 'session/projections': { ok: false, error: { code: 'session/not-found', message: '/home/me/secret' } } })
+  await rejectsWith(new Facade(missing.connection).usage(ACTOR, 'session-x'), 404, 'NOT_FOUND')
+  await rejectsWith(new Facade(missing.connection).usage(ACTOR, '../x'), 404, 'NOT_FOUND')
+})
+
 test('Facade：工作区流出错时，断线视为 DSH 不可用，其他错误视为 DSH 错误', async () => {
   const lost = new Facade(fakeConnection({}, { streamError: { code: 'carrier-lost', message: '' } }).connection)
   await assert.rejects(lost.workspaces(ACTOR), DshUnavailableError)

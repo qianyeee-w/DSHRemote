@@ -310,6 +310,42 @@ async function main() {
       if (digest.lastTurn?.result !== 'stopped') throw new Error(`摘要的最近一轮不对：${short(digest)}`)
       return `turns=${turns.map((t) => t.result).join(',')}`
     })
+    await step('外观层：本轮用量（protocol.md 5.4，落地方案 B4）——正常结束的轮次按 DSH 的算法得出用量，被停止的一轮没有', async () => {
+      const turns = (await facade.messages(ACTOR, sid, { limit: 200 })).turns
+      const completed = turns.filter((t) => t.result === 'completed')
+      if (completed.length === 0) throw new Error('没有正常结束的轮次')
+      // 假模型每次请求报告输入 10、输出 > 0，不报告缓存
+      for (const t of completed) {
+        const u = t.usage
+        if (!u) throw new Error(`第 ${t.turn} 轮没有用量：${short(t)}`)
+        if (u.uncachedInputTokens < 10 || u.uncachedInputTokens % 10 !== 0 || u.outputTokens <= 0 || u.totalTokens !== u.uncachedInputTokens + u.outputTokens) {
+          throw new Error(`第 ${t.turn} 轮的用量不对：${short(u)}`)
+        }
+        if (u.cacheReadTokens !== undefined || u.cacheWriteTokens !== undefined) throw new Error(`假模型没有报告缓存，不能给出缓存：${short(u)}`)
+      }
+      const stopped = turns.at(-1)
+      if (stopped?.usage !== undefined) throw new Error(`被停止的一轮不应当有用量：${short(stopped)}`)
+      return completed.map((t) => `${t.turn}:${t.usage?.totalTokens}`).join(',')
+    })
+    await step('外观层：用量与上下文（GET /v1/sessions/{id}/usage）来自 session/projections', async () => {
+      const usage = await facade.usage(ACTOR, sid)
+      const total = usage.total
+      if (!total) throw new Error(`没有累计用量：${short(usage)}`)
+      const turns = (await facade.messages(ACTOR, sid, { limit: 200 })).turns
+      const summed = turns.reduce((n, t) => n + (t.usage?.uncachedInputTokens ?? 0), 0)
+      // 累计用量包括被停止那一轮已经结算的请求，至少不少于各轮之和
+      if (total.uncachedInputTokens < summed) throw new Error(`累计输入 ${total.uncachedInputTokens} 少于各轮之和 ${summed}`)
+      if (total.cacheReadTokens !== 0 || total.cacheWriteTokens !== 0) throw new Error(`假模型没有缓存：${short(total)}`)
+      const context = usage.context
+      if (!context || typeof context.tokens !== 'number' || context.tokens <= 0 || typeof context.window !== 'number' || context.window <= context.tokens) {
+        throw new Error(`上下文不对：${short(context)}`)
+      }
+      // 新会话还没有任何请求：上下文占用拿不到，累计为 0（DSH 的真实值），不能编出数字
+      const fresh = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      const empty = await facade.usage(ACTOR, fresh)
+      if (empty.context?.tokens !== undefined) throw new Error(`新会话不应当有上下文占用：${short(empty)}`)
+      return `${short(usage, 160)}；新会话 ${short(empty, 120)}`
+    })
     await step('外观层：假模型返回错误（FAIL），这一轮的结果是 failed，带上错误说明', async () => {
       await prompt(conn, sid, '请 FAIL 一次')
       try {

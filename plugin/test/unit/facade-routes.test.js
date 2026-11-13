@@ -41,7 +41,7 @@ beforeEach(async () => {
   }
   const facade = /** @type {import('../../src/server/routes.js').FacadeApi} */ (/** @type {unknown} */ ({
     directories: op('directories'), createDirectory: op('createDirectory'), registerWorkspace: op('registerWorkspace'),
-    workspaces: op('workspaces'), sessions: op('sessions'), models: op('models'), permissionPresets: op('permissionPresets'), messages: op('messages'),
+    workspaces: op('workspaces'), sessions: op('sessions'), models: op('models'), permissionPresets: op('permissionPresets'), messages: op('messages'), usage: op('usage'),
     createSession: op('createSession'), prompt: op('prompt'), cancel: op('cancel'), selectModel: op('selectModel'),
     setPermissionPreset: op('setPermissionPreset'), answerAttention: op('answerAttention'),
   }))
@@ -86,6 +86,7 @@ const READ_ROUTES = [
   ['/v1/models', 'models'],
   ['/v1/permission-presets', 'permissionPresets'],
   ['/v1/sessions/session-abc/messages', 'messages'],
+  ['/v1/sessions/session-abc/usage', 'usage'],
 ]
 
 test('只读接口：调用对应的外观层操作，并带上调用方的 deviceId', async () => {

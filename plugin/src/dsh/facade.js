@@ -5,6 +5,7 @@
  * 路由（src/server/routes.js）只调用这里，不知道 DSH 的接口名、参数名和数据格式（ADR 0007）。
  * DSH 的数据格式见 docs/research/dsh-session-api.md，测试数据是从真实 DSH 录制的（test/fixtures/）。
  */
+import { convertUsage } from './usage.js'
 import { DshUnavailableError } from './connection.js'
 import { convertPage, turnBefore, turnDigest } from './transcript.js'
 import { canonicalDirectory, createDirectory, DirectoryError, listDirectories } from '../directories.js'
@@ -348,6 +349,17 @@ export class Facade {
   /** 是否已经读过这个会话的日志末尾。 @param {string} sessionId */
   hasDigest(sessionId) {
     return this.#digests.has(sessionId)
+  }
+
+  /**
+   * 用量与上下文（protocol.md 第 4 节「用量」）。DSH 说投影暂时不可用时两项都为 null。
+   * @param {string} actor @param {string} sessionId
+   */
+  async usage(actor, sessionId) {
+    assertSessionId(sessionId)
+    const result = await this.#dsh.call('session/projections', { request: { sessionId } }, { actor })
+    if (!result.ok && result.error.code === 'session/projections-unavailable') return convertUsage(null)
+    return convertUsage(unwrap(result))
   }
 
   /** @param {string} actor */

@@ -269,6 +269,12 @@ async function main() {
       if (!hello.sessions.some((/** @type {any} */ x) => x.sessionId === sid)) throw new Error('hello 中没有原来的会话')
       const page = (await api('GET', `/v1/sessions/${sid}/messages`)).json()
       if (!JSON.stringify(page.messages).includes(STREAM_REPLY)) throw new Error('重启后读不到历史')
+      // 用量（落地方案 B4）：经 HTTPS 和设备认证读到，结构和协议一致
+      const usage = (await api('GET', `/v1/sessions/${sid}/usage`)).json()
+      if (!usage.total || typeof usage.total.outputTokens !== 'number' || !usage.context || typeof usage.context.window !== 'number') {
+        throw new Error(`用量不对：${JSON.stringify(usage)}`)
+      }
+      if (!page.turns.some((/** @type {any} */ t) => t.result === 'completed' && typeof t.usage?.totalTokens === 'number')) throw new Error('历史里正常结束的轮次没有用量')
       if (!(await api('GET', '/v1/workspaces')).json().workspaces.some((/** @type {any} */ w) => w.workspaceId === projectId)) throw new Error('重启后工作区丢失')
       return `DSH 端口 ${oldPort} → ${web.launch.port}`
     })
@@ -281,6 +287,7 @@ async function main() {
       if (closed.code !== 4401) throw new Error(`关闭码应为 4401：${closed.code}`)
       if ((await api('GET', '/v1/me')).status !== 401) throw new Error('/v1/me 应当 401')
       if ((await api('GET', '/v1/sessions')).status !== 401) throw new Error('/v1/sessions 应当 401')
+      if ((await api('GET', `/v1/sessions/${sid}/usage`)).status !== 401) throw new Error('撤销后不应能读用量')
       if ((await api('GET', '/v1/directories')).status !== 401) throw new Error('撤销后不应能浏览目录')
       if ((await api('POST', '/v1/directories', { path: projectParent, name: 'revoked' })).status !== 401) throw new Error('撤销后不应能创建目录')
       if ((await api('POST', '/v1/workspaces', { path: projectParent })).status !== 401) throw new Error('撤销后不应能登记工作区')

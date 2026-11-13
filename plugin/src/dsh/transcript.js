@@ -13,6 +13,8 @@
  * - 工具的输入和输出可能很大，按上限截断并标记 truncated。
  */
 
+import { deriveTurnTokenUsage } from '../vendor/dsh-turn-usage.mjs'
+
 /** 工具输入中单个字符串字段的上限（字符） */
 export const TOOL_INPUT_STRING_LIMIT = 2_000
 /** 工具输出的上限（字符） */
@@ -60,6 +62,17 @@ export const LAST_REPLY_LIMIT = 120
  * @property {'completed' | 'stopped' | 'failed' | 'interrupted' | 'other'} [result]
  * @property {string} [error]
  * @property {'user' | 'other'} [stoppedBy]
+ * @property {TurnUsage} [usage] 只在这一轮结束、而且读到了它从开始到结束的全部事件时才有（落地方案 B4）
+ */
+
+/**
+ * 一轮的用量（protocol.md 5.4）。缓存两项只在每次请求都报告了时才有。
+ * @typedef {object} TurnUsage
+ * @property {number} totalTokens
+ * @property {number} uncachedInputTokens
+ * @property {number} outputTokens
+ * @property {number} [cacheReadTokens]
+ * @property {number} [cacheWriteTokens]
  */
 
 /**
@@ -356,21 +369,51 @@ export function turnResult(reason) {
 export function extractTurns(records) {
   /** @type {Map<number, Turn>} */
   const turns = new Map()
+  /** 从 turn/start 起收集的事件，到 turn/end 时算这一轮的用量 @type {{ turn: number, events: unknown[] } | undefined} */
+  let open
   for (const record of records) {
-    if (!isObject(record) || record.type !== 'event' || !isObject(record.event) || !isObject(record.event.data)) continue
+    if (!isObject(record) || record.type !== 'event' || !isObject(record.event)) continue
+    if (open) open.events.push(record.event)
+    if (!isObject(record.event.data)) continue
     const { type, data } = record.event
     if ((type !== 'turn/start' && type !== 'turn/end') || !isTurnNumber(data.turn)) continue
     const time = typeof record.event.time === 'number' ? record.event.time : undefined
     const turn = turns.get(data.turn) ?? { turn: data.turn }
     if (type === 'turn/start') {
       if (time !== undefined) turn.startedAt = time
+      open = { turn: data.turn, events: [record.event] }
     } else {
       if (time !== undefined) turn.endedAt = time
       Object.assign(turn, turnResult(data.reason))
+      const usage = open?.turn === data.turn ? turnUsage(open.events) : undefined
+      if (usage) turn.usage = usage
+      open = undefined
     }
     turns.set(data.turn, turn)
   }
   return [...turns.values()].sort((a, b) => a.turn - b.turn)
+}
+
+/**
+ * 一轮的用量：用 DSH 官方界面的算法（src/vendor/dsh-turn-usage.mjs）。事件不完整、数字对不上时没有，
+ * 不给不完整的小计（protocol.md 5.4）。只转发协议里的几项。
+ * @param {readonly unknown[]} events 这一轮从 turn/start 到 turn/end 的事件
+ * @returns {TurnUsage | undefined}
+ */
+export function turnUsage(events) {
+  let usage
+  try {
+    usage = deriveTurnTokenUsage(events)
+  } catch {
+    // 事件格式和这个版本的算法对不上（DSH 升级后可能出现）：这一轮不给用量
+    return undefined
+  }
+  if (!usage) return undefined
+  /** @type {TurnUsage} */
+  const result = { totalTokens: usage.totalTokens, uncachedInputTokens: usage.uncachedInputTokens, outputTokens: usage.outputTokens }
+  if (usage.cacheReadTokens !== undefined) result.cacheReadTokens = usage.cacheReadTokens
+  if (usage.cacheWriteTokens !== undefined) result.cacheWriteTokens = usage.cacheWriteTokens
+  return result
 }
 
 /**

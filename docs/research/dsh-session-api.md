@@ -224,6 +224,17 @@ PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.m
 
 基线依据：[session-stats 文档](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/session/session-stats/README.md)、[上下文投影定义](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/llm/token-meter/src/projection.ts)、[上下文界面](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/client/ui-conversation/src/client/skeleton/ContextMeter.tsx)。
 
+### 9.3a 用量与上下文的运行时实测（2026-11-14，落地方案 B4）
+
+在真实的 `dsh web` 0.2.2-rc.1 加假模型上实测（契约测试 `npm run contract` 中的两项，以及 `devServerTest`）：
+
+- `session/projections { request: { sessionId } }` 返回 `{ kind: 'sequenced', asOfSeq, values }`。新会话：`tokenUsage` 四项都是 0，`contextPressure` 是空对象（还没有请求，拿不到占用）。跑完一轮后：`tokenUsage` 为 `{ uncachedInputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 }`，`contextPressure` 为 `{ pressureTokens: 10, projectedTokens: 21, contextWindow: 1048576 }`。投影暂时不可用时错误码是 `session/projections-unavailable`。
+- `session/observeProjections` 的帧是 `{ type: 'ready' }` 和 `{ type: 'projection', seq, changes: [{ key, val }] }`；一轮里 `contextPressure`、`contextBreakdown` 会变化很多次。插件没有用它，App 在打开会话、一轮结束和长按发送键时读一次 `session/projections` 就够了。
+- `session/list` 的摘要投影里有 `tokenUsage`，没有 `contextPressure`、`contextBreakdown`、`sessionStats`，和 9.1 的结论一致。
+- 历史分页（`session/page`）里的 `assistant/message` 带 `usage: { inputTokens, outputTokens, totalTokens }` 和 `stream`，`deriveTurnTokenUsage` 能从中算出完整轮次的用量：一步的轮次 15，两步的工具轮次 45（两次请求的合计）；被用户停止、这一步没有结束的轮次算不出来（返回 undefined）。插件把这个函数照抄到了 `plugin/src/vendor/dsh-turn-usage.mjs`（MIT）。
+- 假模型不报告缓存，所以**真实模型的非零缓存命中仍未在运行时验证**；口径照 9.2 和官方界面的源码。
+- 另外看到的投影：`goal`、`todos`、`plan`（`{ active, pending }`）、`turnOutline`、`imageLimits`。和落地方案 B5（计划）、C2（图片附件）有关，到时候再实测。
+
 ### 9.4 新对话分支：公开接口已存在，难点是边界与恢复
 
 - `session/fork` 接受 `{ request: { sessionId, atSeq?, allowMigration? } }`，返回新 `sessionId`。`atSeq` 是包含该条事件的精确整数序号；省略时取最近已完成轮次的前缀。应以当前源码为准，不使用早期设计笔记中「向后寻找 turn/end」的旧语义。

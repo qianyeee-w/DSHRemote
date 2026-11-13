@@ -95,6 +95,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | GET | `/v1/sessions` | 需要 | 会话列表：`{ sessions: [...] }`，每项的结构见 5.1。已归档的会话不出现（和 Desktop 一致） |
 | POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
 | GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor, turns }`，消息结构见 5.2，轮次见 5.4。见下方「历史分页」 |
+| GET | `/v1/sessions/{id}/usage` | 需要 | 用量与上下文：`{ context, total }`，见下方「用量」 |
 | POST | `/v1/sessions/{id}/prompt` | 需要 | 发消息 `{ requestId, text, mode?: "queue" \| "steer" }`，返回 `{ accepted: true }`。见下方「发消息」 |
 | POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务，不需要请求体，返回 `{ accepted: true }`。会话空闲时也返回成功 |
 | GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description? }] }` |
@@ -123,6 +124,21 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - `cursor`：不透明的字符串，App 不要解析它。`hasMore` 为 `true` 时，把它作为下一次请求的 `before`，取更早的一页；`hasMore` 为 `false` 时为 `null`。
 - 不带 `before` 时返回最新的一页。同一个会话的各页按顺序拼起来，就是完整的历史，不会重复，也不会把一次工具调用拆到两页里。
 - `turns`：这一页里出现的轮次（结构见 5.4），按轮次编号排序。一轮可能跨两页：开始在更早的一页时，这一页里它没有 `startedAt`；App 把各页拿到的同一轮合并。旧插件没有这个字段。
+
+**用量**（落地方案 B4，协议 v1 的兼容扩展）
+
+```json
+{
+  "context": { "tokens": 59210, "window": 131072 },
+  "total": { "uncachedInputTokens": 41000, "outputTokens": 12000, "cacheReadTokens": 138000, "cacheWriteTokens": 3000 }
+}
+```
+
+- `context`：下一次请求大约要带多少 token（`tokens`），和当前模型的上下文上限（`window`）。**是估算值**，App 显示时标「约」。取自 DSH 的 `contextPressure.projectedTokens` 和 `contextWindow`；拿不到的字段省略，两项都拿不到时 `context` 为 `null`。切换模型后，上限和占用可能暂时来自不同的请求。
+- `total`：整个会话累计的用量，取自 DSH 的 `tokenUsage`。四项互不重叠：`uncachedInputTokens` 是没走缓存的输入，`cacheReadTokens`、`cacheWriteTokens` 是缓存读写，`outputTokens` 是输出（含思考）。会话的输入合计是前三项之和；缓存命中率是 `cacheReadTokens ÷ (uncachedInputTokens + cacheReadTokens + cacheWriteTokens)`，分母为零时不显示。拿不到时为 `null`。
+- 插件只提取上面这几项，不转发 DSH 的其他统计。拿不到的值一律省略或为 `null`，**不用 0 代替**。
+- App 在打开会话、一轮结束（`turn.updated` 带 `endedAt`）和用户要看用量时读取，不轮询。
+- 旧插件返回 `404`，App 不显示用量。
 
 **发消息**
 
@@ -236,10 +252,12 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 用户发一条消息，DSH 处理它直到停下来，是一轮。插件从 DSH 的 `turn/start`、`turn/end` 得出：
 
 ```json
-{ "turn": 3, "startedAt": 1794107669094, "endedAt": 1794107959094, "result": "completed", "error": "…", "stoppedBy": "user" }
+{ "turn": 3, "startedAt": 1794107669094, "endedAt": 1794107959094, "result": "completed", "error": "…", "stoppedBy": "user",
+  "usage": { "totalTokens": 61234, "uncachedInputTokens": 9800, "outputTokens": 1200, "cacheReadTokens": 49800, "cacheWriteTokens": 434 } }
 ```
 
 - 还在运行的轮次没有 `endedAt` 和 `result`。
+- `usage`：这一轮所有模型请求（包括重试）的用量合计，按 DSH 官方界面的算法（`deriveTurnTokenUsage`）从这一轮的事件算出。`totalTokens` 是输入加输出的准确合计；`cacheReadTokens`、`cacheWriteTokens` 只在每次请求都报告了时才有。**只在这一轮已经结束、而且插件读到了它从开始到结束的全部事件时才有**；一轮跨两页、事件不完整或数字对不上时省略，不给不完整的小计。旧插件没有这个字段。
 - `result`：
   - `completed`：正常结束（包括输出达到上限后结束）。**不表示需求已经完成**，App 写「本轮结束」。
   - `stopped`：被停止。`stoppedBy` 为 `user` 表示用户点了停止，`other` 是其他原因（例如父任务取消）。

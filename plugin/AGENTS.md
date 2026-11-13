@@ -84,7 +84,8 @@ plugin/
 │       ├── facade.js     # 外观层：protocol.md 的操作 → DSH 接口调用 → protocol.md 的数据结构；DSH 错误 → FacadeError；发消息去重
 │       ├── live.js       # 实时状态：会话摘要的变化、任务完成（8 秒）、待处理事项广播；会话消息的增量推送和流式草稿
 │       ├── attention.js  # 待处理事项（审批、提问）：跟踪 waterfall / cancel、重连后重新同步、回答与 409 判断
-│       └── transcript.js # DSH 会话日志 → 消息结构（protocol.md 5.2），以及分页切点的修正
+│       ├── usage.js      # 用量与上下文（落地方案 B4）：只从 session/projections 提取 tokenUsage、contextPressure 的几项
+│       └── transcript.js # DSH 会话日志 → 消息结构（protocol.md 5.2），以及分页切点的修正；轮次和本轮用量（用 src/vendor/dsh-turn-usage.mjs）
 ├── scripts/
 │   ├── verify.mjs        # 真机验证脚本（M1 T10），复用 test/helpers/pinned-client.js
 │   ├── dev-server.mjs    # 给 App 开发用的服务器（M2 T1）：复用 dsh-runtime.mjs 和 fake-llm.mjs，不改插件代码

@@ -22,7 +22,7 @@ npm run e2e          # 端到端测试：插件装进真实 dsh web，模拟手�
                      # → 提问和审批（含在 Desktop 上处理）→ DSH 重启后恢复 → 撤销设备。环境变量同 load-check
 npm run browser-check     # 用系统安装的 Chrome（BROWSER_CHANNEL=msedge 用 Edge）点一遍配对页上的按钮
                      # 单元测试用 Node 客户端手动设置 Origin，测不出浏览器的行为；改配对页时必须跑
-npm run dev-server   # 给 App 开发用的服务器：真实 dsh web + 本插件 + 假模型（关键词驱动：ASK / SHELL / STREAM / THINK / SLOW / MARKDOWN / FAIL）
+npm run dev-server   # 给 App 开发用的服务器：真实 dsh web + 本插件 + 假模型（关键词驱动：ASK / SHELL / STREAM / THINK / SLOW / MARKDOWN / FAIL / TODO / GOAL）
                      # 默认局域网端口 3290、配对页 3291，--port / --admin-port / --bind / --home 可改；数据目录默认 ~/.cache/dshremote-dev，
                      # 重启后指纹和已配对设备保留。子命令：pair（打印配对二维码）、devices、revoke、restart（重启 DSH）、stop、status，
                      # 加 --json 输出机器可读结果。前台运行时可按 p / d / r / q。用法见 scripts/dev-server.mjs 开头
@@ -85,6 +85,7 @@ plugin/
 │       ├── live.js       # 实时状态：会话摘要的变化、任务完成（8 秒）、待处理事项广播；会话消息的增量推送和流式草稿
 │       ├── attention.js  # 待处理事项（审批、提问）：跟踪 waterfall / cancel、重连后重新同步、回答与 409 判断
 │       ├── usage.js      # 用量与上下文（落地方案 B4）：只从 session/projections 提取 tokenUsage、contextPressure 的几项
+│       ├── plan.js       # 计划（落地方案 B5）：只从 session/projections 提取 goal、todos 的几项
 │       └── transcript.js # DSH 会话日志 → 消息结构（protocol.md 5.2），以及分页切点的修正；轮次和本轮用量（用 src/vendor/dsh-turn-usage.mjs）
 ├── scripts/
 │   ├── verify.mjs        # 真机验证脚本（M1 T10），复用 test/helpers/pinned-client.js

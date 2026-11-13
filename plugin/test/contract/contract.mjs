@@ -19,7 +19,7 @@ import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { Facade, FacadeError } from '../../src/dsh/facade.js'
 import { AttentionTracker } from '../../src/dsh/attention.js'
 import { startDshWeb, DSH_VERSION, log } from '../helpers/dsh-runtime.mjs'
-import { FAIL_MESSAGE, startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE } from './fake-llm.mjs'
+import { FAIL_MESSAGE, startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE, TODO_ITEMS, GOAL_OBJECTIVE } from './fake-llm.mjs'
 
 /** 测试里模拟的设备身份：适配层要求每次调用都说明替谁发起 */
 const ACTOR = 'd_contracttest'
@@ -345,6 +345,29 @@ async function main() {
       const empty = await facade.usage(ACTOR, fresh)
       if (empty.context?.tokens !== undefined) throw new Error(`新会话不应当有上下文占用：${short(empty)}`)
       return `${short(usage, 160)}；新会话 ${short(empty, 120)}`
+    })
+    await step('外观层：计划（protocol.md「计划」，落地方案 B5）——模型写的任务清单和目标；新一轮开始时任务清单被清空', async () => {
+      const planned = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      const empty = await facade.plan(ACTOR, planned)
+      if (empty.goal !== null || empty.steps !== null) throw new Error(`新会话不应当有计划：${short(empty)}`)
+      await prompt(conn, planned, '请 TODO 一下')
+      const withSteps = await untilAsync(async () => {
+        const plan = await facade.plan(ACTOR, planned)
+        return plan.steps?.length === TODO_ITEMS.length ? plan : undefined
+      }, '任务清单出现')
+      const expected = TODO_ITEMS.map((t) => ({ text: t.content, status: t.status }))
+      if (JSON.stringify(withSteps.steps) !== JSON.stringify(expected)) throw new Error(`任务清单不对：${short(withSteps)}`)
+      await untilAsync(async () => (await facade.messages(ACTOR, planned, { limit: 50 })).turns.at(-1)?.result !== undefined, '这一轮结束')
+      // 轮数上限 1：DSH 自动续跑一轮后，目标受阻，原因是 round-limit
+      await prompt(conn, planned, '请 GOAL 一下')
+      const blocked = await untilAsync(async () => {
+        const plan = await facade.plan(ACTOR, planned)
+        return plan.goal?.status === 'blocked' ? plan : undefined
+      }, '目标受阻', 60_000)
+      if (blocked.goal?.objective !== GOAL_OBJECTIVE) throw new Error(`目标描述不对：${short(blocked.goal)}`)
+      if (blocked.goal?.blocked?.code !== 'round-limit') throw new Error(`受阻原因不对：${short(blocked.goal)}`)
+      if (blocked.steps !== null) throw new Error(`新一轮开始后任务清单应当被清空：${short(blocked.steps)}`)
+      return short(blocked, 200)
     })
     await step('外观层：假模型返回错误（FAIL），这一轮的结果是 failed，带上错误说明', async () => {
       await prompt(conn, sid, '请 FAIL 一次')

@@ -19,7 +19,7 @@ import { CERT_FILE } from '../../src/tls/identity.js'
 import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { startDshWeb, DSH_VERSION, log, freePort } from '../helpers/dsh-runtime.mjs'
 import { pinnedRequest, pinnedWebSocket, collectMessages } from '../helpers/pinned-client.js'
-import { FAIL_MESSAGE, startFakeLlm, STREAM_REPLY, TOOL_DONE_REPLY } from '../contract/fake-llm.mjs'
+import { FAIL_MESSAGE, startFakeLlm, STREAM_REPLY, TOOL_DONE_REPLY, TODO_ITEMS } from '../contract/fake-llm.mjs'
 
 // 用临时找到的空闲端口：开发机上 3190 / 3191 可能已被占用（例如用户自己的 dsh web 服务）
 const LAN_PORT = await freePort()
@@ -221,6 +221,17 @@ async function main() {
       return `error=${failed.turn.error}；idle.result=${idle.result}`
     })
 
+    await step('计划（落地方案 B5）：模型写了任务清单，已订阅的手机收到 plan.updated；GET /plan 读到同样的内容', async () => {
+      await api('POST', `/v1/sessions/${sid}/prompt`, { requestId: randomUUID(), text: '请 TODO 一下' })
+      const updated = await s.inbox.waitFor((m) => m.type === 'plan.updated' && m.sessionId === sid && Array.isArray(m.plan.steps) && m.plan.steps.length > 0, 30_000)
+      const expected = TODO_ITEMS.map((t) => ({ text: t.content, status: t.status }))
+      if (JSON.stringify(updated.plan.steps) !== JSON.stringify(expected)) throw new Error(`推送的任务清单不对：${JSON.stringify(updated.plan)}`)
+      const plan = (await api('GET', `/v1/sessions/${sid}/plan`)).json()
+      if (JSON.stringify(plan) !== JSON.stringify(updated.plan)) throw new Error(`GET /plan 和推送的不一致：${JSON.stringify(plan)}`)
+      await s.inbox.waitFor((m) => m.type === 'session.idle' && m.sessionId === sid, 30_000)
+      return JSON.stringify(plan).slice(0, 160)
+    })
+
     await step('提问：手机收到 attention.requested，回答后收到 attention.resolved（this-device）', async () => {
       await api('POST', `/v1/sessions/${sid}/prompt`, { requestId: randomUUID(), text: '请 ASK 我一个问题' })
       const requested = await s.inbox.waitFor((m) => m.type === 'attention.requested' && m.attention.kind === 'question')
@@ -288,6 +299,7 @@ async function main() {
       if ((await api('GET', '/v1/me')).status !== 401) throw new Error('/v1/me 应当 401')
       if ((await api('GET', '/v1/sessions')).status !== 401) throw new Error('/v1/sessions 应当 401')
       if ((await api('GET', `/v1/sessions/${sid}/usage`)).status !== 401) throw new Error('撤销后不应能读用量')
+      if ((await api('GET', `/v1/sessions/${sid}/plan`)).status !== 401) throw new Error('撤销后不应能读计划')
       if ((await api('GET', '/v1/directories')).status !== 401) throw new Error('撤销后不应能浏览目录')
       if ((await api('POST', '/v1/directories', { path: projectParent, name: 'revoked' })).status !== 401) throw new Error('撤销后不应能创建目录')
       if ((await api('POST', '/v1/workspaces', { path: projectParent })).status !== 401) throw new Error('撤销后不应能登记工作区')

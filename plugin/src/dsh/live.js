@@ -9,6 +9,7 @@
  * - `session/follow` 先给出 snapshot，之后是会话日志的事件，以及 `assistant-stream` 帧
  *   （模型正在输出、还没写入日志的内容）。一次输出写入日志后（assistant/message），对应的 stream 才结束。
  */
+import { convertPlan } from './plan.js'
 import { randomUUID } from 'node:crypto'
 import { PLUGIN_ACTOR } from './connection.js'
 import { convertRecords, extractTurns, toolSummary, parseToolInput } from './transcript.js'
@@ -30,6 +31,8 @@ const FEED_RETRY_MIN_MS = 500
 const FEED_RETRY_MAX_MS = 10_000
 /** 增量转换时保留的会话日志条数上限（从本轮开始算） */
 const FEED_BUFFER_LIMIT = 3_000
+/** 目标、任务清单变了以后多久读一次计划（毫秒） */
+const PLAN_DEBOUNCE_MS = 150
 
 /** @param {unknown} value @returns {value is Record<string, any>} */
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -46,7 +49,8 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 /**
  * @typedef {{ type: 'message.upsert', eventId: string, sessionId: string, rev: number, message: import('./transcript.js').Message & { draft?: true }, replaces?: string }
  *   | { type: 'message.removed', eventId: string, sessionId: string, messageId: string }
- *   | { type: 'turn.updated', eventId: string, sessionId: string, turn: import('./transcript.js').Turn }} MessageEvent
+ *   | { type: 'turn.updated', eventId: string, sessionId: string, turn: import('./transcript.js').Turn }
+ *   | { type: 'plan.updated', eventId: string, sessionId: string, plan: import('./plan.js').Plan }} MessageEvent
  */
 
 // ---------------------------------------------------------------- 流式输出的草稿
@@ -168,12 +172,17 @@ export class SessionFeed {
   #retryMs = FEED_RETRY_MIN_MS
   /** @type {NodeJS.Timeout | undefined} */
   #retryTimer
+  /** 上次推送（或订阅时读到）的计划（JSON），没变就不推送 @type {string | undefined} */
+  #planJson
+  /** @type {NodeJS.Timeout | undefined} */
+  #planTimer
+  #planDebounceMs
 
   /**
    * @param {import('./connection.js').DshConnection} dsh
    * @param {string} sessionId
    * @param {(event: MessageEvent) => void} emit
-   * @param {{ now?: () => number, draftThrottleMs?: number }} [options]
+   * @param {{ now?: () => number, draftThrottleMs?: number, planDebounceMs?: number }} [options]
    */
   constructor(dsh, sessionId, emit, options = {}) {
     this.#dsh = dsh
@@ -181,6 +190,7 @@ export class SessionFeed {
     this.#emit = emit
     this.#now = options.now ?? Date.now
     this.#throttleMs = options.draftThrottleMs ?? DRAFT_THROTTLE_MS
+    this.#planDebounceMs = options.planDebounceMs ?? PLAN_DEBOUNCE_MS
     void this.#open()
   }
 
@@ -234,6 +244,8 @@ export class SessionFeed {
     }
     this.#buffer = records.slice(start)
     this.#convert({ silent: !this.#seeded })
+    // 订阅时 App 自己读计划；断线重连后计划可能变了，重新读一次，变了才推送
+    this.#schedulePlan({ silent: !this.#seeded })
     this.#seeded = true
     // 正在输出的回复
     const active = isObject(frame.assistantStream) && isObject(frame.assistantStream.activeAttempt) ? frame.assistantStream.activeAttempt : undefined
@@ -253,6 +265,35 @@ export class SessionFeed {
     // 只有可能影响消息的事件才需要重新转换
     const type = isObject(record.event) ? record.event.type : undefined
     if (['user/message', 'assistant/message', 'tool/result', 'approval/decided', 'turn/start', 'turn/end'].includes(String(type))) this.#convert({ silent: false })
+    // 目标、任务清单变了；新一轮开始时 DSH 会清空任务清单（protocol.md「计划」）
+    if (['todo/write', 'goal/change', 'turn/start'].includes(String(type))) this.#schedulePlan({ silent: false })
+  }
+
+  /**
+   * 稍等一下再读计划：同一时刻的几条事件只读一次。silent：只记录，不推送。
+   * @param {{ silent: boolean }} options
+   */
+  #schedulePlan(options) {
+    if (this.#closed) return
+    let silent = options.silent
+    if (this.#planTimer) { clearTimeout(this.#planTimer); silent = false }
+    this.#planTimer = setTimeout(() => { this.#planTimer = undefined; void this.#refreshPlan(silent) }, this.#planDebounceMs)
+  }
+
+  /** @param {boolean} silent */
+  async #refreshPlan(silent) {
+    let result
+    try {
+      result = await this.#dsh.call('session/projections', { request: { sessionId: this.#sessionId } }, { actor: PLUGIN_ACTOR })
+    } catch {
+      return // 连不上 DSH：等下一次事件或重连
+    }
+    if (this.#closed || !result.ok) return
+    const plan = convertPlan(result.value)
+    const json = JSON.stringify(plan)
+    if (json === this.#planJson) return
+    this.#planJson = json
+    if (!silent) this.#emit({ type: 'plan.updated', eventId: randomUUID(), sessionId: this.#sessionId, plan })
   }
 
   /** @param {{ silent: boolean }} options silent：只记录，不推送 */
@@ -376,6 +417,7 @@ export class SessionFeed {
   close() {
     this.#closed = true
     clearTimeout(this.#retryTimer)
+    clearTimeout(this.#planTimer)
     for (const timer of this.#draftTimers.values()) clearTimeout(timer)
     this.#draftTimers.clear()
     this.#stream?.cancel()

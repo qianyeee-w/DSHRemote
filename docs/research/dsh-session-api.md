@@ -235,6 +235,16 @@ PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.m
 - 假模型不报告缓存，所以**真实模型的非零缓存命中仍未在运行时验证**；口径照 9.2 和官方界面的源码。
 - 另外看到的投影：`goal`、`todos`、`plan`（`{ active, pending }`）、`turnOutline`、`imageLimits`。和落地方案 B5（计划）、C2（图片附件）有关，到时候再实测。
 
+### 9.3b 计划：目标和任务清单（2026-11-14，落地方案 B5）
+
+源码（`dsh-tool-todo`、`dsh-goal`、`dsh-tool-goal`、`dsh-plan-mode`，0.2.2-rc.1）和真实 `dsh web` 加假模型的实测（契约测试里的「计划」一项、e2e、`devServerTest`）：
+
+- **`todos` 投影**：模型用 `todo_write` 工具整表写入的任务清单，每项 `{ content, status: 'pending' | 'in_progress' | 'completed' }`，没有 id。事件是 `todo/write`。**投影在每个 `turn/start` 时被清空为 `null`**（`dsh-tool-todo` 的 fold：`if (event.type === "turn/start") return null`），所以它只是当前这一轮的清单。不在 `session/list` 的摘要里。
+- **`goal` 投影**：长期目标，`{ goal: { id, revision, objective, phase: 'active' | 'paused' | 'blocked' | 'complete', blockedReason?: { code, message }, maxGoalRounds }, roundsStarted, createdAt, updatedAt }`，没有目标时为 `null`。事件是 `goal/change`。模型用 `create_goal`、`update_goal` 维护，用户可以用 `/goal`。有目标时 DSH 会自动续跑（goal round driver），达到轮数上限后目标变成 `blocked`，`blockedReason.code` 为 `round-limit`（实测：`max_goal_rounds: 1` 时自动续跑一轮后受阻）。在 `session/list` 的摘要里。
+- **`plan` 投影**只有 `{ active, pending }`，表示「计划模式」开没开，不含计划内容，和设计里的计划不是一回事。
+- 没有和设计稿「最近进展」对应的数据；能从 `todo/write` 事件的时间推出步骤级别的变化，用户确认这次不做。
+- 两个工具都在 `dsh web` 的默认配置（`dsh-base/cordis.patch.yml`、`dsh-web-app/presets/standard.patch.yml`）里。
+
 ### 9.4 新对话分支：公开接口已存在，难点是边界与恢复
 
 - `session/fork` 接受 `{ request: { sessionId, atSeq?, allowMigration? } }`，返回新 `sessionId`。`atSeq` 是包含该条事件的精确整数序号；省略时取最近已完成轮次的前缀。应以当前源码为准，不使用早期设计笔记中「向后寻找 turn/end」的旧语义。

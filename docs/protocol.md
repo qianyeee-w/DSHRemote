@@ -96,6 +96,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | POST | `/v1/sessions` | 需要 | 新建会话 `{ workspaceId? }`，返回 `{ sessionId }` |
 | GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor, turns }`，消息结构见 5.2，轮次见 5.4。见下方「历史分页」 |
 | GET | `/v1/sessions/{id}/usage` | 需要 | 用量与上下文：`{ context, total }`，见下方「用量」 |
+| GET | `/v1/sessions/{id}/plan` | 需要 | 计划：`{ goal, steps }`，见下方「计划」 |
 | POST | `/v1/sessions/{id}/prompt` | 需要 | 发消息 `{ requestId, text, mode?: "queue" \| "steer" }`，返回 `{ accepted: true }`。见下方「发消息」 |
 | POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务，不需要请求体，返回 `{ accepted: true }`。会话空闲时也返回成功 |
 | GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description? }] }` |
@@ -139,6 +140,27 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - 插件只提取上面这几项，不转发 DSH 的其他统计。拿不到的值一律省略或为 `null`，**不用 0 代替**。
 - App 在打开会话、一轮结束（`turn.updated` 带 `endedAt`）和用户要看用量时读取，不轮询。
 - 旧插件返回 `404`，App 不显示用量。
+
+**计划**（落地方案 B5，协议 v1 的兼容扩展）
+
+```json
+{
+  "goal": { "objective": "确认断线重连以后还能接着看当前会话", "status": "blocked", "blocked": { "code": "round-limit", "message": "Goal reached its configured limit of 1 rounds." } },
+  "steps": [
+    { "text": "读连接状态的代码", "status": "completed" },
+    { "text": "跑单元测试", "status": "in_progress" },
+    { "text": "汇报结论", "status": "pending" }
+  ]
+}
+```
+
+- `goal`：会话的长期目标（DSH 的 `goal`，模型用 `create_goal` 创建，用户也可以在 Desktop 上用 `/goal`）。没有目标时为 `null`。
+  - `objective`：目标的描述，最多 2,000 个字符。
+  - `status`：`active` 进行中、`paused` 暂停、`blocked` 受阻、`complete` 完成；DSH 以后新增的状态为 `other`。
+  - `blocked`：只在受阻时有。`code` 是 DSH 的分类（例如 `round-limit` 达到了设定的轮数上限），App 认识的显示中文；`message` 是 DSH 给出的说明（多半是英文，最多 300 个字符），App 不认识 `code` 时显示它。
+- `steps`：模型当前这一轮的任务清单（DSH 的 `todos`，模型用 `todo_write` 整表替换）。**DSH 在每一轮开始时清空它**，所以新一轮开始、模型还没写之前为 `null`。`text` 最多 500 个字符，最多 100 项；`status` 是 `pending` 待做、`in_progress` 进行中、`completed` 已完成。
+- 插件只提取上面这几项，不转发 DSH 的其他字段（目标的 id、修订号、轮数等）。拿不到时为 `null`。
+- 旧插件返回 `404`，App 不显示计划。
 
 **发消息**
 
@@ -304,6 +326,7 @@ App 只维持**一条** WebSocket 连接，前台服务和界面共用。
 | `message.upsert` | `{ sessionId, rev, message, replaces? }`（`message` 结构见 5.2） | **只对已订阅的会话发送**：新增或更新一条消息。见 6.4 |
 | `message.removed` | `{ sessionId, messageId }` | **只对已订阅的会话发送**：删除一条消息（目前只用于被放弃的草稿） |
 | `turn.updated` | `{ sessionId, turn }`（`turn` 结构见 5.4） | **只对已订阅的会话发送**：一轮开始或结束。同一轮的后一次推送整条替换前一次 |
+| `plan.updated` | `{ sessionId, plan }`（`plan` 结构同 `/v1/sessions/{id}/plan`） | **只对已订阅的会话发送**：目标或任务清单变了（包括新一轮开始时清单被清空）。整条替换。订阅时 App 先读一次 `/v1/sessions/{id}/plan` |
 | `error` | `{ code, message }` | 出错，`code` 同第 7 节 |
 
 ### 6.2 App → 插件

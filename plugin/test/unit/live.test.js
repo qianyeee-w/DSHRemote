@@ -49,7 +49,7 @@ function fakeApp(history) {
     apply(event) {
       events.push(event)
       if (event.type === 'message.removed') { messages.delete(event.messageId); return }
-      if (event.type === 'turn.updated') return
+      if (event.type === 'turn.updated' || event.type === 'plan.updated') return
       const last = revs.get(event.message.id) ?? 0
       assert.ok(event.rev > last, `rev 必须递增：${event.message.id}`)
       revs.set(event.message.id, event.rev)
@@ -359,3 +359,50 @@ test('插件启动后只补算最近更新的 20 个会话（用户确认），�
   assert.equal(deps.digestReads.length, 20)
   hub.close()
 })
+
+test('计划（落地方案 B5）：看到 todo/write、goal/change、turn/start 时重新读投影，变了才推送 plan.updated；订阅时不推送', async () => {
+  const fake = fakeFollow()
+  /** @type {unknown} */
+  let values = { todos: null, goal: null }
+  let reads = 0
+  Object.assign(fake.dsh, {
+    call: async (/** @type {string} */ endpoint, /** @type {any} */ args) => {
+      assert.equal(endpoint, 'session/projections')
+      assert.deepEqual(args, { request: { sessionId: 's' } })
+      reads++
+      return { ok: true, value: { kind: 'sequenced', asOfSeq: 1, values } }
+    },
+  })
+  /** @type {import('../../src/dsh/live.js').MessageEvent[]} */
+  const events = []
+  const feed = new SessionFeed(fake.dsh, 's', (e) => events.push(e), { planDebounceMs: 5 })
+  await tick()
+  fake.push({ type: 'snapshot', records: [] })
+  await wait(30)
+  assert.equal(reads, 1)
+  assert.equal(events.filter((e) => e.type === 'plan.updated').length, 0, '订阅时 App 自己读，不推送')
+
+  const event = (/** @type {string} */ type, /** @type {number} */ seq) => ({ type: 'event', event: { type, seq, time: seq, data: { turn: 1 } } })
+  values = { todos: [{ content: '跑测试', status: 'in_progress' }], goal: null }
+  fake.push(event('todo/write', 10))
+  // 同一时刻的几条只读一次
+  fake.push(event('todo/write', 11))
+  await wait(30)
+  assert.equal(reads, 2)
+  assert.deepEqual(events.filter((e) => e.type === 'plan.updated').map((e) => /** @type {any} */ (e).plan), [
+    { goal: null, steps: [{ text: '跑测试', status: 'in_progress' }] },
+  ])
+  // 没变：不推送
+  fake.push(event('goal/change', 12))
+  await wait(30)
+  assert.equal(events.filter((e) => e.type === 'plan.updated').length, 1)
+  // 新一轮开始，DSH 清空了任务清单
+  values = { todos: null, goal: null }
+  fake.push(event('turn/start', 13))
+  await wait(30)
+  const last = /** @type {any} */ (events.filter((e) => e.type === 'plan.updated').at(-1))
+  assert.deepEqual(last.plan, { goal: null, steps: null })
+  assert.equal(last.sessionId, 's')
+  feed.close()
+})
+

@@ -157,6 +157,16 @@ test('Facade：用量只读 session/projections；投影暂时不可用时两项
   await rejectsWith(new Facade(missing.connection).usage(ACTOR, '../x'), 404, 'NOT_FOUND')
 })
 
+test('Facade：计划只读 session/projections；投影暂时不可用时两项为 null', async () => {
+  const ok = fakeConnection({
+    'session/projections': { ok: true, value: { kind: 'sequenced', asOfSeq: 3, values: { todos: [{ content: '跑测试', status: 'in_progress' }], goal: null } } },
+  })
+  assert.deepEqual(await new Facade(ok.connection).plan(ACTOR, 'session-a'), { goal: null, steps: [{ text: '跑测试', status: 'in_progress' }] })
+  const unavailable = fakeConnection({ 'session/projections': { ok: false, error: { code: 'session/projections-unavailable', message: '' } } })
+  assert.deepEqual(await new Facade(unavailable.connection).plan(ACTOR, 'session-a'), { goal: null, steps: null })
+  await rejectsWith(new Facade(unavailable.connection).plan(ACTOR, '../x'), 404, 'NOT_FOUND')
+})
+
 test('Facade：工作区流出错时，断线视为 DSH 不可用，其他错误视为 DSH 错误', async () => {
   const lost = new Facade(fakeConnection({}, { streamError: { code: 'carrier-lost', message: '' } }).connection)
   await assert.rejects(lost.workspaces(ACTOR), DshUnavailableError)

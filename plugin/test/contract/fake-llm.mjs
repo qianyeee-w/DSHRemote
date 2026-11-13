@@ -11,6 +11,8 @@
  *   "STREAM"→ 用约 1 秒分块输出一段文本（STREAM_REPLY），用来观察流式输出
  *   "MARKDOWN" → 分块慢慢输出一段包含标题、列表、引用、长代码块、宽表格和链接的 Markdown（MARKDOWN_REPLY），
  *               用来在手机上检查 Markdown 渲染和流式输出时是否闪烁
+ *   "TODO"  → 调用 todo_write，写一份三步的任务清单（TODO_ITEMS，落地方案 B5）
+ *   "GOAL"  → 调用 create_goal，创建目标（GOAL_OBJECTIVE），轮数上限 1
  *   其他     → 直接回复一段文本（包含 FAKE_REPLY）
  * 收到 tool_result 后回复一段文本结束本轮。
  */
@@ -19,6 +21,15 @@ import http from 'node:http'
 export const FAKE_REPLY = '你好，这是假模型的回复。'
 export const STREAM_REPLY = '这是一段分块慢慢输出的回复，用来验证手机上能实时看到模型正在输出的内容。'
 export const TOOL_DONE_REPLY = '已完成，结果收到了。'
+/** TODO 关键词时模型写的任务清单 */
+export const TODO_ITEMS = [
+  { content: '读连接状态的代码', status: 'completed' },
+  { content: '跑单元测试', status: 'in_progress' },
+  { content: '汇报结论', status: 'pending' },
+]
+/** GOAL 关键词时模型创建的目标 */
+export const GOAL_OBJECTIVE = '确认断线重连以后还能接着看当前会话'
+
 export const MARKDOWN_REPLY = `# Markdown 测试
 
 这一段有 **粗体**、*斜体*、\`行内代码\` 和一个链接：[示例网站](https://example.com/dshremote)。
@@ -168,6 +179,12 @@ export async function startFakeLlm() {
         // 不可重试的错误（DSH 归为 INVALID_REQUEST）：这一轮以 error 结束（protocol.md 5.4 的 failed）
         res.writeHead(400, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: FAIL_MESSAGE } }))
+      } else if (lastText.includes('TODO')) {
+        // 落地方案 B5：模型写任务清单（DSH 的 todos 投影）
+        void toolReply(res, 'todo_write', { todos: TODO_ITEMS })
+      } else if (lastText.includes('GOAL')) {
+        // 落地方案 B5：模型创建一个长期目标（DSH 的 goal 投影）。轮数上限 1，DSH 不会一直自动续跑
+        void toolReply(res, 'create_goal', { objective: GOAL_OBJECTIVE, max_goal_rounds: 1 })
       } else if (text.includes('ASK')) {
         void toolReply(res, 'ask_user_question', { questions: [{ id: 'q1', question: '用哪种方案？', header: '选择', options: [{ label: '方案A' }, { label: '方案B' }], multi_select: false }] })
       } else if (text.includes('SHELL')) {

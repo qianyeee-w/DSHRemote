@@ -62,7 +62,7 @@ export function sendError(res, status, code, message, headers = {}) {
 
 /**
  * 路由用到的外观层操作。第一个参数都是调用方的 deviceId。
- * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages' | 'usage'
+ * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages' | 'usage' | 'plan'
  *   | 'directories' | 'createDirectory' | 'registerWorkspace'
  *   | 'createSession' | 'prompt' | 'cancel' | 'selectModel' | 'setPermissionPreset' | 'answerAttention'>} FacadeApi
  */
@@ -281,6 +281,14 @@ export const ROUTES = Object.freeze([
       }
       const limit = limitText === null ? undefined : Number(limitText)
       sendJson(res, 200, await ctx.facade.messages(deviceIdOf(auth), auth.params.id ?? '', { before, limit }))
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/sessions/{id}/plan',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      sendJson(res, 200, await ctx.facade.plan(deviceIdOf(auth), auth.params.id ?? ''))
     },
   },
   {

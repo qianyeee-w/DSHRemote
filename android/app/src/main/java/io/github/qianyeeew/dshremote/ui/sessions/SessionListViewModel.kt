@@ -16,18 +16,24 @@ import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.live.LiveEvent
 import io.github.qianyeeew.dshremote.data.live.OfflineException
+import io.github.qianyeeew.dshremote.data.seen.Reconnect
+import io.github.qianyeeew.dshremote.data.seen.SeenRecord
+import io.github.qianyeeew.dshremote.data.seen.isUnread
+import io.github.qianyeeew.dshremote.data.seen.offlineResults
 import io.github.qianyeeew.dshremote.ui.attention.AttentionHandler
 import io.github.qianyeeew.dshremote.ui.attention.AttentionResponder
 import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
 import io.github.qianyeeew.dshremote.ui.chat.pendingAttention
 import io.github.qianyeeew.dshremote.ui.hosts.statusOf
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** 会话列表页的内容。 */
@@ -48,6 +54,14 @@ data class SessionListState(
     val attentionUi: Map<String, AttentionUi> = emptyMap(),
     /** 这台电脑的 id（App 本地的），菜单里标出当前电脑用。 */
     val hostId: String = "",
+    /** 断线一段时间后重新连上，离线期间有新结果时的提示（设计规格 7.1）。 */
+    val reconnect: ReconnectLine? = null,
+)
+
+/** 「刚重新连上。离线的 [offlineMillis] 里有 [results] 条新结果。」 */
+data class ReconnectLine(
+    val offlineMillis: Long,
+    val results: Int,
 )
 
 /** 新建会话和开始新任务用到的接口（ViewModel 测试中替换成假的实现）。都是 protocol.md 里已有的接口，不在线时抛出 [OfflineException]。 */
@@ -130,6 +144,11 @@ class SessionListViewModel(
     /** 新任务上一次用的项目（[NO_PROJECT] 是不指定）。 */
     lastProject: Flow<String?> = flowOf(null),
     saveLastProject: suspend (String) -> Unit = {},
+    /** 这台电脑上哪些结果看过（[io.github.qianyeeew.dshremote.data.seen.ReadTracker.records]）。 */
+    seen: Flow<SeenRecord?> = flowOf(null),
+    /** 这台电脑的重连提示（[io.github.qianyeeew.dshremote.data.seen.ReadTracker.reconnects]）。 */
+    reconnect: Flow<Reconnect?> = flowOf(null),
+    private val onDismissReconnect: () -> Unit = {},
 ) : ViewModel() {
     val projects = ProjectFlow(viewModelScope, projectBackend)
 
@@ -143,6 +162,16 @@ class SessionListViewModel(
         viewModelScope.launch { saveProjectFilter(filter) }
     }
 
+    /** 「N 条未读」：只看未读，再点一次看全部。只在这次打开期间有效，不记住。 */
+    private val unreadOnly = MutableStateFlow(false)
+
+    fun toggleUnreadOnly() {
+        unreadOnly.update { !it }
+    }
+
+    /** 用户滑动了列表：重连提示消失。 */
+    fun dismissReconnect() = onDismissReconnect()
+
     /** 首页底部原地展开的新任务（设计规格 7.6）。 */
     val newTask = NewTaskFlow(viewModelScope, creator, saveLastProject)
 
@@ -153,10 +182,17 @@ class SessionListViewModel(
 
     /** null 表示还在读取，或者主机已经不存在。 */
     val state: StateFlow<SessionListState?> =
-        combine(hosts, states, catalog.state, projectFilter, attention.ui) { list, live, workspaces, filter, attentionUi ->
+        combine(
+            hosts,
+            states,
+            combine(catalog.state, projectFilter, attention.ui, ::Triple),
+            combine(seen, reconnect, unreadOnly, ::Triple),
+        ) { list, live, (workspaces, filter, attentionUi), (record, offline, onlyUnread) ->
             val host = list.firstOrNull { it.hostId == hostId } ?: return@combine null
             val hostState = live[hostId]
             val sessions = hostState?.sessions?.values.orEmpty()
+            val unread = sessions.filter { record.isUnread(it) }.mapTo(HashSet()) { it.sessionId }
+            val clockOffset = hostState?.clockOffsetMillis ?: 0
             // 在这台手机上已经处理完的事项马上从卡片里去掉，不等插件推送
             val done = { a: Attention -> attentionUi[a.attentionId]?.resolution != null }
             val others = otherAttention(hostState).filterNot(done)
@@ -173,12 +209,18 @@ class SessionListViewModel(
                         workspaces.workspaces,
                         filter,
                         online = hostState?.status is LinkStatus.Online,
+                        unread = unread,
+                        unreadOnly = onlyUnread,
                     ) { session ->
                         pendingAttention(hostState, session, session.sessionId).firstOrNull { !done(it) }
                     },
                 workspaces = workspaces.workspaces,
                 attentionUi = attentionUi,
                 hostId = hostId,
+                reconnect =
+                    offline?.let { r ->
+                        offlineResults(sessions, record, r, clockOffset).takeIf { it > 0 }?.let { ReconnectLine(r.offlineMillis, it) }
+                    },
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
 

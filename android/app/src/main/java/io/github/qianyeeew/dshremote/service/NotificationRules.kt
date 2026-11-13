@@ -50,6 +50,8 @@ sealed interface NotificationAction {
  * - 用户正在看这个事项所在的会话时不通知（卡片就在眼前），打开会话时撤回它的通知。
  *
  * 「运行结束」：收到 `session.idle` 时通知（插件已经做了 8 秒防抖），用户正在看这个会话时不通知；打开这个会话时撤回。
+ * **离线期间结束的结果不补发**（落地方案 B2）：它们只出现在重连后 `hello` 的会话摘要里（`lastTurn`），
+ * 不会有 `session.idle` 事件，所以只在首页显示为未读、给一条重连提示，不逐条发通知。
  */
 class NotificationRules {
     private val seen = RecentIds(SEEN_CAPACITY)

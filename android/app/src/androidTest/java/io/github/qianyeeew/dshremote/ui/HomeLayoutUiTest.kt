@@ -7,13 +7,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -24,6 +28,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Approval
@@ -53,6 +59,7 @@ import io.github.qianyeeew.dshremote.ui.sessions.NewTaskActions
 import io.github.qianyeeew.dshremote.ui.sessions.NewTaskState
 import io.github.qianyeeew.dshremote.ui.sessions.ProjectMode
 import io.github.qianyeeew.dshremote.ui.sessions.ProjectPick
+import io.github.qianyeeew.dshremote.ui.sessions.ReconnectLine
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListContent
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListNavigation
 import io.github.qianyeeew.dshremote.ui.sessions.SessionListState
@@ -295,6 +302,44 @@ class HomeLayoutUiTest {
         compose.runOnIdle { assertEquals(listOf("m2"), chosen) }
     }
 
+    /**
+     * 落地方案 B2：没看过的结果标题加粗、标为「未读」，失败的排在最前；「N 条未读」点了只看未读。
+     */
+    @Test fun unreadResultsAreMarkedAndCanBeShownAlone() {
+        var toggled = 0
+        render(unread = setOf("tools"), onToggleUnread = { toggled++ })
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("home-unread"))
+        compose.onNodeWithTag("home-unread").assertTextContains(context.getString(R.string.home_unread_count, 1)).performClick()
+        compose.runOnIdle { assertEquals(1, toggled) }
+        compose
+            .onNode(
+                hasAnyAncestor(hasTestTag("recent:tools")) and
+                    SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, text(R.string.recent_unread)),
+            ).assertExists()
+        compose
+            .onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, text(R.string.recent_unread)))
+            .assertCountEquals(1)
+        save("unread")
+    }
+
+    @Test fun unreadOnlyShowsJustTheUnreadSessions() {
+        render(unread = setOf("tools"), unreadOnly = true)
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
+        compose.onNodeWithTag("recent:recent").assertDoesNotExist()
+        compose.onNodeWithTag("home-unread").assertIsOn()
+    }
+
+    /** 重连提示在卡片下面；用户滑动列表后消失（设计规格 7.1）。 */
+    @Test fun reconnectNoticeShowsAndScrollingDismissesIt() {
+        var dismissed = 0
+        render(reconnect = ReconnectLine(offlineMillis = 2 * 3_600_000L, results = 2), onDismissReconnect = { dismissed++ })
+        compose.onNodeWithTag("home-reconnect").assertTextContains(context.getString(R.string.home_reconnected, "2 小时", 2))
+        save("reconnect")
+        compose.runOnIdle { assertEquals(0, dismissed) }
+        compose.onNodeWithTag("home-list").performTouchInput { swipeUp() }
+        compose.runOnIdle { assertEquals(1, dismissed) }
+    }
+
     /** 有问题的电脑在菜单里带短状态，点了不切换，进它的详情页；最后一行「电脑与设置」（设计规格 7.7）。 */
     @Test fun hostMenuSendsProblemComputersToTheirPage() {
         var switched = ""
@@ -404,6 +449,11 @@ class HomeLayoutUiTest {
                 HostRow("second", "笔记本", null, LinkStatus.Stopped),
                 HostRow("third", "实验室服务器", null, LinkStatus.FingerprintMismatch),
             ),
+        unread: Set<String> = emptySet(),
+        unreadOnly: Boolean = false,
+        reconnect: ReconnectLine? = null,
+        onToggleUnread: () -> Unit = {},
+        onDismissReconnect: () -> Unit = {},
     ) {
         val attention = mapOf("waiting" to shell, "asking" to ask)
         val state =
@@ -411,9 +461,13 @@ class HomeLayoutUiTest {
                 hostName = "开发电脑",
                 status = if (offline) LinkStatus.Stopped else online,
                 sessions = sessions,
-                sections = homeSections(sessions, emptyList(), workspaces, filter, online = !offline) { attention[it.sessionId] },
+                sections =
+                    homeSections(sessions, emptyList(), workspaces, filter, online = !offline, unread = unread, unreadOnly = unreadOnly) {
+                        attention[it.sessionId]
+                    },
                 workspaces = workspaces,
                 hostId = "first",
+                reconnect = reconnect,
             )
         compose.setContent {
             back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
@@ -440,6 +494,8 @@ class HomeLayoutUiTest {
                         ),
                     attentionActions = actions,
                     onFilter = onFilter,
+                    onToggleUnread = onToggleUnread,
+                    onDismissReconnect = onDismissReconnect,
                 )
             }
         }

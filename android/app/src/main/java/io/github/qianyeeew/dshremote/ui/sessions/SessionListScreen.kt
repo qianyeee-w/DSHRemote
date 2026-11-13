@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,14 +39,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,6 +92,7 @@ import io.github.qianyeeew.dshremote.ui.hosts.needsAttention
 import io.github.qianyeeew.dshremote.ui.hosts.offersRepair
 import io.github.qianyeeew.dshremote.ui.hosts.offersRetry
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
+import kotlinx.coroutines.flow.first
 
 /** 页面上的导航操作。 */
 class SessionListNavigation(
@@ -155,6 +161,8 @@ fun SessionListScreen(
         onProject = viewModel.projects::open,
         attentionActions = AttentionCardActions.of(viewModel.attention),
         onFilter = viewModel::chooseProjectFilter,
+        onToggleUnread = viewModel::toggleUnreadOnly,
+        onDismissReconnect = viewModel::dismissReconnect,
         attentionNotice = attentionNotice,
         onDismissAttentionNotice = viewModel.attention::dismissNotice,
     )
@@ -185,6 +193,8 @@ fun SessionListContent(
     onProject: (ProjectMode) -> Unit = {},
     attentionActions: AttentionCardActions = AttentionCardActions(),
     onFilter: (String?) -> Unit = {},
+    onToggleUnread: () -> Unit = {},
+    onDismissReconnect: () -> Unit = {},
     attentionNotice: Resolution? = null,
     onDismissAttentionNotice: () -> Unit = {},
 ) {
@@ -206,6 +216,14 @@ fun SessionListContent(
     val listState = rememberLazyListState()
     // 电脑列表在列表最上面：列表滑下去了也要让它看得见
     LaunchedEffect(panel) { if (panel == HomePanel.HOSTS) listState.animateScrollToItem(0) }
+    // 重连提示：用户滑动列表后消失（进入会话后由 ReadTracker 去掉）
+    val reconnecting = state.reconnect != null
+    LaunchedEffect(reconnecting, listState) {
+        if (reconnecting) {
+            snapshotFlow { listState.isScrollInProgress }.first { it }
+            onDismissReconnect()
+        }
+    }
     val uncover = { panel = null }
     val online = state.status is LinkStatus.Online
     val colors = DesignTheme.colors
@@ -279,10 +297,13 @@ fun SessionListContent(
                     }
                 }
             }
+            state.reconnect?.let { line ->
+                item(key = "reconnect") { Covered(covered, uncover) { ReconnectNotice(line) } }
+            }
             if (sections.recent.isNotEmpty() || sections.projects.isNotEmpty()) {
                 item(key = "recent-heading") {
                     Covered(panel == HomePanel.HOSTS, uncover) {
-                        RecentHeading(sections, open = panel == HomePanel.FILTER) {
+                        RecentHeading(sections, open = panel == HomePanel.FILTER, onToggleUnread = onToggleUnread) {
                             panel = if (panel == HomePanel.FILTER) null else HomePanel.FILTER
                         }
                     }
@@ -298,6 +319,7 @@ fun SessionListContent(
                         RecentRow(
                             session,
                             project = if (sections.filter == null) projectNameOf(session, workspaces) else null,
+                            unread = session.sessionId in sections.unread,
                             online = online,
                             now = now,
                             modifier = Modifier.alpha(if (online) 1f else STALE_ALPHA),
@@ -745,17 +767,16 @@ private fun TitleLine(
 private fun RecentHeading(
     sections: HomeSections,
     open: Boolean,
+    onToggleUnread: () -> Unit,
     onToggle: () -> Unit,
 ) {
     val colors = DesignTheme.colors
     val current = sections.projects.firstOrNull { it.key == sections.filter }?.name ?: stringResource(R.string.home_all_projects)
     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            stringResource(R.string.design_recent),
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
-            modifier = Modifier.weight(1f),
-        )
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.design_recent), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            if (sections.unreadCount > 0) UnreadToggle(sections.unreadCount, sections.unreadOnly, onToggleUnread)
+        }
         if (sections.projects.isNotEmpty()) {
             Row(
                 Modifier
@@ -814,12 +835,14 @@ private fun FilterPanel(
 private fun RecentRow(
     session: SessionSummary,
     project: String?,
+    unread: Boolean,
     online: Boolean,
     now: Long,
     modifier: Modifier,
     onOpen: () -> Unit,
 ) {
     val colors = DesignTheme.colors
+    val unreadLabel = stringResource(R.string.recent_unread)
     Column(modifier.fillMaxWidth().testTag("recent:${session.sessionId}")) {
         DesignDivider()
         Column(
@@ -827,13 +850,15 @@ private fun RecentRow(
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .clickable(role = Role.Button, onClick = onOpen)
+                .semantics { if (unread) stateDescription = unreadLabel }
                 .padding(vertical = 11.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // 没看过的结果标题 600，看过的 400（设计规格第 4 节）
                 Text(
                     sessionTitleText(session.title),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Normal),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal),
                     color = colors.text,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -846,8 +871,8 @@ private fun RecentRow(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val (text, color) =
                         when (line) {
-                            is RecentLine.Reply -> line.text to colors.textSecondary
-                            is RecentLine.Status -> stringResource(line.text) to colors.textSecondary
+                            is RecentLine.Reply -> line.text to if (unread) colors.text else colors.textSecondary
+                            is RecentLine.Status -> stringResource(line.text) to if (unread) colors.text else colors.textSecondary
                             is RecentLine.Failed ->
                                 (
                                     line.reason?.let { stringResource(R.string.turn_failed_reason, it) }
@@ -877,6 +902,50 @@ private fun RecentRow(
                 }
             }
         }
+    }
+}
+
+/** 「N 条未读」：点了只看未读，再点一次看全部。只看未读时底下垫一层浅填充。 */
+@Composable
+private fun UnreadToggle(
+    count: Int,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = DesignTheme.colors
+    Text(
+        stringResource(R.string.home_unread_count, count),
+        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+        color = colors.text,
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (active) colors.fill else Color.Transparent)
+                .toggleable(value = active, role = Role.Switch, onValueChange = { onClick() })
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .testTag("home-unread"),
+    )
+}
+
+/** 重连提示（设计规格 7.1）：卡片下面一行灰字。 */
+@Composable
+private fun ReconnectNotice(line: ReconnectLine) {
+    Text(
+        stringResource(R.string.home_reconnected, offlineDuration(line.offlineMillis), line.results),
+        style = MaterialTheme.typography.bodySmall,
+        color = DesignTheme.colors.textSecondary,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp).testTag("home-reconnect"),
+    )
+}
+
+/** 离线了多久：不到一小时按分钟，不到两天按小时，再长按天。 */
+@Composable
+private fun offlineDuration(millis: Long): String {
+    val minutes = (millis / 60_000).coerceAtLeast(1)
+    return when {
+        minutes < 60 -> stringResource(R.string.offline_minutes, minutes.toInt())
+        minutes < 48 * 60 -> stringResource(R.string.offline_hours, (minutes / 60).toInt())
+        else -> stringResource(R.string.offline_days, (minutes / (24 * 60)).toInt())
     }
 }
 

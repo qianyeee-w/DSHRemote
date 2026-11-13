@@ -10,6 +10,8 @@ import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.NetworkMonitor
 import io.github.qianyeeew.dshremote.data.net.ClientFactory
 import io.github.qianyeeew.dshremote.data.pairing.PairingService
+import io.github.qianyeeew.dshremote.data.seen.ReadTracker
+import io.github.qianyeeew.dshremote.data.seen.SeenStore
 import io.github.qianyeeew.dshremote.data.settings.SettingsRepository
 import io.github.qianyeeew.dshremote.service.LinkController
 import io.github.qianyeeew.dshremote.service.NotificationTarget
@@ -76,6 +78,10 @@ class AppContainer(
 
     /** 用户正在看的会话（会话详情页可见时），通知规则据此不打扰。 */
     val visibleSession = MutableStateFlow<VisibleSession?>(null)
+
+    /** 哪些结果在这台手机上看过、断线重连的提示（落地方案 B2）。进程存活期间一直跟着实时连接。 */
+    val reads: ReadTracker =
+        ReadTracker(scope, SeenStore.create(appContext), connections.states, visibleSession).also { it.start() }
 
     /** 点通知后要打开的页面，由导航取走。 */
     val pendingTarget = MutableStateFlow<NotificationTarget?>(null)

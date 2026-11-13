@@ -53,6 +53,12 @@ data class HomeSections(
     val projects: List<ProjectOption>,
     /** 实际生效的筛选：选中的项目已经不在列表里时退回 null（全部项目）。 */
     val filter: String?,
+    /** 没看过结果的会话（落地方案 B2）：标题加粗，第二行用主文字色。 */
+    val unread: Set<String> = emptySet(),
+    /** 当前项目筛选下最近列表里的未读数，「最近」旁边的「N 条未读」。 */
+    val unreadCount: Int = 0,
+    /** 实际生效的「只看未读」：没有未读时自动退回全部。 */
+    val unreadOnly: Boolean = false,
 )
 
 /** 会话属于哪个项目（筛选用）。没有工作目录的会话不属于任何项目。 */
@@ -81,6 +87,8 @@ fun homeSections(
     workspaces: List<Workspace>,
     filter: String?,
     online: Boolean = true,
+    unread: Set<String> = emptySet(),
+    unreadOnly: Boolean = false,
     attentionOf: (SessionSummary) -> Attention?,
 ): HomeSections {
     val byTime = sessions.sortedWith(compareByDescending<SessionSummary> { it.updatedAt }.thenBy { it.sessionId })
@@ -97,14 +105,22 @@ fun homeSections(
             .map { (key, names) -> ProjectOption(key, names.first(), names.size) }
             .sortedWith(compareBy<ProjectOption> { it.name.lowercase() }.thenBy { it.key })
     val effective = filter?.takeIf { key -> projects.any { it.key == key } }
+    val inProject = if (effective == null) rest else rest.filter { projectKey(it) == effective }
+    val unreadHere = inProject.count { it.sessionId in unread }
+    val onlyUnread = unreadOnly && unreadHere > 0
+    // 没看过的失败排在最前面（用户确认：看过之后回到按时间排）
+    val failedFirst = inProject.sortedByDescending { it.sessionId in unread && it.lastTurn?.result == TurnResult.FAILED }
     return HomeSections(
         active =
             waiting.map { ActiveItem.Waiting(it, attentionOf(it)) } +
                 otherAttention.sortedBy { it.createdAt }.map { ActiveItem.Orphan(it) } +
                 running.map { ActiveItem.Running(it) },
-        recent = if (effective == null) rest else rest.filter { projectKey(it) == effective },
+        recent = if (onlyUnread) failedFirst.filter { it.sessionId in unread } else failedFirst,
         projects = projects,
         filter = effective,
+        unread = unread.filterTo(HashSet()) { id -> rest.any { it.sessionId == id } },
+        unreadCount = unreadHere,
+        unreadOnly = onlyUnread,
     )
 }
 

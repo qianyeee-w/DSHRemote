@@ -157,6 +157,12 @@
     <string name="home_wants_edit">想修改</string>
     <string name="home_switch_host">切换电脑</string>
     <string name="choice_selected">当前选中</string>
+    <string name="home_unread_count">%1$d 条未读</string>
+    <string name="recent_unread">未读</string>
+    <string name="home_reconnected">刚重新连上。离线的 %1$s里有 %2$d 条新结果。</string>
+    <string name="offline_minutes">%1$d 分钟</string>
+    <string name="offline_hours">%1$d 小时</string>
+    <string name="offline_days">%1$d 天</string>
     <string name="sessions_empty_title">还没有会话</string>
     <string name="sessions_empty_body">点「新建会话」开始。在电脑上的 DeepSeek Harness 中新建的会话也会出现在这里。</string>
     <string name="sessions_untitled">新会话</string>

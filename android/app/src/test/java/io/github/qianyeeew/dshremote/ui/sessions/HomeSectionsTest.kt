@@ -97,6 +97,42 @@ class HomeSectionsTest {
         assertEquals(listOf("c"), byDirectory.recent.map { it.sessionId })
     }
 
+    /** 落地方案 B2：没看过的失败排在最前面，看过的失败照常按时间；「只看未读」和项目筛选同时生效。 */
+    @Test
+    fun unreadFailuresComeFirstAndUnreadOnlyNarrowsTheList() {
+        val failed = LastTurn(TurnResult.FAILED, 1)
+        val sessions =
+            listOf(
+                session("new", updatedAt = 5, workspaceId = "w1"),
+                session("failed-read", updatedAt = 4, workspaceId = "w1", lastTurn = failed),
+                session("plain-unread", updatedAt = 3, workspaceId = "w2"),
+                session("failed-unread", updatedAt = 2, workspaceId = "w1", lastTurn = failed),
+                session("failed-unread-2", updatedAt = 1, workspaceId = "w2", lastTurn = failed),
+            )
+        val unread = setOf("plain-unread", "failed-unread", "failed-unread-2")
+        val all = homeSections(sessions, emptyList(), workspaces, null, unread = unread) { null }
+        assertEquals(
+            listOf("failed-unread", "failed-unread-2", "new", "failed-read", "plain-unread"),
+            all.recent.map { it.sessionId },
+        )
+        assertEquals(3, all.unreadCount)
+        assertEquals(unread, all.unread)
+
+        val onlyUnread = homeSections(sessions, emptyList(), workspaces, null, unread = unread, unreadOnly = true) { null }
+        assertEquals(true, onlyUnread.unreadOnly)
+        assertEquals(listOf("failed-unread", "failed-unread-2", "plain-unread"), onlyUnread.recent.map { it.sessionId })
+
+        // 项目筛选下只数这个项目的未读
+        val w2 = homeSections(sessions, emptyList(), workspaces, "w2", unread = unread, unreadOnly = true) { null }
+        assertEquals(2, w2.unreadCount)
+        assertEquals(listOf("failed-unread-2", "plain-unread"), w2.recent.map { it.sessionId })
+
+        // 没有未读时「只看未读」自动退回全部
+        val none = homeSections(sessions, emptyList(), workspaces, null, unread = emptySet(), unreadOnly = true) { null }
+        assertEquals(false, none.unreadOnly)
+        assertEquals(5, none.recent.size)
+    }
+
     @Test
     fun aFilterThatNoLongerExistsFallsBackToAllProjects() {
         val sections = homeSections(listOf(session("a", workspaceId = "w1")), emptyList(), workspaces, "gone") { null }

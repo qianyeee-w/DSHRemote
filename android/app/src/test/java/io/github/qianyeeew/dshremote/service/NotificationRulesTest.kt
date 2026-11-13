@@ -5,6 +5,7 @@ import io.github.qianyeeew.dshremote.data.api.Approval
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.AttentionRef
+import io.github.qianyeeew.dshremote.data.api.LastTurn
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.TurnResult
@@ -110,6 +111,23 @@ class NotificationRulesTest {
         assertEquals(listOf(CancelTaskDone("h1", "s1")), rules.onVisible(VisibleSession("h1", "s1"), emptyMap()))
         assertEquals(emptyList<NotificationAction>(), rules.onVisible(VisibleSession("h1", "s1"), emptyMap()))
         assertEquals(emptyList<NotificationAction>(), rules.onVisible(null, emptyMap()))
+    }
+
+    /** 落地方案 B2：离线期间结束的结果，重连后只出现在 hello 的会话摘要里，不逐条补发通知。 */
+    @Test
+    fun resultsThatEndedWhileOfflineAreNotNotifiedAfterReconnect() {
+        val ended =
+            SessionSummary(
+                "s1",
+                title = "修复登录",
+                status = SessionStatus.IDLE,
+                updatedAt = 10,
+                lastTurn = LastTurn(TurnResult.COMPLETED, endedAt = 10),
+            )
+        val offline = mapOf("h1" to HostLiveState(LinkStatus.Offline(OfflineReason.UNREACHABLE, 1_000)))
+        assertEquals(emptyList<NotificationAction>(), rules.onStates(offline, null))
+        val back = mapOf("h1" to HostLiveState(online, sessions = mapOf("s1" to ended)))
+        assertEquals(emptyList<NotificationAction>(), rules.onStates(back, null))
     }
 
     @Test

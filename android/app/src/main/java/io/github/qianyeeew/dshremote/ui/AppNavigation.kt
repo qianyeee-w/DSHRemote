@@ -249,6 +249,9 @@ private fun SessionList(
                     saveProjectFilter = { container.settings.setProjectFilter(hostId, it) },
                     lastProject = container.settings.lastProject(hostId),
                     saveLastProject = { container.settings.setLastProject(hostId, it) },
+                    seen = container.reads.records.map { it[hostId] },
+                    reconnect = container.reads.reconnects.map { it[hostId] },
+                    onDismissReconnect = { container.reads.dismiss(hostId) },
                 )
             },
         navigation =

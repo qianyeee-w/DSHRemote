@@ -33,6 +33,8 @@ class ReadTracker(
     private val now: () -> Long = System::currentTimeMillis,
     private val thresholdMillis: Long = RECONNECT_THRESHOLD_MILLIS,
     private val heartbeatMillis: Long = HEARTBEAT_MILLIS,
+    /** 连上时拿到了电脑上现有的会话：别处按会话存的东西（草稿）也据此清理。 */
+    private val onSessionsKnown: suspend (hostId: String, sessions: Set<String>) -> Unit = { _, _ -> },
 ) {
     /** 每台电脑的「看过」记录。 */
     val records: StateFlow<Map<String, SeenRecord>> = store.records.stateIn(scope, SharingStarted.Eagerly, emptyMap())
@@ -100,6 +102,7 @@ class ReadTracker(
             }
         }
         reconnect?.let { r -> _reconnects.update { it + (hostId to r) } }
+        onSessionsKnown(hostId, state.sessions.keys)
     }
 
     private suspend fun markSeen(

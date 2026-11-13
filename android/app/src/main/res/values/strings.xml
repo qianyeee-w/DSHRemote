@@ -159,6 +159,7 @@
     <string name="choice_selected">当前选中</string>
     <string name="home_unread_count">%1$d 条未读</string>
     <string name="recent_unread">未读</string>
+    <string name="recent_draft">草稿：%1$s</string>
     <string name="home_reconnected">刚重新连上。离线的 %1$s里有 %2$d 条新结果。</string>
     <string name="offline_minutes">%1$d 分钟</string>
     <string name="offline_hours">%1$d 小时</string>
@@ -190,6 +191,9 @@
     <string name="chat_input_hint_answer_above">在上面逐题回答</string>
     <string name="chat_local_steered">已送出，DSH 下一步会读到</string>
     <string name="chat_local_retry">重试</string>
+    <string name="chat_local_uncertain">不确定是否送达</string>
+    <string name="chat_local_check">查看</string>
+    <string name="chat_local_resend">重发</string>
     <string name="chat_running">运行中</string>
     <string name="chat_replying">正在回复</string>
     <!-- 一轮的结尾（设计规格 6.7）：不写「已完成」，运行结束不等于需求完成 -->
@@ -240,6 +244,7 @@
     <string name="chat_notice_older_failed">读取更早的消息失败</string>
     <string name="chat_notice_setup_failed">模型或审批方式没有设置成功，消息还没发出，检查后再发送。</string>
     <string name="chat_notice_change_failed">操作失败，请稍后再试</string>
+    <string name="chat_notice_not_in_session">会话里还没有这条消息。确认没送到再重发。</string>
     <string name="chat_link_title">打开链接？</string>
     <string name="chat_link_open">打开</string>
     <string name="chat_link_unsupported">只能打开 http 和 https 链接。</string>

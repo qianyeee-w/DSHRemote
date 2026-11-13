@@ -56,6 +56,8 @@ data class SessionListState(
     val hostId: String = "",
     /** 断线一段时间后重新连上，离线期间有新结果时的提示（设计规格 7.1）。 */
     val reconnect: ReconnectLine? = null,
+    /** 各会话没发出去的草稿（落地方案 B3），最近列表第二行显示「草稿：…」。 */
+    val drafts: Map<String, String> = emptyMap(),
 )
 
 /** 「刚重新连上。离线的 [offlineMillis] 里有 [results] 条新结果。」 */
@@ -149,6 +151,8 @@ class SessionListViewModel(
     /** 这台电脑的重连提示（[io.github.qianyeeew.dshremote.data.seen.ReadTracker.reconnects]）。 */
     reconnect: Flow<Reconnect?> = flowOf(null),
     private val onDismissReconnect: () -> Unit = {},
+    /** 这台电脑上各会话的草稿。 */
+    drafts: Flow<Map<String, String>> = flowOf(emptyMap()),
 ) : ViewModel() {
     val projects = ProjectFlow(viewModelScope, projectBackend)
 
@@ -187,7 +191,8 @@ class SessionListViewModel(
             states,
             combine(catalog.state, projectFilter, attention.ui, ::Triple),
             combine(seen, reconnect, unreadOnly, ::Triple),
-        ) { list, live, (workspaces, filter, attentionUi), (record, offline, onlyUnread) ->
+            drafts,
+        ) { list, live, (workspaces, filter, attentionUi), (record, offline, onlyUnread), sessionDrafts ->
             val host = list.firstOrNull { it.hostId == hostId } ?: return@combine null
             val hostState = live[hostId]
             val sessions = hostState?.sessions?.values.orEmpty()
@@ -217,6 +222,7 @@ class SessionListViewModel(
                 workspaces = workspaces.workspaces,
                 attentionUi = attentionUi,
                 hostId = hostId,
+                drafts = sessionDrafts,
                 reconnect =
                     offline?.let { r ->
                         offlineResults(sessions, record, r, clockOffset).takeIf { it > 0 }?.let { ReconnectLine(r.offlineMillis, it) }

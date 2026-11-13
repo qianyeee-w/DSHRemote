@@ -200,6 +200,34 @@ class ChatContentUiTest {
         compose.runOnIdle { assertEquals(failed.outgoing.requestId, retried) }
     }
 
+    /** 落地方案 B3：请求发出但没收到回应，「不确定是否送达 · 查看 · 重发」，两个都只在用户点时才执行。 */
+    @Test
+    fun uncertainMessageOffersCheckAndResend() {
+        val uncertain = LocalMessage(OutgoingMessage("不知道到没到", PromptMode.QUEUE), OutgoingStatus.UNCERTAIN)
+        val checked = mutableListOf<String>()
+        val resent = mutableListOf<String>()
+        compose.setContent {
+            DshRemoteTheme {
+                ChatContent(
+                    onlineChatState().copy(items = listOf(ChatItem.Local("l1", uncertain))),
+                    null,
+                    Picker.Closed,
+                    ChatActions(onCheckSend = { checked += it }, onRetrySend = { resent += it }),
+                )
+            }
+        }
+        compose.onNodeWithText(context.getString(R.string.chat_local_uncertain)).assertIsDisplayed()
+        compose.onNodeWithTag("chat-retry").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(emptyList<String>(), checked)
+            assertEquals(emptyList<String>(), resent)
+        }
+        compose.onNodeWithTag("chat-check").performClick()
+        compose.runOnIdle { assertEquals(listOf(uncertain.outgoing.requestId), checked) }
+        compose.onNodeWithTag("chat-resend").performClick()
+        compose.runOnIdle { assertEquals(listOf(uncertain.outgoing.requestId), resent) }
+    }
+
     /** 每一轮的结尾（设计规格 6.7）：结果加用时，不写「已完成」；失败是红字加原因。 */
     @Test
     fun finishedTurnsEndWithResultAndDuration() {

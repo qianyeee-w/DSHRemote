@@ -55,6 +55,7 @@ import kotlinx.serialization.json.JsonObject
 fun UserBubble(
     text: String,
     local: LocalMessage?,
+    onCheck: () -> Unit = {},
     onRetry: () -> Unit,
 ) {
     val colors = DesignTheme.colors
@@ -72,18 +73,20 @@ fun UserBubble(
                         .padding(horizontal = 14.dp, vertical = 9.dp),
             )
         }
-        if (local != null) SendStatus(local, onRetry)
+        if (local != null) SendStatus(local, onRetry, onCheck)
     }
 }
 
 /**
- * 发送状态：发送中；插话已受理但还没出现在会话里时「已送出，DSH 下一步会读到」；失败时「发送失败 · 重试」。
- * 空闲时发出的消息受理后马上就会出现在会话里，不再提示。「不确定是否送达」在落地方案 B3 加。
+ * 发送状态（设计规格 6.4）：发送中；插话已受理但还没出现在会话里时「已送出，DSH 下一步会读到」；失败时「发送失败 · 重试」；
+ * 请求发出但没收到回应时「不确定是否送达 · 查看 · 重发」。空闲时发出的消息受理后马上就会出现在会话里，不再提示。
+ * 「重试」「重发」都只由用户点，App 不自动重发（落地方案 B3）。
  */
 @Composable
 private fun SendStatus(
     local: LocalMessage,
     onRetry: () -> Unit,
+    onCheck: () -> Unit,
 ) {
     val colors = DesignTheme.colors
     val style = MaterialTheme.typography.labelSmall
@@ -108,19 +111,37 @@ private fun SendStatus(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.chat_local_failed), style = style, color = colors.danger)
                 Text(" · ", style = style, color = colors.textSecondary)
-                Text(
-                    stringResource(R.string.chat_local_retry),
-                    style = style.copy(textDecoration = TextDecoration.Underline),
-                    color = colors.text,
-                    modifier =
-                        Modifier
-                            .heightIn(min = 48.dp)
-                            .clickable(role = Role.Button, onClick = onRetry)
-                            .padding(vertical = 16.dp)
-                            .testTag("chat-retry"),
-                )
+                StatusAction(stringResource(R.string.chat_local_retry), "chat-retry", onRetry)
+            }
+        OutgoingStatus.UNCERTAIN ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.chat_local_uncertain), style = style, color = colors.waitingText)
+                Text(" · ", style = style, color = colors.textSecondary)
+                StatusAction(stringResource(R.string.chat_local_check), "chat-check", onCheck)
+                Text(" · ", style = style, color = colors.textSecondary)
+                StatusAction(stringResource(R.string.chat_local_resend), "chat-resend", onRetry)
             }
     }
+}
+
+/** 状态行里可以点的字：下划线，可点区域高 48。 */
+@Composable
+private fun StatusAction(
+    text: String,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall.copy(textDecoration = TextDecoration.Underline),
+        color = DesignTheme.colors.text,
+        modifier =
+            Modifier
+                .heightIn(min = 48.dp)
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(vertical = 16.dp)
+                .testTag(tag),
+    )
 }
 
 /**

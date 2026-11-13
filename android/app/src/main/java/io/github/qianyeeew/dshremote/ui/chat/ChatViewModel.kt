@@ -19,6 +19,7 @@ import io.github.qianyeeew.dshremote.data.chat.ChatTimeline
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.Outbox
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
+import io.github.qianyeeew.dshremote.data.chat.deliveryStatus
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
@@ -29,6 +30,7 @@ import io.github.qianyeeew.dshremote.ui.attention.AttentionHandler
 import io.github.qianyeeew.dshremote.ui.attention.AttentionResponder
 import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -171,6 +174,9 @@ enum class ChatNotice {
 
     /** 新任务：会话已经创建，但模型或审批方式没设置成功，消息还没发。 */
     SETUP_FAILED,
+
+    /** 「查看」之后会话里还没有这条消息。 */
+    NOT_IN_SESSION,
 }
 
 /** 输入框里原地展开的模型或审批方式的选项（设计规格 6.10）。 */
@@ -218,9 +224,20 @@ class ChatViewModel(
     hostName: Flow<String?> = flowOf(null),
     /** 首页开始新任务时没有完成的步骤（见 [ChatHandoff]）。 */
     handoff: ChatHandoff? = null,
+    /** 这个会话存在本地的草稿（落地方案 B3）。 */
+    storedDraft: Flow<String?> = flowOf(null),
+    /** 存草稿。在 App 的作用域里执行，离开会话页后也会存完。 */
+    private val saveDraft: (String) -> Unit = {},
 ) : ViewModel() {
     /** 模型或审批方式没设置成功、消息还没发时，放回输入框的文字。 */
     val initialDraft: String? = (handoff as? ChatHandoff.NotSent)?.text
+
+    private val _restoredDraft = MutableStateFlow<String?>(null)
+
+    /** 打开会话时从本地恢复的草稿（读到之后只给一次，输入框里已经有字时界面不覆盖）。 */
+    val restoredDraft: StateFlow<String?> = _restoredDraft.asStateFlow()
+    private var pendingDraft: Job? = null
+    private var unsavedDraft: String? = null
 
     /** 这个会话的审批和提问（T10）。 */
     val attention = AttentionHandler(viewModelScope, responder, resolvedEvents)
@@ -232,11 +249,20 @@ class ChatViewModel(
                 // 第一条消息发送失败：显示成失败的气泡，重试沿用同一个 requestId。
                 // 新会话里的用户消息都是这条，所以第一次读到历史时就按文字对应（可能其实已经送到了）
                 is ChatHandoff.FailedFirstMessage ->
-                    Outbox(items = listOf(LocalMessage(handoff.message, OutgoingStatus.FAILED)), seenUserIds = emptySet())
+                    Outbox(items = listOf(LocalMessage(handoff.message, handoff.status)), seenUserIds = emptySet())
                 else -> Outbox()
             },
         )
     private val flags = MutableStateFlow(Flags())
+
+    init {
+        if (initialDraft != null) {
+            saveDraft(initialDraft)
+        } else {
+            viewModelScope.launch { _restoredDraft.value = storedDraft.first()?.takeIf { it.isNotBlank() } }
+        }
+    }
+
     private val workspaces = MutableStateFlow<List<Workspace>>(emptyList())
     private var subscription: Job? = null
     private var reload: Job? = null
@@ -338,12 +364,50 @@ class ChatViewModel(
         return true
     }
 
-    /** 重试发送失败的消息：沿用同一个 requestId，插件据此去重。 */
+    /**
+     * 重试或重发：失败的「重试」和不确定的「重发」都只由用户点（落地方案 B3，**不自动重发**）。
+     * 沿用同一个 requestId：10 分钟内插件据此去重，其实已经送到时不会发两次。
+     */
     fun retrySend(requestId: String) {
         val local = outbox.value.find(requestId) ?: return
-        if (local.status != OutgoingStatus.FAILED) return
+        if (local.status != OutgoingStatus.FAILED && local.status != OutgoingStatus.UNCERTAIN) return
         outbox.update { it.mark(requestId, OutgoingStatus.SENDING) }
         deliver(local.outgoing)
+    }
+
+    /**
+     * 不确定是否送达时的「查看」：重新读取最新一页历史。消息其实已经到了，就按文字对应上，气泡下的那一行消失；
+     * 还没看到时提示一声，由用户决定要不要重发。
+     */
+    fun checkSend(requestId: String) {
+        if (outbox.value.find(requestId)?.status != OutgoingStatus.UNCERTAIN) return
+        viewModelScope.launch {
+            try {
+                val page = backend.messages(null)
+                updateTimeline { it.withLatest(page) }
+                if (outbox.value.find(requestId) != null) _notice.value = ChatNotice.NOT_IN_SESSION
+            } catch (_: ApiException) {
+                _notice.value = ChatNotice.OFFLINE
+            } catch (_: OfflineException) {
+                _notice.value = ChatNotice.OFFLINE
+            }
+        }
+    }
+
+    /** 输入框里的字变了：停顿一下再存（落地方案 B3）。空白等于删掉草稿。 */
+    fun draftChanged(text: String) {
+        pendingDraft?.cancel()
+        unsavedDraft = text
+        pendingDraft =
+            viewModelScope.launch {
+                if (text.isNotBlank()) delay(DRAFT_SAVE_DELAY_MILLIS)
+                flushDraft()
+            }
+    }
+
+    private fun flushDraft() {
+        unsavedDraft?.let(saveDraft)
+        unsavedDraft = null
     }
 
     fun cancelRun() {
@@ -379,6 +443,8 @@ class ChatViewModel(
 
     override fun onCleared() {
         onHidden()
+        // 离开会话页时还没到存的时候：现在就存
+        flushDraft()
     }
 
     /** 项目名只是顶栏的说明，读不到就算了（之后回到页面再试）。 */
@@ -415,16 +481,17 @@ class ChatViewModel(
         flags.update { it.copy(loadFailed = true) }
     }
 
+    /** 发一次，只发一次：失败或不确定时只改状态，从不在这里重发（落地方案 B3）。 */
     private fun deliver(message: OutgoingMessage) {
         viewModelScope.launch {
             val status =
                 try {
                     backend.prompt(message)
                     OutgoingStatus.SENT
-                } catch (_: ApiException) {
-                    OutgoingStatus.FAILED
-                } catch (_: OfflineException) {
-                    OutgoingStatus.FAILED
+                } catch (e: ApiException) {
+                    deliveryStatus(e)
+                } catch (e: OfflineException) {
+                    deliveryStatus(e)
                 }
             outbox.update { box -> if (box.find(message.requestId) != null) box.mark(message.requestId, status) else box }
         }
@@ -524,3 +591,6 @@ internal fun chatItems(
     outbox.items.forEach { items += ChatItem.Local("local:${it.outgoing.requestId}", it) }
     return items
 }
+
+/** 输入框停顿这么久再存草稿。 */
+private const val DRAFT_SAVE_DELAY_MILLIS = 400L

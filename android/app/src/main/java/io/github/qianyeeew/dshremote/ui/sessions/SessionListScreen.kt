@@ -320,6 +320,7 @@ fun SessionListContent(
                             session,
                             project = if (sections.filter == null) projectNameOf(session, workspaces) else null,
                             unread = session.sessionId in sections.unread,
+                            draft = state.drafts[session.sessionId],
                             online = online,
                             now = now,
                             modifier = Modifier.alpha(if (online) 1f else STALE_ALPHA),
@@ -836,6 +837,7 @@ private fun RecentRow(
     session: SessionSummary,
     project: String?,
     unread: Boolean,
+    draft: String?,
     online: Boolean,
     now: Long,
     modifier: Modifier,
@@ -866,11 +868,12 @@ private fun RecentRow(
                 )
                 Text(relativeTime(session.updatedAt, now), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
             }
-            val line = recentLine(session, online)
+            val line = recentLine(session, online, draft)
             if (line != RecentLine.None || project != null) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val (text, color) =
                         when (line) {
+                            is RecentLine.Draft -> stringResource(R.string.recent_draft, line.text) to colors.text
                             is RecentLine.Reply -> line.text to if (unread) colors.text else colors.textSecondary
                             is RecentLine.Status -> stringResource(line.text) to if (unread) colors.text else colors.textSecondary
                             is RecentLine.Failed ->

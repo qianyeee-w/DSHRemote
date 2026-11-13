@@ -61,7 +61,7 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 │   ├── host/       # （T4 已完成）Host、HostAddress、DeviceToken、PairUri（二维码解析）、SecretBox（Keystore AES-GCM）、HostRepository
 │   ├── api/        # （T5 已完成）PluginApi：protocol.md 的 REST 接口、数据结构、错误码（外观层，不是 DSH 的协议）
 │   ├── attention/  # （T10 已完成）AnswerForm：回答提问前的本地校验（和插件的规则一致）
-│   ├── chat/       # （T9 已完成）ChatTimeline（历史分页和推送的合并规则）、Outbox（发出但还没出现在日志里的消息）
+│   ├── chat/       # （T9 已完成）ChatTimeline（历史分页和推送的合并规则）、Outbox（发出但还没出现在日志里的消息，B3 起区分失败和不确定）、Drafts（B3，每个会话的草稿）
 │   ├── live/       # （T6 已完成）ConnectionManager、HostConnection：每台主机一条 /v1/stream 连接，选地址、重连、hello、订阅、事件分发
 │   ├── settings/   # （T11 已完成）SettingsRepository：通知开关等设置（DataStore Preferences，不含秘密）
 │   ├── seen/       # （B2）SeenStore：哪些结果在这台手机上看过；ReadTracker：跟着实时连接记「看过」、上次在线时间和重连提示

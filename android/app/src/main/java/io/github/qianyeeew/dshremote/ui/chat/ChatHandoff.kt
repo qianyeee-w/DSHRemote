@@ -1,6 +1,7 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
+import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -9,11 +10,12 @@ import java.util.concurrent.ConcurrentHashMap
  */
 sealed interface ChatHandoff {
     /**
-     * 第一条消息没发出去：在会话里显示成发送失败的气泡，「重试」沿用同一个 requestId（用户确认），
-     * 插件据此去重，其实已经送到时不会发两次。
+     * 第一条消息没发出去，或者不确定是否送到：在会话里显示成「发送失败」或「不确定是否送达」的气泡（[status]），
+     * 「重试」「重发」沿用同一个 requestId（用户确认），插件据此去重，其实已经送到时不会发两次。
      */
     data class FailedFirstMessage(
         val message: OutgoingMessage,
+        val status: OutgoingStatus = OutgoingStatus.FAILED,
     ) : ChatHandoff
 
     /** 模型或审批方式没有设置成功，消息还没发：文字放回输入框，并提示原因。 */

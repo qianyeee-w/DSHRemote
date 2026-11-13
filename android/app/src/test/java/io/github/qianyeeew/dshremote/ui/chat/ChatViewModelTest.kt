@@ -1,5 +1,8 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
@@ -25,10 +28,15 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -155,7 +163,7 @@ class ChatViewModelTest {
     @Test
     fun failedSendIsRetriedWithTheSameRequestId() {
         val vm = visible()
-        backend.promptError = ApiException.Network(IOException("x"))
+        backend.promptError = ApiException.Network(IOException("x"), maybeDelivered = false)
         vm.send("重要的消息")
         val failed = vm.locals().single()
         assertEquals(OutgoingStatus.FAILED, failed.status)
@@ -338,6 +346,116 @@ class ChatViewModelTest {
         createdAt = createdAt,
     )
 
+    /**
+     * 落地方案 B3 的反向用例：请求发出后回应丢了，状态是「不确定是否送达」，**不会自动再发**；
+     * 只有用户点「重发」才发第二次，并且沿用同一个 requestId。
+     */
+    @Test
+    fun lostResponseIsUncertainAndNeverResentAutomatically() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val vm = visible()
+            runCurrent()
+            backend.promptError = ApiException.Network(IOException("x"), maybeDelivered = true)
+            vm.send("重要的消息")
+            runCurrent()
+            assertEquals(OutgoingStatus.UNCERTAIN, vm.locals().single().status)
+            // 过了很久、断线又重连，都不会自己再发
+            backend.promptError = null
+            advanceTimeBy(30 * 60_000L)
+            backend.push(SessionEvent.Resync(SESSION))
+            runCurrent()
+            assertEquals(1, backend.prompts.size)
+            assertEquals(OutgoingStatus.UNCERTAIN, vm.locals().single().status)
+
+            vm.retrySend(
+                vm
+                    .locals()
+                    .single()
+                    .outgoing.requestId,
+            )
+            runCurrent()
+            assertEquals(2, backend.prompts.size)
+            assertEquals(backend.prompts[0].requestId, backend.prompts[1].requestId)
+            assertEquals(OutgoingStatus.SENT, vm.locals().single().status)
+            clear(vm)
+        }
+
+    /** 「查看」：重新读最新一页。消息其实到了就消失；还没看到就提示，由用户决定要不要重发。 */
+    @Test
+    fun checkingAnUncertainMessage() {
+        val vm = visible()
+        backend.promptError = ApiException.BadResponse("Accepted")
+        vm.send("其实到了")
+        vm.send("真的丢了")
+        assertEquals(listOf(OutgoingStatus.UNCERTAIN, OutgoingStatus.UNCERTAIN), vm.locals().map { it.status })
+        val (arrived, lost) = vm.locals()
+
+        backend.pages[null] = MessagePage(listOf(msg("u9", "其实到了", MessageRole.USER)), hasMore = false, cursor = null)
+        vm.checkSend(arrived.outgoing.requestId)
+        assertEquals(listOf(lost.outgoing.requestId), vm.locals().map { it.outgoing.requestId })
+        assertNull(vm.notice.value)
+
+        vm.checkSend(lost.outgoing.requestId)
+        assertEquals(ChatNotice.NOT_IN_SESSION, vm.notice.value)
+        assertEquals(OutgoingStatus.UNCERTAIN, vm.locals().single().status)
+        assertEquals(2, backend.prompts.size)
+    }
+
+    /** 新任务的第一条消息不确定是否送到：会话里也是「不确定是否送达」。 */
+    @Test
+    fun uncertainFirstMessageFromNewTask() {
+        val first = OutgoingMessage("给通知加按钮", PromptMode.QUEUE)
+        val vm =
+            ChatViewModel(
+                "h1",
+                SESSION,
+                states,
+                backend,
+                { _, _ -> },
+                resolved,
+                handoff = ChatHandoff.FailedFirstMessage(first, OutgoingStatus.UNCERTAIN),
+            )
+        assertEquals(OutgoingStatus.UNCERTAIN, vm.locals().single().status)
+        assertTrue(backend.prompts.isEmpty())
+    }
+
+    /** 草稿（落地方案 B3）：打开时恢复；停顿后保存；离开时把还没存的立即存掉；放回输入框的文字也存成草稿。 */
+    @Test
+    fun draftsAreRestoredAndSaved() =
+        runTest {
+            Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+            val saved = mutableListOf<String>()
+            val vm =
+                ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved, storedDraft = flowOf("写了一半"), saveDraft = {
+                    saved +=
+                        it
+                })
+            runCurrent()
+            assertEquals("写了一半", vm.restoredDraft.value)
+            vm.draftChanged("写了一半，")
+            vm.draftChanged("写了一半，继续")
+            advanceTimeBy(100)
+            assertEquals(emptyList<String>(), saved)
+            advanceTimeBy(1_000)
+            assertEquals(listOf("写了一半，继续"), saved)
+            // 清空（发出去了）马上删掉
+            vm.draftChanged("")
+            runCurrent()
+            assertEquals(listOf("写了一半，继续", ""), saved)
+            // 还没到存的时候就离开了
+            vm.draftChanged("最后几个字")
+            clear(vm)
+            assertEquals("最后几个字", saved.last())
+
+            val notSent = mutableListOf<String>()
+            ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved, handoff = ChatHandoff.NotSent("任务"), saveDraft = {
+                notSent +=
+                    it
+            })
+            assertEquals(listOf("任务"), notSent)
+        }
+
     private val resolved =
         kotlinx.coroutines.flow.MutableSharedFlow<io.github.qianyeeew.dshremote.data.live.LiveEvent.AttentionResolved>(
             extraBufferCapacity = 8,
@@ -386,6 +504,19 @@ class ChatViewModelTest {
                 .isEmpty(),
         )
         assertTrue(backend.prompts.isEmpty())
+    }
+
+    /** 和离开页面时一样清掉视图模型（触发 onCleared）。 */
+    private fun clear(vm: ChatViewModel) {
+        val store = ViewModelStore()
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = vm as T
+            },
+        )[ChatViewModel::class.java]
+        store.clear()
     }
 
     private fun viewModel() = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved)

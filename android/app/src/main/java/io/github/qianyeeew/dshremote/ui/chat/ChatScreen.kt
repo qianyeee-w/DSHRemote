@@ -80,6 +80,10 @@ class ChatActions(
     val onBack: () -> Unit = {},
     val onSend: (text: String) -> Boolean = { false },
     val onRetrySend: (requestId: String) -> Unit = {},
+    /** 不确定是否送达时的「查看」。 */
+    val onCheckSend: (requestId: String) -> Unit = {},
+    /** 输入框里的字变了（存草稿）。 */
+    val onDraftChange: (String) -> Unit = {},
     val onCancelRun: () -> Unit = {},
     val onLoadOlder: () -> Unit = {},
     val onRetryLoad: () -> Unit = {},
@@ -100,6 +104,7 @@ fun ChatScreen(
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val picker by viewModel.picker.collectAsStateWithLifecycle()
     val attentionNotice by viewModel.attention.notice.collectAsStateWithLifecycle()
+    val restoredDraft by viewModel.restoredDraft.collectAsStateWithLifecycle()
     // 只在页面可见时订阅这个会话（插件按引用计数订阅，m2-android.md 3.3「订阅」）
     LifecycleStartEffect(viewModel) {
         viewModel.onVisible()
@@ -114,6 +119,8 @@ fun ChatScreen(
                 onBack = onBack,
                 onSend = viewModel::send,
                 onRetrySend = viewModel::retrySend,
+                onCheckSend = viewModel::checkSend,
+                onDraftChange = viewModel::draftChanged,
                 onCancelRun = viewModel::cancelRun,
                 onLoadOlder = viewModel::loadOlder,
                 onRetryLoad = viewModel::retryLoad,
@@ -128,6 +135,7 @@ fun ChatScreen(
         attentionNotice = attentionNotice,
         onDismissAttentionNotice = viewModel.attention::dismissNotice,
         initialDraft = viewModel.initialDraft,
+        restoredDraft = restoredDraft,
     )
 }
 
@@ -141,6 +149,7 @@ fun ChatContent(
     attentionNotice: Resolution? = null,
     onDismissAttentionNotice: () -> Unit = {},
     initialDraft: String? = null,
+    restoredDraft: String? = null,
 ) {
     val snackbar = remember { SnackbarHostState() }
     val elsewhere = stringResource(R.string.attention_elsewhere)
@@ -192,6 +201,7 @@ fun ChatContent(
                     actions,
                     picker = picker,
                     initialText = initialDraft.orEmpty(),
+                    restoredDraft = restoredDraft,
                     attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
                     onAnswer = attentionActions.onAnswerWithCustom,
                 )
@@ -284,7 +294,12 @@ private fun MessageList(
         }
         items(reversed, key = { it.key }, contentType = { it::class }) { block ->
             when (block) {
-                is ChatBlock.User -> UserBubble(block.text, block.local) { block.local?.let { actions.onRetrySend(it.outgoing.requestId) } }
+                is ChatBlock.User ->
+                    UserBubble(
+                        block.text,
+                        block.local,
+                        onCheck = { block.local?.let { actions.onCheckSend(it.outgoing.requestId) } },
+                    ) { block.local?.let { actions.onRetrySend(it.outgoing.requestId) } }
                 is ChatBlock.Reply -> MarkdownText(block.text, onCopied)
                 is ChatBlock.Steps -> StepsView(block)
                 is ChatBlock.TurnEnd -> TurnEndLine(block.turn)
@@ -430,6 +445,7 @@ private fun noticeText(notice: ChatNotice): Int =
         ChatNotice.LOAD_OLDER_FAILED -> R.string.chat_notice_older_failed
         ChatNotice.CHANGE_FAILED -> R.string.chat_notice_change_failed
         ChatNotice.SETUP_FAILED -> R.string.chat_notice_setup_failed
+        ChatNotice.NOT_IN_SESSION -> R.string.chat_notice_not_in_session
     }
 
 /** 离底部不到这么多像素也算停在底部。 */

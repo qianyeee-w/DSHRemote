@@ -9,6 +9,7 @@ import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.api.isTokenInvalid
+import io.github.qianyeeew.dshremote.data.chat.deliveryStatus
 import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.ui.chat.ChatHandoff
 import kotlinx.coroutines.CoroutineScope
@@ -150,8 +151,17 @@ class NewTaskFlow(
                 return@launch
             }
             val message = OutgoingMessage(text, PromptMode.QUEUE)
-            val sent = runCatchingApi { backend.prompt(sessionId, message) } != null
-            finish(StartedTask(sessionId, if (sent) null else ChatHandoff.FailedFirstMessage(message)))
+            // 发一次，不自动重发；没送到和不确定交给会话页，由用户决定（落地方案 B3）
+            val failure =
+                try {
+                    backend.prompt(sessionId, message)
+                    null
+                } catch (e: ApiException) {
+                    e
+                } catch (e: OfflineException) {
+                    e
+                }
+            finish(StartedTask(sessionId, failure?.let { ChatHandoff.FailedFirstMessage(message, deliveryStatus(it)) }))
         }
         return true
     }

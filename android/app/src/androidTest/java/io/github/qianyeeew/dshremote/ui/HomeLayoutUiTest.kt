@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -329,6 +330,17 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("home-unread").assertIsOn()
     }
 
+    /** 落地方案 B3：有没发出去的草稿时，最近列表第二行是「草稿：…」。 */
+    @Test fun draftShowsInTheRecentRow() {
+        render(drafts = mapOf("tools" to "再清一遍日志"))
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
+        compose
+            .onNodeWithTag(
+                "recent-line:tools",
+                useUnmergedTree = true,
+            ).assertTextEquals(context.getString(R.string.recent_draft, "再清一遍日志"))
+    }
+
     /** 重连提示在卡片下面；用户滑动列表后消失（设计规格 7.1）。 */
     @Test fun reconnectNoticeShowsAndScrollingDismissesIt() {
         var dismissed = 0
@@ -454,6 +466,7 @@ class HomeLayoutUiTest {
         reconnect: ReconnectLine? = null,
         onToggleUnread: () -> Unit = {},
         onDismissReconnect: () -> Unit = {},
+        drafts: Map<String, String> = emptyMap(),
     ) {
         val attention = mapOf("waiting" to shell, "asking" to ask)
         val state =
@@ -468,6 +481,7 @@ class HomeLayoutUiTest {
                 workspaces = workspaces,
                 hostId = "first",
                 reconnect = reconnect,
+                drafts = drafts,
             )
         compose.setContent {
             back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher

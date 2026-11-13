@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import io.github.qianyeeew.dshremote.data.chat.DraftStore
 import io.github.qianyeeew.dshremote.data.host.HostRepository
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.NetworkMonitor
@@ -17,10 +18,12 @@ import io.github.qianyeeew.dshremote.service.LinkController
 import io.github.qianyeeew.dshremote.service.NotificationTarget
 import io.github.qianyeeew.dshremote.service.VisibleSession
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /** 创建 Application 作用域的对象（手动注入，android/AGENTS.md「技术选型」）。 */
 class DshRemoteApp : Application() {
@@ -79,9 +82,30 @@ class AppContainer(
     /** 用户正在看的会话（会话详情页可见时），通知规则据此不打扰。 */
     val visibleSession = MutableStateFlow<VisibleSession?>(null)
 
+    /** 每个会话没发出去的文字（落地方案 B3）。 */
+    val drafts: DraftStore = DraftStore.create(appContext)
+
+    /**
+     * 在 App 的作用域里存草稿：离开会话页（视图模型被清掉）后也会存完。
+     * UNDISPATCHED：调用时立即进入 DataStore 的写入队列，先后两次保存（例如发送后清空）不会颠倒。
+     */
+    fun saveDraft(
+        hostId: String,
+        sessionId: String,
+        text: String,
+    ) {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { drafts.save(hostId, sessionId, text) }
+    }
+
     /** 哪些结果在这台手机上看过、断线重连的提示（落地方案 B2）。进程存活期间一直跟着实时连接。 */
     val reads: ReadTracker =
-        ReadTracker(scope, SeenStore.create(appContext), connections.states, visibleSession).also { it.start() }
+        ReadTracker(
+            scope,
+            SeenStore.create(appContext),
+            connections.states,
+            visibleSession,
+            onSessionsKnown = { hostId, sessions -> drafts.prune(hostId, sessions) },
+        ).also { it.start() }
 
     /** 点通知后要打开的页面，由导航取走。 */
     val pendingTarget = MutableStateFlow<NotificationTarget?>(null)

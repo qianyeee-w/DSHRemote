@@ -148,6 +148,8 @@ fun AppNavigation(
                             resolvedEvents = container.connections.resolvedEvents(route.hostId),
                             hostName = container.hosts.hosts.map { list -> list.firstOrNull { it.hostId == route.hostId }?.name },
                             handoff = container.handoffs.take(route.hostId, route.sessionId),
+                            storedDraft = container.drafts.drafts(route.hostId).map { it[route.sessionId] },
+                            saveDraft = { container.saveDraft(route.hostId, route.sessionId, it) },
                         )
                     },
                 onBack = { nav.popBackStack() },
@@ -252,6 +254,7 @@ private fun SessionList(
                     seen = container.reads.records.map { it[hostId] },
                     reconnect = container.reads.reconnects.map { it[hostId] },
                     onDismissReconnect = { container.reads.dismiss(hostId) },
+                    drafts = container.drafts.drafts(hostId),
                 )
             },
         navigation =

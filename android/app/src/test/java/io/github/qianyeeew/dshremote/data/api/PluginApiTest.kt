@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -454,6 +455,24 @@ class PluginApiTest {
         runBlocking<Unit> {
             val closedPort = ServerSocket(0).use { it.localPort }
             assertApiError<ApiException.Network> { PluginApi(client, HostAddress("127.0.0.1", closedPort), token).info() }
+        }
+
+    /** 落地方案 B3：请求写出之后连接断开，插件可能已经收到；连不上时肯定没收到。 */
+    @Test
+    fun promptKnowsWhetherTheMessageMayHaveArrived() =
+        runBlocking<Unit> {
+            // 收到请求后、回应之前断开（OkHttp 可能自己在新连接上再试一次，多准备几个）
+            repeat(3) { server.enqueue(MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build()) }
+            val lost = assertApiError<ApiException.Network> { api.prompt("s1", OutgoingMessage("你好", PromptMode.QUEUE)) }
+            assertTrue("请求已经写出，可能已送到", lost.maybeDelivered)
+            assertTrue(server.requestCount >= 1)
+
+            val closedPort = ServerSocket(0).use { it.localPort }
+            val refused =
+                assertApiError<ApiException.Network> {
+                    PluginApi(client, HostAddress("127.0.0.1", closedPort), token).prompt("s1", OutgoingMessage("你好", PromptMode.QUEUE))
+                }
+            assertFalse("连不上，肯定没送到", refused.maybeDelivered)
         }
 
     @Test

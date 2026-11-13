@@ -24,6 +24,7 @@ import okhttp3.Response
 import okio.BufferedSink
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -148,8 +149,14 @@ class PluginApi(
         message: OutgoingMessage,
     ) {
         requireId(sessionId)
-        val body = encode(PromptRequest.serializer(), PromptRequest(message.requestId, message.text, message.mode))
-        send("POST", listOf("sessions", sessionId, "prompt"), body = body) { decode(Accepted.serializer(), it) }
+        // 请求体开始写出之前就失败（连不上、握手失败），插件肯定没收到；之后失败就说不准（落地方案 B3）
+        val written = AtomicBoolean(false)
+        val body = encode(PromptRequest.serializer(), PromptRequest(message.requestId, message.text, message.mode)).tracked(written)
+        try {
+            send("POST", listOf("sessions", sessionId, "prompt"), body = body) { decode(Accepted.serializer(), it) }
+        } catch (e: ApiException.Network) {
+            throw ApiException.Network(e.cause as IOException, maybeDelivered = written.get())
+        }
     }
 
     /** 停止当前任务。会话空闲时也成功。 */
@@ -363,6 +370,21 @@ private data class PairedHost(
     val name: String,
     val pluginVersion: String,
 )
+
+/** 记下请求体是否开始写出（[written]）。OkHttp 自己重试时会再写一次，记录不会变回 false。 */
+private fun RequestBody.tracked(written: AtomicBoolean): RequestBody {
+    val original = this
+    return object : RequestBody() {
+        override fun contentType() = original.contentType()
+
+        override fun contentLength() = original.contentLength()
+
+        override fun writeTo(sink: BufferedSink) {
+            written.set(true)
+            original.writeTo(sink)
+        }
+    }
+}
 
 /** 创建目录的回执丢失后交给界面确认，禁止 HTTP 层自行重发已经写出的请求体。 */
 private fun RequestBody.oneShot(): RequestBody {

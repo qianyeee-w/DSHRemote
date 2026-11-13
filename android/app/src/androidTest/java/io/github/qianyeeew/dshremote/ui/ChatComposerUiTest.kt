@@ -198,6 +198,32 @@ class ChatComposerUiTest {
 
     private fun text(id: Int) = context.getString(id)
 
+    /** 落地方案 B3：打开会话时恢复草稿；写字时通知保存；发出去后清空草稿；输入框里已经有字时不被覆盖。 */
+    @Test
+    fun draftIsRestoredAndEveryChangeIsReported() {
+        val changes = mutableListOf<String>()
+        var restored by mutableStateOf<String?>(null)
+        compose.setContent {
+            DshRemoteTheme {
+                ChatComposer(
+                    onlineChatState(),
+                    ChatActions(onDraftChange = { changes += it }, onSend = { true }),
+                    restoredDraft = restored,
+                )
+            }
+        }
+        compose.runOnIdle { restored = "写了一半" }
+        compose.onNodeWithTag("chat-input").assertTextContains("写了一半")
+        compose.onNodeWithTag("chat-input").performTextInput("，继续")
+        compose.runOnIdle { assertEquals("写了一半，继续", changes.last()) }
+        compose.onNodeWithTag("chat-send").performClick()
+        compose.runOnIdle { assertEquals("", changes.last()) }
+        // 再来一份恢复的草稿：输入框已经清空了才放进去
+        compose.onNodeWithTag("chat-input").performTextInput("新写的")
+        compose.runOnIdle { restored = "旧草稿" }
+        compose.onNodeWithTag("chat-input").assertTextContains("新写的")
+    }
+
     @Test
     fun offlineStateDisablesInputSendAndPickersWithoutDiscardingDraft() {
         var state by mutableStateOf(onlineChatState())

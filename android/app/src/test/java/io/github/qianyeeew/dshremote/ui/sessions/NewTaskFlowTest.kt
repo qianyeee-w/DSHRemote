@@ -10,6 +10,7 @@ import io.github.qianyeeew.dshremote.data.api.PermissionPreset
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.Workspace
+import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.ui.chat.ChatHandoff
 import kotlinx.coroutines.CompletableDeferred
@@ -112,6 +113,20 @@ class NewTaskFlowTest {
                 ?.handoff as ChatHandoff.FailedFirstMessage
         assertEquals(backend.prompts.single().second, handoff.message)
         assertEquals(1, backend.created.size)
+        // 请求写出后断开：不确定是否送达，不自动重发（落地方案 B3）
+        assertEquals(OutgoingStatus.UNCERTAIN, handoff.status)
+    }
+
+    /** 连不上：确定没送到，会话里是「发送失败」。 */
+    @Test
+    fun promptThatNeverLeftIsAPlainFailure() {
+        backend.promptError = ApiException.Network(IOException("refused"), maybeDelivered = false)
+        flow.start("任务", project)
+        val handoff =
+            flow.state.value.started
+                ?.handoff as ChatHandoff.FailedFirstMessage
+        assertEquals(OutgoingStatus.FAILED, handoff.status)
+        assertEquals(1, backend.prompts.size)
     }
 
     /** 开始中再点不会创建第二个会话；没写内容或者太长不开始。 */

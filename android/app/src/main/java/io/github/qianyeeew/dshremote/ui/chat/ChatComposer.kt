@@ -43,7 +43,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
@@ -99,11 +101,25 @@ fun ChatComposer(
     picker: Picker = Picker.Closed,
     /** 打开页面时输入框里已有的文字（新任务的消息没发出去时放回来）。 */
     initialText: String = "",
+    /** 从本地恢复的草稿（落地方案 B3）：读到时输入框还是空的才放进去。 */
+    restoredDraft: String? = null,
     attention: ComposerAttention = ComposerAttention.None,
     onAnswer: (Attention, questionId: String, text: String) -> Boolean = { _, _, _ -> false },
 ) {
     val colors = DesignTheme.colors
-    var text by rememberSaveable { mutableStateOf(initialText) }
+    // 带光标位置：程序放进去的文字（放回的消息、恢复的草稿）光标在末尾，接着写不会插到最前面
+    var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(initialText, TextRange(initialText.length)))
+    }
+    val text = field.text
+    LaunchedEffect(restoredDraft) {
+        if (restoredDraft != null && field.text.isEmpty()) field = TextFieldValue(restoredDraft, TextRange(restoredDraft.length))
+    }
+    val edit = { value: TextFieldValue ->
+        val changed = value.text != field.text
+        field = value
+        if (changed) actions.onDraftChange(value.text)
+    }
     var focused by remember { mutableStateOf(false) }
     val pickerOpen = picker != Picker.Closed
     val expanded = focused || pickerOpen
@@ -141,7 +157,7 @@ fun ChatComposer(
                 ComposerAttention.None -> actions.onSend(text)
             }
         if (accepted) {
-            text = ""
+            edit(TextFieldValue())
             haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
         }
     }
@@ -159,8 +175,8 @@ fun ChatComposer(
         ) {
             Row(Modifier.heightIn(min = if (expanded) 24.dp else 50.dp), verticalAlignment = Alignment.CenterVertically) {
                 BasicTextField(
-                    value = text,
-                    onValueChange = { text = it },
+                    value = field,
+                    onValueChange = edit,
                     enabled = writable,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
                     cursorBrush = SolidColor(colors.text),

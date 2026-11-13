@@ -24,9 +24,13 @@ sealed class ApiException(
         cause: Throwable,
     ) : ApiException("服务器证书的指纹和配对时保存的不一致", cause)
 
-    /** 连不上、超时、连接中断等网络问题。可以重试。 */
+    /**
+     * 连不上、超时、连接中断等网络问题。可以重试。
+     * [maybeDelivered]：请求体已经开始写出，插件可能已经收到（只有发消息区分这一点，其他接口一律为 true）。
+     */
     class Network(
         cause: IOException,
+        val maybeDelivered: Boolean = true,
     ) : ApiException("网络错误：${cause.javaClass.simpleName}", cause)
 
     /** 插件返回了无法解析的内容（多半是 App 和插件的版本不匹配）。 */

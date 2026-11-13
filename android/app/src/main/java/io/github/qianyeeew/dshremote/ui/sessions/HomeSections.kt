@@ -141,18 +141,29 @@ sealed interface RecentLine {
         val reason: String?,
     ) : RecentLine
 
+    /** 有没发出去的草稿（落地方案 B3）：主文字色「草稿」，后面跟草稿开头。 */
+    data class Draft(
+        val text: String,
+    ) : RecentLine
+
     /** 没有轮次数据（旧插件、还没运行过）：只显示项目名。 */
     data object None : RecentLine
 }
 
 /**
- * 最近列表一行的第二行。没连上电脑而会话断线前还在运行，是「结果待确认」（落地方案 B1：由 App 判断，
- * 重新连上、拿到新状态之后就换成真实结果）。
+ * 最近列表一行的第二行。有草稿时先显示草稿（这是用户自己还没做完的事）。没连上电脑而会话断线前还在运行，
+ * 是「结果待确认」（落地方案 B1：由 App 判断，重新连上、拿到新状态之后就换成真实结果）。
  */
 fun recentLine(
     session: SessionSummary,
     online: Boolean,
+    draft: String? = null,
 ): RecentLine {
+    draft
+        ?.replace(WHITESPACE, " ")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { return RecentLine.Draft(it) }
     if (!online && session.status == SessionStatus.RUNNING) return RecentLine.Status(R.string.turn_unconfirmed)
     val reply =
         session.lastReply

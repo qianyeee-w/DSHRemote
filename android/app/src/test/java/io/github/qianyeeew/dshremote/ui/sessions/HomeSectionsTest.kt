@@ -194,4 +194,12 @@ class HomeSectionsTest {
         // 断线时已经不在运行：照常显示最后的结果
         assertEquals(RecentLine.Reply("上一轮"), recentLine(running.copy(status = SessionStatus.IDLE), online = false))
     }
+
+    /** 落地方案 B3：有草稿时先显示草稿（换行合成空格），空白的草稿不算。 */
+    @Test
+    fun draftComesFirst() {
+        val failed = session("s", lastTurn = LastTurn(TurnResult.FAILED, 1, "rate limited"))
+        assertEquals(RecentLine.Draft("先看一下 再改"), recentLine(failed, online = true, draft = "先看一下\n再改"))
+        assertEquals(RecentLine.Failed("rate limited"), recentLine(failed, online = true, draft = "  "))
+    }
 }

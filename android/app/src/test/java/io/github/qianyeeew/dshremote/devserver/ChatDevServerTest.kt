@@ -37,6 +37,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.BeforeClass
@@ -122,6 +123,42 @@ class ChatDevServerTest {
             assertTrue(chatBlocks(ended.items, ended.turns).last() is ChatBlock.TurnEnd)
             val summary = await("摘要里的最近一轮") { it.session?.lastTurn?.result == TurnResult.COMPLETED }.session!!
             assertTrue("最后一句回复：${summary.lastReply}", summary.lastReply.orEmpty().isNotBlank())
+        }
+
+    /**
+     * 落地方案 B4：真实插件给出的本轮用量（推送的 turn.updated 和历史里都有），一轮结束后会话页自动读到用量与上下文。
+     * 假模型每次请求报告输入 10，不报告缓存。
+     */
+    @Test
+    fun turnUsageAndSessionUsageReachTheApp() =
+        runBlocking<Unit> {
+            val before = await("打开会话时读到用量") { it.usage != null }.usage!!
+            assertNull("新会话还没有上下文占用", before.context?.tokens)
+            assertTrue(withContext(main) { vm.send("你好") })
+            val state =
+                await("本轮用量和会话用量", timeoutMillis = 60_000) { s ->
+                    s.turns.values.any { it.result == TurnResult.COMPLETED && it.usage != null } &&
+                        (s.usage?.total?.uncachedInputTokens ?: 0) > 0
+                }
+            val usage =
+                state.turns.values
+                    .single { it.usage != null }
+                    .usage!!
+            assertEquals(10L, usage.uncachedInputTokens)
+            assertEquals(usage.uncachedInputTokens + usage.outputTokens, usage.totalTokens)
+            assertNull("假模型没有报告缓存，不能显示缓存命中", usage.cacheHit)
+            val session = state.usage!!
+            assertTrue("上下文：${session.context}", (session.context?.tokens ?: 0) > 0 && (session.context?.window ?: 0) > 0)
+            assertEquals(usage.uncachedInputTokens, session.total?.uncachedInputTokens)
+            // 历史里同一轮也有同样的用量
+            assertEquals(
+                usage,
+                api
+                    .messages(sessionId)
+                    .turns
+                    .single { it.usage != null }
+                    .usage,
+            )
         }
 
     @Test

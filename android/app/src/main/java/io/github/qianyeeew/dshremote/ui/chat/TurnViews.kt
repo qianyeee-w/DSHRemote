@@ -63,8 +63,8 @@ fun elapsedClock(millis: Long): String {
 }
 
 /**
- * 一轮的结尾（6.7）：12.5 号灰字，`本轮结束 · 4 分 50 秒`。失败用红色并跟上原因。
- * 用时要有开始和结束时间才显示；token 数等落地方案 B4。
+ * 一轮的结尾（6.7）：12.5 号灰字，`本轮结束 · 4 分 50 秒 · 61k token · 缓存命中 71%`。失败用红色并跟上原因。
+ * 用时要有开始和结束时间才显示；token 数要有这一轮完整的用量（落地方案 B4），缓存命中要每次请求都报告了缓存、分母不为零。
  */
 @Composable
 fun TurnEndLine(
@@ -79,6 +79,8 @@ fun TurnEndLine(
     val end = turn.endedAt
     val duration = if (start != null && end != null) durationText(end - start) else null
     val separator = stringResource(R.string.separator_dot)
+    val tokens = turn.usage?.let { stringResource(R.string.usage_tokens, formatTokens(it.totalTokens)) }
+    val cacheHit = turn.usage?.cacheHit?.let { stringResource(R.string.usage_cache_hit, percent(it)) }
     val text =
         buildAnnotatedString {
             withStyle(SpanStyle(color = if (failed) colors.danger else colors.textSecondary)) {
@@ -87,6 +89,14 @@ fun TurnEndLine(
             if (duration != null) {
                 append(separator)
                 append(duration)
+            }
+            if (tokens != null) {
+                append(separator)
+                append(tokens)
+            }
+            if (cacheHit != null) {
+                append(separator)
+                append(cacheHit)
             }
         }
     Text(

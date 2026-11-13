@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui
 
+import android.graphics.Bitmap
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Column
@@ -8,6 +9,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsDisplayed
@@ -16,17 +18,22 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.isNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qianyeeew.dshremote.R
+import io.github.qianyeeew.dshremote.data.api.ContextUsage
 import io.github.qianyeeew.dshremote.data.api.ModelList
 import io.github.qianyeeew.dshremote.data.api.ModelOption
 import io.github.qianyeeew.dshremote.data.api.ModelRef
@@ -34,17 +41,21 @@ import io.github.qianyeeew.dshremote.data.api.PermissionPreset
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.SessionUsage
+import io.github.qianyeeew.dshremote.data.api.TotalUsage
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.ui.chat.ChatActions
 import io.github.qianyeeew.dshremote.ui.chat.ChatComposer
 import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.Picker
+import io.github.qianyeeew.dshremote.ui.chat.USAGE_DETAILS_TAG
 import io.github.qianyeeew.dshremote.ui.common.INLINE_CHOICES_TAG
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class ChatComposerUiTest {
@@ -198,6 +209,13 @@ class ChatComposerUiTest {
 
     private fun text(id: Int) = context.getString(id)
 
+    private fun save(name: String) {
+        compose.waitForIdle()
+        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        val directory = File(context.getExternalFilesDir(null), "visual-verification").apply { mkdirs() }
+        File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
     /** 落地方案 B3：打开会话时恢复草稿；写字时通知保存；发出去后清空草稿；输入框里已经有字时不被覆盖。 */
     @Test
     fun draftIsRestoredAndEveryChangeIsReported() {
@@ -222,6 +240,73 @@ class ChatComposerUiTest {
         compose.onNodeWithTag("chat-input").performTextInput("新写的")
         compose.runOnIdle { restored = "旧草稿" }
         compose.onNodeWithTag("chat-input").assertTextContains("新写的")
+    }
+
+    /**
+     * 落地方案 B4（设计规格 6.3、7.11）：长按发送键在输入框里展开用量，没写字时也能长按；
+     * 和模型、审批方式的选项一次只展开一个；返回键先收起它；拿不到的项不显示。
+     */
+    @Test
+    fun longPressingTheSendKeyShowsUsageInPlace() {
+        var refreshed = 0
+        var picker by mutableStateOf<Picker>(Picker.Closed)
+        var back: OnBackPressedDispatcher? = null
+        val usage = SessionUsage(ContextUsage(40_000, 131_072), TotalUsage(41_000, 12_000, 138_000, 3_000))
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            DshRemoteTheme {
+                ChatComposer(
+                    onlineChatState().copy(usage = usage),
+                    ChatActions(
+                        onRefreshUsage = { refreshed++ },
+                        onOpenModels = { picker = Picker.Models(ModelList(models = emptyList())) },
+                        onClosePicker = { picker = Picker.Closed },
+                    ),
+                    picker = picker,
+                )
+            }
+        }
+        compose.onNodeWithTag("chat-input").performClick()
+        compose.onNodeWithTag("chat-send").assertIsNotEnabled().performTouchInput { longClick() }
+        compose.onNodeWithTag(USAGE_DETAILS_TAG).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.usage_context_low)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.usage_context_amount, "40k", "131k")).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.usage_session_value, "182k", "12k")).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.usage_percent, 76)).assertIsDisplayed()
+        compose.onNodeWithTag("chat-input").assertIsFocused()
+        compose.runOnIdle { assertEquals(1, refreshed) }
+        save("composer-usage")
+        // 打开模型的选项：用量收起
+        compose.onNodeWithTag("chat-model").performClick()
+        compose.onNodeWithTag(USAGE_DETAILS_TAG).assertDoesNotExist()
+        compose.runOnIdle { picker = Picker.Closed }
+        // 再展开，返回键先收起它，输入框还在编辑
+        compose.onNodeWithTag("chat-send").performTouchInput { longClick() }
+        compose.onNodeWithTag(USAGE_DETAILS_TAG).assertIsDisplayed()
+        compose.runOnIdle { back!!.onBackPressed() }
+        compose.onNodeWithTag(USAGE_DETAILS_TAG).assertDoesNotExist()
+        compose.onNodeWithTag("chat-composer-options").assertIsDisplayed()
+    }
+
+    /** 拿不到的项不显示（不当成 0）；全都拿不到时说一句；上下文用到八成写「上下文快满」。 */
+    @Test
+    fun missingUsageIsNotShownAsZero() {
+        var state by mutableStateOf(onlineChatState())
+        compose.setContent { DshRemoteTheme { ChatComposer(state, ChatActions()) } }
+        compose.onNodeWithTag("chat-input").performClick()
+        compose.onNodeWithTag("chat-send").performTouchInput { longClick() }
+        compose.onNodeWithText(text(R.string.usage_unavailable)).assertIsDisplayed()
+        // 新会话：还没有上下文占用，累计都是 0，缓存命中的分母为零
+        compose.runOnIdle { state = state.copy(usage = SessionUsage(ContextUsage(window = 131_072), TotalUsage(0, 0, 0, 0))) }
+        compose.onNodeWithText(text(R.string.usage_context)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.usage_cache)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.usage_session_value, "0", "0")).assertIsDisplayed()
+        compose.onNodeWithTag("chat-context-almost-full").assertDoesNotExist()
+        compose.runOnIdle { state = state.copy(usage = SessionUsage(ContextUsage(110_000, 131_072), null)) }
+        compose.onNodeWithTag("chat-context-almost-full").assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.usage_context_full)).assertIsDisplayed()
+        save("composer-almost-full")
+        compose.onNodeWithText(text(R.string.usage_session)).assertDoesNotExist()
     }
 
     @Test

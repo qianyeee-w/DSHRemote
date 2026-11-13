@@ -206,6 +206,8 @@ data class Turn(
     val error: String? = null,
     /** `user` 表示用户点了停止。 */
     val stoppedBy: String? = null,
+    /** 这一轮的用量（落地方案 B4）：只在结束、而且插件读到了整轮的事件时才有。 */
+    val usage: TurnUsage? = null,
 ) {
     val running: Boolean get() = result == null && endedAt == null
 
@@ -218,6 +220,7 @@ data class Turn(
             result = newer.result ?: result,
             error = newer.error ?: error,
             stoppedBy = newer.stoppedBy ?: stoppedBy,
+            usage = newer.usage ?: usage,
         )
 }
 

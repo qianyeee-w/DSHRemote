@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import io.github.qianyeeew.dshremote.data.api.ApiException
+import io.github.qianyeeew.dshremote.data.api.ContextUsage
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
 import io.github.qianyeeew.dshremote.data.api.MessageRole
@@ -14,7 +15,11 @@ import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.SessionUsage
 import io.github.qianyeeew.dshremote.data.api.TextPart
+import io.github.qianyeeew.dshremote.data.api.TotalUsage
+import io.github.qianyeeew.dshremote.data.api.Turn
+import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.host.HostAddress
@@ -456,6 +461,37 @@ class ChatViewModelTest {
             assertEquals(listOf("任务"), notSent)
         }
 
+    /** 落地方案 B4：打开会话、一轮结束时读用量（不轮询）；读不到时保留上一次的，不清空。 */
+    @Test
+    fun usageIsReadWhenOpeningAndWhenATurnEnds() {
+        backend.usage = SessionUsage(ContextUsage(21, 1_000), TotalUsage(10, 5, 0, 0))
+        val vm = visible()
+        assertEquals(1, backend.usageReads)
+        assertEquals(backend.usage, vm.state.value.usage)
+        // 一轮开始：不读；结束：读
+        backend.push(SessionEvent.TurnUpdated(SESSION, Turn(2, startedAt = 1)))
+        assertEquals(1, backend.usageReads)
+        backend.usage = SessionUsage(ContextUsage(40, 1_000), TotalUsage(20, 10, 0, 0))
+        backend.push(SessionEvent.TurnUpdated(SESSION, Turn(2, startedAt = 1, endedAt = 5, result = TurnResult.COMPLETED)))
+        assertEquals(2, backend.usageReads)
+        assertEquals(
+            40L,
+            vm.state.value.usage
+                ?.context
+                ?.tokens,
+        )
+        // 读不到（例如旧插件、断线）：保留上一次的
+        backend.usage = null
+        vm.refreshUsage()
+        assertEquals(3, backend.usageReads)
+        assertEquals(
+            40L,
+            vm.state.value.usage
+                ?.context
+                ?.tokens,
+        )
+    }
+
     private val resolved =
         kotlinx.coroutines.flow.MutableSharedFlow<io.github.qianyeeew.dshremote.data.live.LiveEvent.AttentionResolved>(
             extraBufferCapacity = 8,
@@ -595,6 +631,15 @@ class ChatViewModelTest {
                 throw ApiException.Network(IOException("x"))
             }
             return pages.getValue(before)
+        }
+
+        var usage: SessionUsage? = null
+        var usageReads = 0
+
+        override suspend fun usage(): SessionUsage {
+            check()
+            usageReads++
+            return usage ?: throw ApiException.Network(IOException("x"))
         }
 
         override suspend fun prompt(message: OutgoingMessage) {

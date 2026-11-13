@@ -45,6 +45,7 @@ import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.ui.DesignTheme
+import io.github.qianyeeew.dshremote.ui.chat.contextRing
 import io.github.qianyeeew.dshremote.ui.chat.permissionHint
 import io.github.qianyeeew.dshremote.ui.chat.permissionLabel
 import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
@@ -375,6 +376,8 @@ private fun StartKey(
     Box(
         Modifier
             .size(48.dp)
+            // 新任务还没有上下文，外圈只画轨道（设计规格 6.3）
+            .contextRing(ratio = null, trackOnly = true)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description }
             .testTag("new-task-start"),

@@ -30,6 +30,7 @@ import io.github.qianyeeew.dshremote.data.api.ToolPart
 import io.github.qianyeeew.dshremote.data.api.ToolStatus
 import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.api.TurnResult
+import io.github.qianyeeew.dshremote.data.api.TurnUsage
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
@@ -254,6 +255,44 @@ class ChatContentUiTest {
                 )}$dot${context.getString(R.string.duration_seconds, 1)}",
             ).assertIsDisplayed()
         save("chat-turn-end")
+    }
+
+    /** 落地方案 B4：结尾带上本轮的 token 数和缓存命中；没报告缓存时只有 token 数，没有用量时都不写。 */
+    @Test
+    fun turnEndShowsTokensAndCacheHitWhenKnown() {
+        val numbered = turn.map { (it as ChatItem.Entry).let { e -> e.copy(message = e.message.copy(turn = 1)) } }
+        val more =
+            listOf(
+                ChatItem.Entry("u2", Message("u2", MessageRole.USER, listOf(TextPart("第二轮")), 2, turn = 2)),
+                ChatItem.Entry("u3", Message("u3", MessageRole.USER, listOf(TextPart("第三轮")), 3, turn = 3)),
+            )
+        val turns =
+            mapOf(
+                1 to
+                    Turn(
+                        1,
+                        startedAt = 0,
+                        endedAt = 290_000,
+                        result = TurnResult.COMPLETED,
+                        usage = TurnUsage(61_234, 9_800, 1_200, 49_800, 434),
+                    ),
+                2 to Turn(2, startedAt = 300_000, endedAt = 301_000, result = TurnResult.COMPLETED, usage = TurnUsage(15, 10, 5)),
+                3 to Turn(3, startedAt = 302_000, endedAt = 303_000, result = TurnResult.COMPLETED),
+            )
+        render(onlineChatState().copy(items = numbered + more, turns = turns))
+        val dot = context.getString(R.string.separator_dot)
+        val ended = context.getString(R.string.turn_ended)
+        compose
+            .onNodeWithText(
+                "$ended$dot${context.getString(R.string.duration_minutes, 4, 50)}$dot" +
+                    "${context.getString(R.string.usage_tokens, "61k")}$dot${context.getString(R.string.usage_cache_hit, 83)}",
+            ).assertIsDisplayed()
+        compose
+            .onNodeWithText(
+                "$ended$dot${context.getString(R.string.duration_seconds, 1)}$dot${context.getString(R.string.usage_tokens, "15")}",
+            ).assertIsDisplayed()
+        compose.onNodeWithText("$ended$dot${context.getString(R.string.duration_seconds, 1)}").assertIsDisplayed()
+        save("chat-turn-usage")
     }
 
     /** 运行状态行右边是本轮已经运行的时间，按电脑的时钟算。 */

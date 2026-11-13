@@ -13,6 +13,7 @@ import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
+import io.github.qianyeeew.dshremote.data.api.SessionUsage
 import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.chat.ChatTimeline
@@ -66,6 +67,9 @@ interface ChatBackend {
 
     /** 电脑上的项目，用来在顶栏显示项目名。 */
     suspend fun workspaces(): List<Workspace>
+
+    /** 用量与上下文（落地方案 B4）。旧插件没有这个接口。 */
+    suspend fun usage(): SessionUsage = SessionUsage()
 }
 
 /** 通过实时连接订阅，通过 [ConnectionManager.api] 调用接口。 */
@@ -95,6 +99,8 @@ class LiveChatBackend(
     }
 
     override suspend fun workspaces(): List<Workspace> = api().workspaces()
+
+    override suspend fun usage(): SessionUsage = api().usage(sessionId)
 
     private fun api() = connections.api(hostId) ?: throw OfflineException()
 
@@ -143,6 +149,8 @@ data class ChatState(
     val turns: Map<Int, Turn> = emptyMap(),
     /** 电脑的时钟比手机快多少毫秒（[HostLiveState.clockOffsetMillis]），算本轮用时。 */
     val clockOffsetMillis: Long = 0,
+    /** 用量与上下文（落地方案 B4）。还没读到、读不到或旧插件时为 null。 */
+    val usage: SessionUsage? = null,
 ) {
     val online: Boolean get() = link is LinkStatus.Online
 
@@ -275,6 +283,9 @@ class ChatViewModel(
 
     private val names = combine(hostName, workspaces) { host, list -> host to list }
 
+    /** 最近一次读到的用量。读失败时保留上一次的，不清空。 */
+    private val usage = MutableStateFlow<SessionUsage?>(null)
+
     val state: StateFlow<ChatState> =
         combine(states, timeline, outbox, flags, attention.ui) { live, t, o, f, attentionUi ->
             val host = live[hostId]
@@ -294,7 +305,8 @@ class ChatViewModel(
             )
         }.combine(names) { base, (name, projects) ->
             base.copy(hostName = name, projectName = projectName(base.session, projects))
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatState(null, LinkStatus.Stopped, emptyList(), false, false, false, false))
+        }.combine(usage) { base, u -> base.copy(usage = u) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, ChatState(null, LinkStatus.Stopped, emptyList(), false, false, false, false))
 
     init {
         // 出现在这个页面上的事项之后在别处被处理时，提示「已在其他地方处理」
@@ -310,11 +322,14 @@ class ChatViewModel(
     /** 界面可见：订阅推送（插件每个会话按引用计数订阅，离开页面后取消）。 */
     fun onVisible() {
         loadWorkspaces()
+        refreshUsage()
         if (subscription?.isActive == true) return
         subscription =
             viewModelScope.launch {
                 backend.events().collect { event ->
                     if (event is SessionEvent.Resync) reloadLatest() else updateTimeline { it.apply(event) }
+                    // 一轮结束后用量和上下文都变了（不轮询，protocol.md「用量」）
+                    if (event is SessionEvent.TurnUpdated && event.turn.endedAt != null) refreshUsage()
                 }
             }
     }
@@ -390,6 +405,17 @@ class ChatViewModel(
                 _notice.value = ChatNotice.OFFLINE
             } catch (_: OfflineException) {
                 _notice.value = ChatNotice.OFFLINE
+            }
+        }
+    }
+
+    /** 读用量（打开会话、一轮结束、用户长按发送键时）。读不到时保留上一次的，不显示成 0。 */
+    fun refreshUsage() {
+        viewModelScope.launch {
+            try {
+                usage.value = backend.usage()
+            } catch (_: ApiException) {
+            } catch (_: OfflineException) {
             }
         }
     }

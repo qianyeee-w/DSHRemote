@@ -165,6 +165,12 @@ class PluginApi(
         send("POST", listOf("sessions", sessionId, "cancel"), body = EMPTY_BODY) { decode(Accepted.serializer(), it) }
     }
 
+    /** 用量与上下文（protocol.md 第 4 节「用量」）。旧插件没有这个接口，返回 `404`。 */
+    suspend fun usage(sessionId: String): SessionUsage {
+        requireId(sessionId)
+        return get(listOf("sessions", sessionId, "usage"), SessionUsage.serializer())
+    }
+
     // ---------------------------------------------------------------- 模型和权限模式
 
     suspend fun models(): ModelList = get(listOf("models"), ModelList.serializer())

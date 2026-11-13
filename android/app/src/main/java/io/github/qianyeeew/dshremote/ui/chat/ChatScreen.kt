@@ -84,6 +84,8 @@ class ChatActions(
     val onCheckSend: (requestId: String) -> Unit = {},
     /** 输入框里的字变了（存草稿）。 */
     val onDraftChange: (String) -> Unit = {},
+    /** 用户要看用量：重新读一次。 */
+    val onRefreshUsage: () -> Unit = {},
     val onCancelRun: () -> Unit = {},
     val onLoadOlder: () -> Unit = {},
     val onRetryLoad: () -> Unit = {},
@@ -121,6 +123,7 @@ fun ChatScreen(
                 onRetrySend = viewModel::retrySend,
                 onCheckSend = viewModel::checkSend,
                 onDraftChange = viewModel::draftChanged,
+                onRefreshUsage = viewModel::refreshUsage,
                 onCancelRun = viewModel::cancelRun,
                 onLoadOlder = viewModel::loadOlder,
                 onRetryLoad = viewModel::retryLoad,

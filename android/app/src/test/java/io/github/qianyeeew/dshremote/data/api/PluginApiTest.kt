@@ -457,6 +457,25 @@ class PluginApiTest {
             assertApiError<ApiException.Network> { PluginApi(client, HostAddress("127.0.0.1", closedPort), token).info() }
         }
 
+    /** 落地方案 B4：用量与上下文；拿不到的字段是 null，不是 0；旧插件 404。 */
+    @Test
+    fun usageParsesWhatThePluginGivesAndLeavesTheRestNull() =
+        runBlocking<Unit> {
+            respond(
+                """{"context":{"tokens":59210,"window":131072},"total":{"uncachedInputTokens":41000,"outputTokens":12000,"cacheReadTokens":138000,"cacheWriteTokens":3000},"extra":1}""",
+            )
+            assertEquals(
+                SessionUsage(ContextUsage(59_210, 131_072), TotalUsage(41_000, 12_000, 138_000, 3_000)),
+                api.usage("s1"),
+            )
+            assertEquals("/v1/sessions/s1/usage", server.takeRequest().url.encodedPath)
+            respond("""{"context":{"window":131072},"total":null}""")
+            assertEquals(SessionUsage(ContextUsage(tokens = null, window = 131_072), null), api.usage("s1"))
+            server.takeRequest()
+            error(404, """{"error":{"code":"NOT_FOUND","message":"接口不存在"}}""")
+            assertApiError<ApiException.Http> { api.usage("s1") }
+        }
+
     /** 落地方案 B3：请求写出之后连接断开，插件可能已经收到；连不上时肯定没收到。 */
     @Test
     fun promptKnowsWhetherTheMessageMayHaveArrived() =

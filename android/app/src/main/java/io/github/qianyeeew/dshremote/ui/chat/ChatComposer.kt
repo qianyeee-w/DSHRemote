@@ -5,6 +5,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -122,19 +124,30 @@ fun ChatComposer(
     }
     var focused by remember { mutableStateOf(false) }
     val pickerOpen = picker != Picker.Closed
-    val expanded = focused || pickerOpen
+    // 长按发送键展开的用量（7.11）。和模型、审批方式的选项一次只展开一个
+    var usageOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(pickerOpen) { if (pickerOpen) usageOpen = false }
+    val expanded = focused || pickerOpen || usageOpen
     // 收起的动画期间还要画最后一次展开的选项
     var lastPicker by remember { mutableStateOf<Picker>(Picker.Closed) }
     if (pickerOpen) lastPicker = picker
-    // 返回键先收起选项，再按一次才收起输入框
+    // 返回键先收起选项和用量，再按一次才收起输入框
     BackHandler(enabled = pickerOpen) { actions.onClosePicker() }
+    BackHandler(enabled = usageOpen) { usageOpen = false }
+    val toggleUsage = {
+        if (pickerOpen) actions.onClosePicker()
+        usageOpen = !usageOpen
+        if (usageOpen) actions.onRefreshUsage()
+    }
+    val ratio = state.usage?.context?.ratio
+    val almostFull = ratio != null && ratio >= CONTEXT_ALMOST_FULL
     val focus = LocalFocusManager.current
     val haptic = LocalHapticFeedback.current
     val imeVisible = WindowInsets.isImeVisible
     var hadKeyboard by remember { mutableStateOf(false) }
     // 收起键盘、又没写字时退出编辑，输入框跟着收起
-    LaunchedEffect(imeVisible, pickerOpen) {
-        if (hadKeyboard && !imeVisible && !pickerOpen && text.isBlank()) focus.clearFocus()
+    LaunchedEffect(imeVisible, pickerOpen, usageOpen) {
+        if (hadKeyboard && !imeVisible && !pickerOpen && !usageOpen && text.isBlank()) focus.clearFocus()
         hadKeyboard = imeVisible
     }
     val hint =
@@ -185,8 +198,10 @@ fun ChatComposer(
                         Modifier
                             .weight(1f)
                             .onFocusChanged { focused = it.isFocused }
-                            .onTap { if (pickerOpen) actions.onClosePicker() }
-                            .padding(end = 10.dp)
+                            .onTap {
+                                if (pickerOpen) actions.onClosePicker()
+                                usageOpen = false
+                            }.padding(end = 10.dp)
                             .testTag("chat-input")
                             .semantics { contentDescription = hint },
                     decorationBox = { field ->
@@ -204,12 +219,17 @@ fun ChatComposer(
                         }
                     },
                 )
-                if (!expanded) SendKey(mode, onSend = send, onStop = actions.onCancelRun)
+                if (!expanded) SendKey(mode, ratio, onSend = send, onStop = actions.onCancelRun, onLongPress = toggleUsage)
             }
             // 选项在最下面一行的正上方展开，输入框卡片向上长；不另开窗口，焦点和键盘都不变
             InlineChoices(visible = expanded && pickerOpen) {
                 DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp, bottom = 4.dp))
                 PickerChoices(lastPicker, state, actions)
+                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
+            }
+            InlineChoices(visible = expanded && usageOpen && !pickerOpen) {
+                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp, bottom = 4.dp))
+                UsageDetails(state.usage)
                 DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
             }
             if (expanded) {
@@ -239,7 +259,16 @@ fun ChatComposer(
                             Modifier.weight(1f, fill = false).testTag("chat-preset"),
                         )
                     }
-                    SendKey(mode, onSend = send, onStop = actions.onCancelRun)
+                    if (almostFull) {
+                        Text(
+                            stringResource(R.string.usage_context_almost_full),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.waitingText,
+                            maxLines = 1,
+                            modifier = Modifier.testTag("chat-context-almost-full"),
+                        )
+                    }
+                    SendKey(mode, ratio, onSend = send, onStop = actions.onCancelRun, onLongPress = toggleUsage)
                 }
             }
         }
@@ -349,24 +378,44 @@ private fun ComposerChoice(
     }
 }
 
-/** 发送键：发送、不可点、停止三种（[SendKeyMode]）。看上去直径 30，可点区域 48。 */
+/**
+ * 发送键：发送、不可点、停止三种（[SendKeyMode]）。看上去直径 30，可点区域 48。
+ * 外圈表示上下文用了多少（[contextRing]）；长按展开用量（7.11），不能发送时也可以长按。
+ */
 @Composable
 private fun SendKey(
     mode: SendKeyMode,
+    contextRatio: Float?,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val colors = DesignTheme.colors
+    val haptic = LocalHapticFeedback.current
     val description = stringResource(if (mode == SendKeyMode.STOP) R.string.chat_stop else R.string.chat_send)
+    val idle = mode == SendKeyMode.IDLE
     Box(
         Modifier
             .size(48.dp)
-            .clickable(
-                enabled = mode != SendKeyMode.IDLE,
+            .contextRing(contextRatio)
+            .combinedClickable(
                 role = Role.Button,
-                onClick = if (mode == SendKeyMode.STOP) onStop else onSend,
-            ).semantics { contentDescription = description }
-            .testTag(if (mode == SendKeyMode.STOP) "chat-stop" else "chat-send"),
+                onLongClickLabel = stringResource(R.string.usage_show),
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                },
+                onClick = {
+                    when (mode) {
+                        SendKeyMode.STOP -> onStop()
+                        SendKeyMode.SEND -> onSend()
+                        SendKeyMode.IDLE -> Unit
+                    }
+                },
+            ).semantics {
+                contentDescription = description
+                if (idle) disabled()
+            }.testTag(if (mode == SendKeyMode.STOP) "chat-stop" else "chat-send"),
         contentAlignment = Alignment.Center,
     ) {
         Box(

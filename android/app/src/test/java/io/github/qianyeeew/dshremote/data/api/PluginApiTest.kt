@@ -457,6 +457,27 @@ class PluginApiTest {
             assertApiError<ApiException.Network> { PluginApi(client, HostAddress("127.0.0.1", closedPort), token).info() }
         }
 
+    /** 落地方案 B5：计划；旧插件 404。 */
+    @Test
+    fun planParsesGoalAndSteps() =
+        runBlocking<Unit> {
+            respond(
+                """{"goal":{"objective":"确认重连","status":"blocked",""" +
+                    """"blocked":{"code":"round-limit","message":"Goal reached its configured limit of 1 rounds."}},""" +
+                    """"steps":[{"text":"跑测试","status":"in_progress"}]}""",
+            )
+            assertEquals(
+                SessionPlan(
+                    PlanGoal("确认重连", GoalStatus.BLOCKED, GoalBlock("round-limit", "Goal reached its configured limit of 1 rounds.")),
+                    listOf(PlanStep("跑测试", StepStatus.IN_PROGRESS)),
+                ),
+                api.plan("s1"),
+            )
+            assertEquals("/v1/sessions/s1/plan", server.takeRequest().url.encodedPath)
+            error(404, """{"error":{"code":"NOT_FOUND","message":"接口不存在"}}""")
+            assertApiError<ApiException.Http> { api.plan("s1") }
+        }
+
     /** 落地方案 B4：用量与上下文；拿不到的字段是 null，不是 0；旧插件 404。 */
     @Test
     fun usageParsesWhatThePluginGivesAndLeavesTheRestNull() =

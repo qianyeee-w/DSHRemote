@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.ContextUsage
+import io.github.qianyeeew.dshremote.data.api.GoalStatus
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
 import io.github.qianyeeew.dshremote.data.api.MessageRole
@@ -12,10 +13,14 @@ import io.github.qianyeeew.dshremote.data.api.ModelList
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
+import io.github.qianyeeew.dshremote.data.api.PlanGoal
+import io.github.qianyeeew.dshremote.data.api.PlanStep
 import io.github.qianyeeew.dshremote.data.api.PromptMode
+import io.github.qianyeeew.dshremote.data.api.SessionPlan
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.SessionUsage
+import io.github.qianyeeew.dshremote.data.api.StepStatus
 import io.github.qianyeeew.dshremote.data.api.TextPart
 import io.github.qianyeeew.dshremote.data.api.TotalUsage
 import io.github.qianyeeew.dshremote.data.api.Turn
@@ -82,6 +87,9 @@ class ChatViewModelTest {
         backend.push(upsert(msg("m3"), 1))
         assertEquals(listOf("m1", "m2", "m3"), vm.keys())
 
+        // 显示了两次（会话页和计划页），两次都隐藏了才取消订阅
+        vm.onHidden()
+        assertEquals(1, backend.active)
         vm.onHidden()
         assertEquals(0, backend.active)
     }
@@ -461,6 +469,42 @@ class ChatViewModelTest {
             assertEquals(listOf("任务"), notSent)
         }
 
+    /** 落地方案 B5：订阅生效（Resync）时读计划，之后按推送整条替换；读不到时保留上一次的。 */
+    @Test
+    fun planIsReadOnResyncAndReplacedByPushes() {
+        backend.plan = SessionPlan(steps = listOf(PlanStep("跑测试", StepStatus.IN_PROGRESS)))
+        val vm = visible()
+        assertEquals(1, backend.planReads)
+        assertEquals(backend.plan, vm.state.value.plan)
+        val pushed = SessionPlan(goal = PlanGoal("目标", GoalStatus.ACTIVE))
+        backend.push(SessionEvent.PlanUpdated(SESSION, pushed))
+        assertEquals(pushed, vm.state.value.plan)
+        assertEquals(1, backend.planReads)
+        // 重连：再读一次；读不到时保留
+        backend.plan = null
+        backend.push(SessionEvent.Resync(SESSION))
+        assertEquals(2, backend.planReads)
+        assertEquals(pushed, vm.state.value.plan)
+    }
+
+    /** 会话页和计划页共用视图模型：都不可见了才取消订阅。 */
+    @Test
+    fun subscriptionLastsUntilEveryPageIsHidden() {
+        val vm = visible()
+        vm.onVisible()
+        assertEquals(1, backend.active)
+        vm.onHidden()
+        assertEquals(1, backend.active)
+        vm.onHidden()
+        assertEquals(0, backend.active)
+        // 多调一次不会变成负数：之后再显示照常订阅
+        vm.onHidden()
+        vm.onVisible()
+        assertEquals(1, backend.active)
+        vm.onHidden()
+        assertEquals(0, backend.active)
+    }
+
     /** 落地方案 B4：打开会话、一轮结束时读用量（不轮询）；读不到时保留上一次的，不清空。 */
     @Test
     fun usageIsReadWhenOpeningAndWhenATurnEnds() {
@@ -631,6 +675,15 @@ class ChatViewModelTest {
                 throw ApiException.Network(IOException("x"))
             }
             return pages.getValue(before)
+        }
+
+        var plan: SessionPlan? = null
+        var planReads = 0
+
+        override suspend fun plan(): SessionPlan {
+            check()
+            planReads++
+            return plan ?: throw ApiException.Network(IOException("x"))
         }
 
         var usage: SessionUsage? = null

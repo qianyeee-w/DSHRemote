@@ -87,6 +87,8 @@ data class ChatTimeline(
             is SessionEvent.Upsert -> upsert(event)
             is SessionEvent.Removed -> remove(event.messageId)
             is SessionEvent.TurnUpdated -> copy(turns = mergeTurns(turns, listOf(event.turn)))
+            // 计划不在时间线里，由会话页的视图模型单独保存
+            is SessionEvent.PlanUpdated -> this
         }
     }
 

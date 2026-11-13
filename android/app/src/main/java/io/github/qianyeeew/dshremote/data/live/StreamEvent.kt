@@ -4,6 +4,7 @@ import io.github.qianyeeew.dshremote.data.api.ApiJson
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.Message
+import io.github.qianyeeew.dshremote.data.api.SessionPlan
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.api.TurnResult
@@ -88,6 +89,13 @@ sealed interface StreamEvent {
         val turn: Turn,
     ) : StreamEvent
 
+    /** 只对已订阅的会话发送：目标或任务清单变了（protocol.md 6.1，落地方案 B5）。整条替换。 */
+    data class PlanUpdated(
+        override val eventId: String,
+        val sessionId: String,
+        val plan: SessionPlan,
+    ) : StreamEvent
+
     /** 插件报告的错误。[message] 由插件保证不含敏感信息。 */
     data class Error(
         override val eventId: String,
@@ -160,6 +168,12 @@ sealed interface StreamEvent {
                             eventId,
                             sessionId = json.string("sessionId") ?: return null,
                             turn = json.decode("turn", Turn.serializer()) ?: return null,
+                        )
+                    "plan.updated" ->
+                        PlanUpdated(
+                            eventId,
+                            sessionId = json.string("sessionId") ?: return null,
+                            plan = json.decode("plan", SessionPlan.serializer()) ?: return null,
                         )
                     "error" -> Error(eventId, ErrorCode.of(json.string("code")), json.string("message"))
                     else -> Unknown(eventId, type)

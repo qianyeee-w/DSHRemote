@@ -3,6 +3,7 @@ package io.github.qianyeeew.dshremote.devserver
 import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.PluginApi
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
+import io.github.qianyeeew.dshremote.data.api.StepStatus
 import io.github.qianyeeew.dshremote.data.api.TextPart
 import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
@@ -123,6 +124,18 @@ class ChatDevServerTest {
             assertTrue(chatBlocks(ended.items, ended.turns).last() is ChatBlock.TurnEnd)
             val summary = await("摘要里的最近一轮") { it.session?.lastTurn?.result == TurnResult.COMPLETED }.session!!
             assertTrue("最后一句回复：${summary.lastReply}", summary.lastReply.orEmpty().isNotBlank())
+        }
+
+    /** 落地方案 B5：模型写了任务清单，会话页通过推送（plan.updated）拿到，和 GET /plan 一致。 */
+    @Test
+    fun planArrivesByPushWhenTheModelWritesItsTodoList() =
+        runBlocking<Unit> {
+            assertTrue(withContext(main) { vm.send("TODO 请列个清单") })
+            val state = await("计划", timeoutMillis = 60_000) { s -> s.plan?.steps?.size == 3 }
+            val plan = state.plan!!
+            assertEquals(listOf(StepStatus.COMPLETED, StepStatus.IN_PROGRESS, StepStatus.PENDING), plan.steps!!.map { it.status })
+            assertEquals(1, plan.currentIndex)
+            assertEquals(plan, api.plan(sessionId))
         }
 
     /**

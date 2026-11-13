@@ -3,6 +3,7 @@ package io.github.qianyeeew.dshremote.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -22,6 +23,7 @@ import io.github.qianyeeew.dshremote.ui.attention.attentionSession
 import io.github.qianyeeew.dshremote.ui.chat.ChatScreen
 import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
 import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
+import io.github.qianyeeew.dshremote.ui.chat.PlanScreen
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailScreen
 import io.github.qianyeeew.dshremote.ui.hosts.HostDetailViewModel
 import io.github.qianyeeew.dshremote.ui.hosts.HostListViewModel
@@ -51,6 +53,13 @@ object HomeRoute
 
 @Serializable
 data class SessionRoute(
+    val hostId: String,
+    val sessionId: String,
+)
+
+/** 会话的计划页（设计规格 7.12）：和会话页共用一个视图模型。 */
+@Serializable
+data class PlanRoute(
     val hostId: String,
     val sessionId: String,
 )
@@ -132,26 +141,25 @@ fun AppNavigation(
             val route = entry.toRoute<SessionRoute>()
             // 正在看这个会话：通知规则不为它发通知，并撤回它的「任务完成」通知
             LifecycleStartEffect(route) {
-                val visible = VisibleSession(route.hostId, route.sessionId)
-                container.visibleSession.value = visible
-                onStopOrDispose { container.visibleSession.compareAndSet(visible, null) }
+                val release = container.holdVisible(VisibleSession(route.hostId, route.sessionId))
+                onStopOrDispose { release() }
             }
             ChatScreen(
-                viewModel =
-                    viewModel {
-                        ChatViewModel(
-                            hostId = route.hostId,
-                            sessionId = route.sessionId,
-                            states = container.connections.states,
-                            backend = LiveChatBackend(container.connections, route.hostId, route.sessionId),
-                            responder = LiveAttentionResponder(container.connections, route.hostId),
-                            resolvedEvents = container.connections.resolvedEvents(route.hostId),
-                            hostName = container.hosts.hosts.map { list -> list.firstOrNull { it.hostId == route.hostId }?.name },
-                            handoff = container.handoffs.take(route.hostId, route.sessionId),
-                            storedDraft = container.drafts.drafts(route.hostId).map { it[route.sessionId] },
-                            saveDraft = { container.saveDraft(route.hostId, route.sessionId, it) },
-                        )
-                    },
+                viewModel = viewModel { chatViewModel(container, route.hostId, route.sessionId) },
+                onBack = { nav.popBackStack() },
+                onOpenPlan = { nav.navigate(PlanRoute(route.hostId, route.sessionId)) },
+            )
+        }
+        composable<PlanRoute> { entry ->
+            val route = entry.toRoute<PlanRoute>()
+            LifecycleStartEffect(route) {
+                val release = container.holdVisible(VisibleSession(route.hostId, route.sessionId))
+                onStopOrDispose { release() }
+            }
+            // 计划页从会话页进入，用会话页的那一个视图模型（计划和待处理事项都在里面）
+            val parent = remember(entry) { nav.getBackStackEntry(SessionRoute(route.hostId, route.sessionId)) }
+            PlanScreen(
+                viewModel = viewModel(viewModelStoreOwner = parent) { chatViewModel(container, route.hostId, route.sessionId) },
                 onBack = { nav.popBackStack() },
             )
         }
@@ -278,3 +286,21 @@ private fun SessionList(
             ),
     )
 }
+
+/** 会话页的视图模型（计划页也用会话页的这一个）。 */
+private fun chatViewModel(
+    container: AppContainer,
+    hostId: String,
+    sessionId: String,
+) = ChatViewModel(
+    hostId = hostId,
+    sessionId = sessionId,
+    states = container.connections.states,
+    backend = LiveChatBackend(container.connections, hostId, sessionId),
+    responder = LiveAttentionResponder(container.connections, hostId),
+    resolvedEvents = container.connections.resolvedEvents(hostId),
+    hostName = container.hosts.hosts.map { list -> list.firstOrNull { it.hostId == hostId }?.name },
+    handoff = container.handoffs.take(hostId, sessionId),
+    storedDraft = container.drafts.drafts(hostId).map { it[sessionId] },
+    saveDraft = { container.saveDraft(hostId, sessionId, it) },
+)

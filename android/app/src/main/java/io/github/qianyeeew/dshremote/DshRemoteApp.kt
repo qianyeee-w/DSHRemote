@@ -17,11 +17,13 @@ import io.github.qianyeeew.dshremote.data.settings.SettingsRepository
 import io.github.qianyeeew.dshremote.service.LinkController
 import io.github.qianyeeew.dshremote.service.NotificationTarget
 import io.github.qianyeeew.dshremote.service.VisibleSession
+import io.github.qianyeeew.dshremote.service.VisibleSessions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -79,8 +81,12 @@ class AppContainer(
     /** App 的界面是否在前台（MainActivity 的 onStart 到 onStop）。 */
     val foreground = MutableStateFlow(false)
 
-    /** 用户正在看的会话（会话详情页可见时），通知规则据此不打扰。 */
-    val visibleSession = MutableStateFlow<VisibleSession?>(null)
+    /** 用户正在看的会话（会话页或计划页可见时），通知规则据此不打扰。页面用 [VisibleSessions.hold] 设置。 */
+    val visibleSessions = VisibleSessions()
+    val visibleSession: StateFlow<VisibleSession?> get() = visibleSessions.current
+
+    /** 页面开始显示一个会话时持有，停止时调用返回的函数释放（见 [VisibleSessions]）。只在主线程上调用。 */
+    fun holdVisible(session: VisibleSession): () -> Unit = visibleSessions.hold(session)
 
     /** 每个会话没发出去的文字（落地方案 B3）。 */
     val drafts: DraftStore = DraftStore.create(appContext)

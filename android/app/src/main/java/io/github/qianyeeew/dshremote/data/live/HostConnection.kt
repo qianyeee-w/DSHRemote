@@ -438,6 +438,7 @@ class HostConnection internal constructor(
                 sessionEvents.emit(SessionEvent.Upsert(event.sessionId, event.rev, event.message, event.replaces))
             is StreamEvent.MessageRemoved -> sessionEvents.emit(SessionEvent.Removed(event.sessionId, event.messageId))
             is StreamEvent.TurnUpdated -> sessionEvents.emit(SessionEvent.TurnUpdated(event.sessionId, event.turn))
+            is StreamEvent.PlanUpdated -> sessionEvents.emit(SessionEvent.PlanUpdated(event.sessionId, event.plan))
             is StreamEvent.Error -> log("主机 $hostId：插件报告错误 ${event.code.name}")
             is StreamEvent.Unknown, is StreamEvent.Hello -> Unit
         }

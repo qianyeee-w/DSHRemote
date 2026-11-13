@@ -86,6 +86,8 @@ class ChatActions(
     val onDraftChange: (String) -> Unit = {},
     /** 用户要看用量：重新读一次。 */
     val onRefreshUsage: () -> Unit = {},
+    /** 点了计划条：打开计划页。 */
+    val onOpenPlan: () -> Unit = {},
     val onCancelRun: () -> Unit = {},
     val onLoadOlder: () -> Unit = {},
     val onRetryLoad: () -> Unit = {},
@@ -101,6 +103,7 @@ class ChatActions(
 fun ChatScreen(
     viewModel: ChatViewModel,
     onBack: () -> Unit,
+    onOpenPlan: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
@@ -124,6 +127,7 @@ fun ChatScreen(
                 onCheckSend = viewModel::checkSend,
                 onDraftChange = viewModel::draftChanged,
                 onRefreshUsage = viewModel::refreshUsage,
+                onOpenPlan = onOpenPlan,
                 onCancelRun = viewModel::cancelRun,
                 onLoadOlder = viewModel::loadOlder,
                 onRetryLoad = viewModel::retryLoad,
@@ -187,6 +191,8 @@ fun ChatContent(
         ) {
             val panelMax = maxHeight / 2
             Column(Modifier.fillMaxSize()) {
+                // 计划条（设计规格 6.9）：会话顶栏下面
+                PlanStrip(state.plan, actions.onOpenPlan)
                 if (!state.online) LinkBanner(state)
                 // 等待处理、但事项还没到（或者不在这台手机能看到的范围）时，至少提示一下
                 if (state.session?.status == SessionStatus.WAITING && state.attention.isEmpty()) WaitingBanner()

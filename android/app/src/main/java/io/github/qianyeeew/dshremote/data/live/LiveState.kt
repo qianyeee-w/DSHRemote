@@ -2,6 +2,7 @@ package io.github.qianyeeew.dshremote.data.live
 
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.Message
+import io.github.qianyeeew.dshremote.data.api.SessionPlan
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.api.TurnResult
@@ -153,6 +154,12 @@ sealed interface SessionEvent {
     data class TurnUpdated(
         override val sessionId: String,
         val turn: Turn,
+    ) : SessionEvent
+
+    /** 目标或任务清单变了（protocol.md 6.1 plan.updated）。 */
+    data class PlanUpdated(
+        override val sessionId: String,
+        val plan: SessionPlan,
     ) : SessionEvent
 }
 

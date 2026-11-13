@@ -165,6 +165,12 @@ class PluginApi(
         send("POST", listOf("sessions", sessionId, "cancel"), body = EMPTY_BODY) { decode(Accepted.serializer(), it) }
     }
 
+    /** 计划（protocol.md 第 4 节「计划」）。旧插件没有这个接口，返回 `404`。 */
+    suspend fun plan(sessionId: String): SessionPlan {
+        requireId(sessionId)
+        return get(listOf("sessions", sessionId, "plan"), SessionPlan.serializer())
+    }
+
     /** 用量与上下文（protocol.md 第 4 节「用量」）。旧插件没有这个接口，返回 `404`。 */
     suspend fun usage(sessionId: String): SessionUsage {
         requireId(sessionId)

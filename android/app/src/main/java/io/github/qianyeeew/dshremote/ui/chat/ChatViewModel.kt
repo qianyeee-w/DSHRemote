@@ -11,6 +11,7 @@ import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
+import io.github.qianyeeew.dshremote.data.api.SessionPlan
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.SessionSummary
 import io.github.qianyeeew.dshremote.data.api.SessionUsage
@@ -70,6 +71,9 @@ interface ChatBackend {
 
     /** 用量与上下文（落地方案 B4）。旧插件没有这个接口。 */
     suspend fun usage(): SessionUsage = SessionUsage()
+
+    /** 计划（落地方案 B5）。旧插件没有这个接口。 */
+    suspend fun plan(): SessionPlan = SessionPlan()
 }
 
 /** 通过实时连接订阅，通过 [ConnectionManager.api] 调用接口。 */
@@ -101,6 +105,8 @@ class LiveChatBackend(
     override suspend fun workspaces(): List<Workspace> = api().workspaces()
 
     override suspend fun usage(): SessionUsage = api().usage(sessionId)
+
+    override suspend fun plan(): SessionPlan = api().plan(sessionId)
 
     private fun api() = connections.api(hostId) ?: throw OfflineException()
 
@@ -151,6 +157,8 @@ data class ChatState(
     val clockOffsetMillis: Long = 0,
     /** 用量与上下文（落地方案 B4）。还没读到、读不到或旧插件时为 null。 */
     val usage: SessionUsage? = null,
+    /** 计划（落地方案 B5）：目标和这一轮的任务清单。还没读到、读不到或旧插件时为 null。 */
+    val plan: SessionPlan? = null,
 ) {
     val online: Boolean get() = link is LinkStatus.Online
 
@@ -273,6 +281,7 @@ class ChatViewModel(
 
     private val workspaces = MutableStateFlow<List<Workspace>>(emptyList())
     private var subscription: Job? = null
+    private var visibleCount = 0
     private var reload: Job? = null
     private var pickerLoad: Job? = null
 
@@ -285,6 +294,9 @@ class ChatViewModel(
 
     /** 最近一次读到的用量。读失败时保留上一次的，不清空。 */
     private val usage = MutableStateFlow<SessionUsage?>(null)
+
+    /** 最近一次读到或推送来的计划。 */
+    private val plan = MutableStateFlow<SessionPlan?>(null)
 
     val state: StateFlow<ChatState> =
         combine(states, timeline, outbox, flags, attention.ui) { live, t, o, f, attentionUi ->
@@ -306,6 +318,7 @@ class ChatViewModel(
         }.combine(names) { base, (name, projects) ->
             base.copy(hostName = name, projectName = projectName(base.session, projects))
         }.combine(usage) { base, u -> base.copy(usage = u) }
+            .combine(plan) { base, p -> base.copy(plan = p) }
             .stateIn(viewModelScope, SharingStarted.Eagerly, ChatState(null, LinkStatus.Stopped, emptyList(), false, false, false, false))
 
     init {
@@ -321,22 +334,48 @@ class ChatViewModel(
 
     /** 界面可见：订阅推送（插件每个会话按引用计数订阅，离开页面后取消）。 */
     fun onVisible() {
+        visibleCount++
         loadWorkspaces()
         refreshUsage()
         if (subscription?.isActive == true) return
         subscription =
             viewModelScope.launch {
                 backend.events().collect { event ->
-                    if (event is SessionEvent.Resync) reloadLatest() else updateTimeline { it.apply(event) }
+                    when (event) {
+                        is SessionEvent.Resync -> {
+                            reloadLatest()
+                            // 断线期间可能错过了 plan.updated
+                            refreshPlan()
+                        }
+                        is SessionEvent.PlanUpdated -> plan.value = event.plan
+                        else -> updateTimeline { it.apply(event) }
+                    }
                     // 一轮结束后用量和上下文都变了（不轮询，protocol.md「用量」）
                     if (event is SessionEvent.TurnUpdated && event.turn.endedAt != null) refreshUsage()
                 }
             }
     }
 
+    /**
+     * 界面不可见。会话页和计划页共用这个视图模型，各自开始时调 [onVisible]、停止时调 [onHidden]；
+     * 从会话页进计划页时计划页先开始、会话页后停止，所以按次数算，都不可见了才取消订阅。
+     */
     fun onHidden() {
+        visibleCount = (visibleCount - 1).coerceAtLeast(0)
+        if (visibleCount > 0) return
         subscription?.cancel()
         subscription = null
+    }
+
+    /** 读计划（打开会话、重连后）。读不到时保留上一次的。 */
+    private fun refreshPlan() {
+        viewModelScope.launch {
+            try {
+                plan.value = backend.plan()
+            } catch (_: ApiException) {
+            } catch (_: OfflineException) {
+            }
+        }
     }
 
     /** 读取历史失败后重试。 */
@@ -468,6 +507,7 @@ class ChatViewModel(
     }
 
     override fun onCleared() {
+        visibleCount = 0
         onHidden()
         // 离开会话页时还没到存的时候：现在就存
         flushDraft()

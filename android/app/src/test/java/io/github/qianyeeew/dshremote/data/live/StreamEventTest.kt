@@ -2,7 +2,12 @@ package io.github.qianyeeew.dshremote.data.live
 
 import io.github.qianyeeew.dshremote.data.api.AttentionKind
 import io.github.qianyeeew.dshremote.data.api.ErrorCode
+import io.github.qianyeeew.dshremote.data.api.GoalStatus
+import io.github.qianyeeew.dshremote.data.api.PlanGoal
+import io.github.qianyeeew.dshremote.data.api.PlanStep
+import io.github.qianyeeew.dshremote.data.api.SessionPlan
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
+import io.github.qianyeeew.dshremote.data.api.StepStatus
 import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.live.FakePlugin.Companion.approval
@@ -46,6 +51,25 @@ class StreamEventTest {
         assertEquals(
             StreamEvent.TurnUpdated("e", "s1", Turn(4, startedAt = 1, endedAt = 2, result = TurnResult.COMPLETED)),
             parse("turn.updated", """"sessionId":"s1","turn":{"turn":4,"startedAt":1,"endedAt":2,"result":"completed"}"""),
+        )
+        // 落地方案 B5：计划整条替换；不认识的状态变成 OTHER / PENDING
+        assertEquals(
+            StreamEvent.PlanUpdated(
+                "e",
+                "s1",
+                SessionPlan(
+                    PlanGoal("目标", GoalStatus.OTHER),
+                    listOf(PlanStep("一", StepStatus.COMPLETED), PlanStep("二", StepStatus.PENDING)),
+                ),
+            ),
+            parse(
+                "plan.updated",
+                """"sessionId":"s1","plan":{"goal":{"objective":"目标","status":"archived"},"steps":[{"text":"一","status":"completed"},{"text":"二","status":"later"}]}""",
+            ),
+        )
+        assertEquals(
+            StreamEvent.PlanUpdated("e", "s1", SessionPlan()),
+            parse("plan.updated", """"sessionId":"s1","plan":{"goal":null,"steps":null}"""),
         )
         assertEquals(
             "a1",

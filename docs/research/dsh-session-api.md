@@ -245,6 +245,10 @@ PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.m
 - 没有和设计稿「最近进展」对应的数据；能从 `todo/write` 事件的时间推出步骤级别的变化，用户确认这次不做。
 - 两个工具都在 `dsh web` 的默认配置（`dsh-base/cordis.patch.yml`、`dsh-web-app/presets/standard.patch.yml`）里。
 
+### 9.3c 命令输出的长度（2026-11-14，落地方案 B6）
+
+实测（契约测试 `LONGOUT` 一项）：DSH 0.2.2-rc.1 不截断 `bash` 的输出，5,000 行、约 48 KB 的输出整段出现在 `tool/result` 里。所以插件对命令输出保留开头和末尾（protocol.md 5.2）就能拿到真正的最后几行。
+
 ### 9.4 新对话分支：公开接口已存在，难点是边界与恢复
 
 - `session/fork` 接受 `{ request: { sessionId, atSeq?, allowMigration? } }`，返回新 `sessionId`。`atSeq` 是包含该条事件的精确整数序号；省略时取最近已完成轮次的前缀。应以当前源码为准，不使用早期设计笔记中「向后寻找 turn/end」的旧语义。

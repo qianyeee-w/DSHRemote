@@ -19,7 +19,7 @@ import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { Facade, FacadeError } from '../../src/dsh/facade.js'
 import { AttentionTracker } from '../../src/dsh/attention.js'
 import { startDshWeb, DSH_VERSION, log } from '../helpers/dsh-runtime.mjs'
-import { FAIL_MESSAGE, startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE, TODO_ITEMS, GOAL_OBJECTIVE } from './fake-llm.mjs'
+import { FAIL_MESSAGE, startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE, TODO_ITEMS, GOAL_OBJECTIVE, LONG_OUTPUT_LINES } from './fake-llm.mjs'
 
 /** 测试里模拟的设备身份：适配层要求每次调用都说明替谁发起 */
 const ACTOR = 'd_contracttest'
@@ -345,6 +345,23 @@ async function main() {
       const empty = await facade.usage(ACTOR, fresh)
       if (empty.context?.tokens !== undefined) throw new Error(`新会话不应当有上下文占用：${short(empty)}`)
       return `${short(usage, 160)}；新会话 ${short(empty, 120)}`
+    })
+    await step('外观层：很长的命令输出保留开头和末尾（protocol.md 5.2，落地方案 B6）', async () => {
+      const longSession = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      await prompt(conn, longSession, '请 LONGOUT 一下')
+      const part = await untilAsync(async () => {
+        const page = await facade.messages(ACTOR, longSession, { limit: 50 })
+        for (const m of page.messages) for (const p of m.parts) if (p.type === 'tool' && p.status !== 'running' && p.output !== undefined) return p
+        return undefined
+      }, '命令结束', 60_000)
+      if (part.status !== 'done') throw new Error(`命令没有成功：${short(part, 300)}`)
+      const output = (part.output ?? '').replace(/\r\n/g, '\n')
+      const omitted = part.omitted
+      if (!omitted || part.truncated !== true) throw new Error(`应当去掉中间：${short({ ...part, output: output.slice(0, 80) }, 300)}`)
+      if (!output.startsWith('line 1\n')) throw new Error(`开头不对：${short(output.slice(0, 40))}`)
+      if (!output.trimEnd().endsWith(`line ${LONG_OUTPUT_LINES}`)) throw new Error(`末尾不对（DSH 可能自己截断了输出）：${short(output.slice(-120))}`)
+      if (output.length > 8_000) throw new Error(`超过上限：${output.length}`)
+      return `offset=${omitted.offset} chars=${omitted.chars} lines=${omitted.lines} 保留=${output.length}`
     })
     await step('外观层：计划（protocol.md「计划」，落地方案 B5）——模型写的任务清单和目标；新一轮开始时任务清单被清空', async () => {
       const planned = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId

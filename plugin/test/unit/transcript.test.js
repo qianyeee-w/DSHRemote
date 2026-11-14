@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { convertRecords, convertPage, extractTurns, turnUsage, turnBefore, turnDigest, turnResult, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT, TURN_ERROR_LIMIT, LAST_REPLY_LIMIT } from '../../src/dsh/transcript.js'
+import { convertRecords, convertPage, extractTurns, turnUsage, clipCommandOutput, COMMAND_HEAD_LIMIT, COMMAND_TAIL_LIMIT, turnBefore, turnDigest, turnResult, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT, TURN_ERROR_LIMIT, LAST_REPLY_LIMIT } from '../../src/dsh/transcript.js'
 
 /** @param {string} name */
 const fixture = (name) => JSON.parse(readFileSync(new URL(`../fixtures/dsh-0.2.2-rc.1/${name}`, import.meta.url), 'utf8'))
@@ -110,16 +110,61 @@ test('工具调用没有结果、本轮已结束（例如被停止）时，状�
   assert.equal(shape(/** @type {any} */ (aborted[0])), 'assistant:text+tool(bash,error)')
 })
 
-/** @param {string} id @param {string} args */
-const assistantWithTool = (id, args) => ({ type: 'event', event: { type: 'assistant/message', seq: 1, time: 1, data: { message: { id: 'm1', content: [{ type: 'tool-call', id, name: 'bash', arguments: args }] } } } })
+/** @param {string} id @param {string} args @param {string} [name] */
+const assistantWithTool = (id, args, name = 'bash') => ({ type: 'event', event: { type: 'assistant/message', seq: 1, time: 1, data: { message: { id: 'm1', content: [{ type: 'tool-call', id, name, arguments: args }] } } } })
 /** @param {string} id @param {string} text */
 const toolResult = (id, text) => ({ type: 'event', event: { type: 'tool/result', seq: 2, time: 2, data: { message: { toolCallId: id, content: [{ type: 'text', text }], isError: false } } } })
 
-test('过长的工具输出按上限截断，并标记 truncated', () => {
-  const [message] = convertRecords([assistantWithTool('c1', '{"command":"ls"}'), toolResult('c1', 'x'.repeat(TOOL_OUTPUT_LIMIT + 100))])
+test('过长的工具输出按上限截断，保留开头并标记 truncated（命令以外的工具）', () => {
+  const [message] = convertRecords([assistantWithTool('c1', '{"file_path":"a.txt"}', 'read'), toolResult('c1', 'x'.repeat(TOOL_OUTPUT_LIMIT + 100))])
   const part = /** @type {import('../../src/dsh/transcript.js').ToolPart} */ (message?.parts[0])
   assert.equal(part.output?.length, TOOL_OUTPUT_LIMIT + 1)
+  assert.ok(part.output?.endsWith('…'))
   assert.equal(part.truncated, true)
+  assert.equal(part.omitted, undefined)
+})
+
+test('命令输出（落地方案 B6）：超过上限时保留开头和末尾，切在换行处，标明去掉的位置、字符数和行数', () => {
+  const lines = Array.from({ length: 2_000 }, (_, i) => `line ${String(i).padStart(4, '0')}`)
+  const text = `${lines.join('\n')}\n`
+  const [message] = convertRecords([assistantWithTool('c1', '{"command":"npm test"}'), toolResult('c1', text)])
+  const part = /** @type {import('../../src/dsh/transcript.js').ToolPart} */ (message?.parts[0])
+  const output = part.output ?? ''
+  const omitted = part.omitted
+  assert.ok(omitted)
+  assert.equal(part.truncated, true)
+  assert.ok(output.length <= TOOL_OUTPUT_LIMIT, `总长 ${output.length}`)
+  assert.ok(!output.endsWith('…'), '末尾不加省略号')
+  // 开头和末尾都是完整的行；最后一行就是原文的最后一行
+  const head = output.slice(0, omitted.offset)
+  const tail = output.slice(omitted.offset)
+  assert.ok(head.endsWith('\n') && head.startsWith('line 0000\n'))
+  assert.ok(tail.startsWith('line ') && tail.endsWith('line 1999\n'))
+  assert.ok(head.length <= COMMAND_HEAD_LIMIT && tail.length <= COMMAND_TAIL_LIMIT)
+  // 去掉的部分加回来就是原文
+  assert.equal(head.length + omitted.chars + tail.length, text.length)
+  assert.equal(text.slice(0, omitted.offset) + text.slice(omitted.offset + omitted.chars), output)
+  const kept = output.split('\n').length - 1
+  assert.equal(kept + omitted.lines, 2_000)
+  // 不长时原样保留，不带 omitted
+  const [short] = convertRecords([assistantWithTool('c2', '{"command":"ls"}'), toolResult('c2', 'a\nb\n')])
+  const shortPart = /** @type {import('../../src/dsh/transcript.js').ToolPart} */ (short?.parts[0])
+  assert.equal(shortPart.output, 'a\nb\n')
+  assert.equal(shortPart.truncated, undefined)
+  assert.equal(shortPart.omitted, undefined)
+})
+
+test('命令输出：一整行没有换行时按字符切，不切开代理对', () => {
+  const emoji = '😀'
+  const text = emoji.repeat(TOOL_OUTPUT_LIMIT)
+  const clipped = clipCommandOutput(text)
+  assert.ok(clipped.omitted)
+  const { offset, chars } = clipped.omitted
+  assert.equal(offset % 2, 0, '开头不切开代理对')
+  assert.equal((offset + chars) % 2, 0, '末尾不切开代理对')
+  assert.equal(text.slice(0, offset) + text.slice(offset + chars), clipped.text)
+  assert.equal(clipped.omitted.lines, 0)
+  assert.deepEqual(clipCommandOutput('短'), { text: '短' })
 })
 
 test('过长的工具输入字段按上限截断；无法解析的参数变成空对象', () => {

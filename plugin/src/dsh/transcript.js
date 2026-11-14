@@ -19,6 +19,11 @@ import { deriveTurnTokenUsage } from '../vendor/dsh-turn-usage.mjs'
 export const TOOL_INPUT_STRING_LIMIT = 2_000
 /** 工具输出的上限（字符） */
 export const TOOL_OUTPUT_LIMIT = 8_000
+/** 命令输出超过上限时保留的开头和末尾（字符，合计不超过 TOOL_OUTPUT_LIMIT；落地方案 B6） */
+export const COMMAND_HEAD_LIMIT = 1_000
+export const COMMAND_TAIL_LIMIT = 7_000
+/** 这些工具的输出是命令的输出：结果通常在末尾，保留开头和末尾 */
+const COMMAND_TOOLS = new Set(['bash', 'pwsh'])
 /** 工具摘要的上限（字符） */
 const SUMMARY_LIMIT = 120
 /** 失败原因的上限（字符） */
@@ -42,6 +47,7 @@ export const LAST_REPLY_LIMIT = 120
  * @property {Record<string, unknown>} input
  * @property {string} [output]
  * @property {true} [truncated]
+ * @property {{ offset: number, chars: number, lines: number }} [omitted] 命令输出去掉了中间（protocol.md 5.2）
  */
 
 /**
@@ -82,6 +88,35 @@ export const LAST_REPLY_LIMIT = 120
 
 /** @param {unknown} value @returns {value is Record<string, any>} */
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/**
+ * 命令输出（protocol.md 5.2，落地方案 B6）：超过上限时保留开头约 COMMAND_HEAD_LIMIT 个字符和末尾约
+ * COMMAND_TAIL_LIMIT 个字符，尽量切在换行处，不切开代理对；去掉中间，返回去掉的位置和多少。
+ * @param {string} text
+ * @returns {{ text: string, omitted?: { offset: number, chars: number, lines: number } }}
+ */
+export function clipCommandOutput(text) {
+  if (text.length <= TOOL_OUTPUT_LIMIT) return { text }
+  // 开头：到上限之前最后一个换行（含换行）；没有换行时直接按字符切
+  let headEnd = text.lastIndexOf('\n', COMMAND_HEAD_LIMIT - 1) + 1
+  if (headEnd <= 0) headEnd = safeCut(text, COMMAND_HEAD_LIMIT)
+  // 末尾：从「倒数上限」位置之后的第一个换行的下一个字符开始；没有时直接按字符切
+  const from = text.length - COMMAND_TAIL_LIMIT
+  let tailStart = text.indexOf('\n', from) + 1
+  if (tailStart <= 0 || tailStart >= text.length) tailStart = safeCut(text, from)
+  if (tailStart < headEnd) tailStart = headEnd
+  const middle = text.slice(headEnd, tailStart)
+  return {
+    text: text.slice(0, headEnd) + text.slice(tailStart),
+    omitted: { offset: headEnd, chars: middle.length, lines: middle.split('\n').length - 1 },
+  }
+}
+
+/** 在 index 处切开，但不切开代理对：index 落在一对的中间时往后挪一位。 @param {string} text @param {number} index */
+function safeCut(text, index) {
+  const code = text.charCodeAt(index - 1)
+  return code >= 0xd800 && code <= 0xdbff ? index + 1 : index
+}
 
 /** @param {string} text @param {number} limit */
 function truncate(text, limit) {
@@ -268,9 +303,16 @@ export function convertRecords(records, startTurn) {
         const callId = typeof message.toolCallId === 'string' ? message.toolCallId : undefined
         const part = callId ? pendingTools.get(callId) : undefined
         if (!callId || !part) break
-        const output = truncate(toolResultText(message.content), TOOL_OUTPUT_LIMIT)
-        part.output = output.text
-        if (output.truncated) part.truncated = true
+        const text = toolResultText(message.content)
+        if (COMMAND_TOOLS.has(part.name)) {
+          const output = clipCommandOutput(text)
+          part.output = output.text
+          if (output.omitted) { part.truncated = true; part.omitted = output.omitted }
+        } else {
+          const output = truncate(text, TOOL_OUTPUT_LIMIT)
+          part.output = output.text
+          if (output.truncated) part.truncated = true
+        }
         part.status = message.isError === true ? (rejectedCalls.has(callId) ? 'rejected' : 'error') : 'done'
         pendingTools.delete(callId)
         break

@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
+import io.github.qianyeeew.dshremote.data.api.ImagePart
 import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.OutputOmission
 import io.github.qianyeeew.dshremote.data.api.TextPart
@@ -8,6 +9,7 @@ import io.github.qianyeeew.dshremote.data.api.ToolPart
 import io.github.qianyeeew.dshremote.data.api.ToolStatus
 import io.github.qianyeeew.dshremote.data.api.Turn
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
+import io.github.qianyeeew.dshremote.data.image.ImageRef
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
@@ -25,6 +27,8 @@ sealed interface ChatBlock {
         val local: LocalMessage? = null,
         /** 这条消息属于第几轮（protocol.md 5.2）；本地还没进会话的消息、推断不出轮次时为 null。另开对话要用它。 */
         val turn: Int? = null,
+        /** 附带的图片（落地方案 C2），按发出的顺序。 */
+        val images: List<ImageRef> = emptyList(),
     ) : ChatBlock
 
     /** 一段回复正文（Markdown）。 */
@@ -97,6 +101,9 @@ data class Step(
 fun chatBlocks(
     items: List<ChatItem>,
     turns: Map<Int, Turn> = emptyMap(),
+    /** 会话里的图片从哪台电脑、哪个会话读（[ImageRef.Remote]）。 */
+    hostId: String = "",
+    sessionId: String = "",
 ): List<ChatBlock> {
     val blocks = ArrayList<ChatBlock>()
     var steps = ArrayList<Step>()
@@ -132,7 +139,15 @@ fun chatBlocks(
                 flush()
                 // 本地发出的消息在日志里出现之前没有轮次：前一轮已经结束的话，结尾先放在它上面
                 closeTurn()
-                blocks += ChatBlock.User(item.key, item.local.outgoing.text, item.local)
+                blocks +=
+                    ChatBlock.User(
+                        item.key,
+                        item.local.outgoing.text,
+                        item.local,
+                        images =
+                            item.local.outgoing.images
+                                .map { ImageRef.Local(it) },
+                    )
             }
             is ChatItem.Entry -> {
                 val message = item.message
@@ -144,6 +159,10 @@ fun chatBlocks(
                             item.key,
                             message.parts.filterIsInstance<TextPart>().joinToString("") { it.text },
                             turn = message.turn,
+                            images =
+                                message.parts.filterIsInstance<ImagePart>().map {
+                                    ImageRef.Remote(hostId, sessionId, it.id, it.width, it.height)
+                                },
                         )
                     continue
                 }

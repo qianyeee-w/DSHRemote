@@ -46,6 +46,7 @@ import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
+import io.github.qianyeeew.dshremote.data.image.ImageRef
 import io.github.qianyeeew.dshremote.ui.CodeTextStyles
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import kotlinx.serialization.json.Json
@@ -53,12 +54,14 @@ import kotlinx.serialization.json.JsonObject
 
 /**
  * 用户气泡（设计规格 6.4）：靠右，浅填充底，圆角 18，最宽 280。下方可以有一行 12 号灰字说明发送状态，正常送达后不显示。
- * 本地发出、还没出现在会话日志里的消息带 [local]。
+ * 本地发出、还没出现在会话日志里的消息带 [local]。带图片时图片在文字上面（落地方案 C2）；只有图片时没有文字气泡。
  */
 @Composable
 fun UserBubble(
     text: String,
     local: LocalMessage?,
+    images: List<ImageRef> = emptyList(),
+    onOpenImage: (ImageRef) -> Unit = {},
     onCheck: () -> Unit = {},
     /** 长按：底部出现「复制」「另开对话」（设计规格 7.13）。取代原来长按选字。 */
     onLongPress: (() -> Unit)? = null,
@@ -66,38 +69,51 @@ fun UserBubble(
     highlighted: Boolean = false,
     onRetry: () -> Unit,
 ) {
-    val colors = DesignTheme.colors
-    val haptic = LocalHapticFeedback.current
     val shape = RoundedCornerShape(18.dp)
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.text,
-            modifier =
-                Modifier
-                    .widthIn(max = 280.dp)
-                    .clip(shape)
-                    .background(colors.fill)
-                    .let { if (highlighted) it.border(1.5.dp, colors.text, shape) else it }
-                    .let { m ->
-                        if (onLongPress == null) {
-                            m
-                        } else {
-                            m.combinedClickable(
-                                onLongClickLabel = stringResource(R.string.chat_message_actions),
-                                onLongClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onLongPress()
-                                },
-                                onClick = {},
-                            )
-                        }
-                    }.padding(horizontal = 14.dp, vertical = 9.dp)
-                    .testTag("user-bubble"),
-        )
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        BubbleImages(images, onOpenImage)
+        if (text.isNotBlank() || images.isEmpty()) {
+            BubbleText(text, shape, highlighted, onLongPress)
+        }
         if (local != null) SendStatus(local, onRetry, onCheck)
     }
+}
+
+@Composable
+private fun BubbleText(
+    text: String,
+    shape: RoundedCornerShape,
+    highlighted: Boolean,
+    onLongPress: (() -> Unit)?,
+) {
+    val colors = DesignTheme.colors
+    val haptic = LocalHapticFeedback.current
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = colors.text,
+        modifier =
+            Modifier
+                .widthIn(max = 280.dp)
+                .clip(shape)
+                .background(colors.fill)
+                .let { if (highlighted) it.border(1.5.dp, colors.text, shape) else it }
+                .let { m ->
+                    if (onLongPress == null) {
+                        m
+                    } else {
+                        m.combinedClickable(
+                            onLongClickLabel = stringResource(R.string.chat_message_actions),
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongPress()
+                            },
+                            onClick = {},
+                        )
+                    }
+                }.padding(horizontal = 14.dp, vertical = 9.dp)
+                .testTag("user-bubble"),
+    )
 }
 
 /**

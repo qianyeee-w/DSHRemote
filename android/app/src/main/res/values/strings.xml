@@ -292,6 +292,20 @@
     <string name="chat_notice_setup_failed">模型或审批方式没有设置成功，消息还没发出，检查后再发送。</string>
     <string name="chat_notice_change_failed">操作失败，请稍后再试</string>
     <string name="chat_notice_not_in_session">会话里还没有这条消息。确认没送到再重发。</string>
+    <!-- 图片附件（落地方案 C2） -->
+    <string name="chat_notice_images_not_supported">当前模型看不了图片。消息没有发出，内容已放回输入框，换一个能看图的模型再发。</string>
+    <string name="chat_notice_image_invalid">图片已损坏或格式不支持。消息没有发出，内容已放回输入框。</string>
+    <string name="chat_notice_image_unreadable">有的图片读不出来，没有加上。</string>
+    <string name="chat_notice_images_old_plugin">电脑上的插件版本较旧，还不能发图片。升级插件后再试。</string>
+    <string name="chat_notice_images_checking">还没确认能不能发图片，连上电脑后再试。</string>
+    <string name="image_add">添加图片</string>
+    <string name="image_add_unavailable">添加图片（现在不可用）</string>
+    <string name="image_remove">移除这张图片</string>
+    <string name="image_preparing">正在处理图片</string>
+    <string name="image_in_message">图片 %1$d×%2$d</string>
+    <string name="image_open">查看大图</string>
+    <string name="image_failed">读不到图片</string>
+    <string name="image_viewer_close">关闭</string>
     <string name="chat_link_title">打开链接？</string>
     <string name="chat_link_open">打开</string>
     <string name="chat_link_unsupported">只能打开 http 和 https 链接。</string>

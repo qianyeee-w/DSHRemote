@@ -4,14 +4,19 @@ import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.ModelList
 import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingImage
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.api.isTokenInvalid
 import io.github.qianyeeew.dshremote.data.chat.deliveryStatus
+import io.github.qianyeeew.dshremote.data.image.ImageSupport
 import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.ui.chat.ChatHandoff
+import io.github.qianyeeew.dshremote.ui.chat.ChatNotice
+import io.github.qianyeeew.dshremote.ui.chat.imageNotice
+import io.github.qianyeeew.dshremote.ui.chat.imageRejection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,7 +66,17 @@ data class NewTaskState(
     /** 会话没能创建（之后的步骤失败不在这里，见 [StartedTask.handoff]）。 */
     val error: CreateError? = null,
     val started: StartedTask? = null,
-)
+    /** 加上的图片（落地方案 C2，只在内存里）和还在压缩的张数。 */
+    val images: List<OutgoingImage> = emptyList(),
+    val preparingImages: Int = 0,
+    /** 和图片有关的说明（不能加图片的原因、有的图片读不出来）。 */
+    val imageNotice: ChatNotice? = null,
+) {
+    /** 按选的模型（没选时是默认模型）判断能不能加图片。 */
+    val imageSupport: ImageSupport get() = ImageSupport.of(models, model)
+
+    val imageSlots: Int get() = (OutgoingMessage.MAX_IMAGES - images.size - preparingImages).coerceAtLeast(0)
+}
 
 /**
  * 默认的项目：上一次用的项目还在就用它（[last] 为空串表示上次选了「不指定项目」）；没有记录时用第一个项目；
@@ -112,7 +127,48 @@ class NewTaskFlow(
 
     fun chooseProject(pick: ProjectPick) = mutable.update { it.copy(project = pick, error = null) }
 
-    fun chooseModel(model: ModelRef) = mutable.update { it.copy(model = model) }
+    fun chooseModel(model: ModelRef) = mutable.update { it.copy(model = model, imageNotice = null) }
+
+    /** 点了不可用的加号：说明原因（还没读到模型列表时顺便再读）。 */
+    fun explainImages() {
+        val support = mutable.value.imageSupport
+        if (support == ImageSupport.CHECKING) {
+            mutable.update { it.copy(models = null) }
+            loadOptions()
+        }
+        mutable.update { it.copy(imageNotice = imageNotice(support)) }
+    }
+
+    /** 加上用户选的图片（在后台压缩），超过张数的部分不加。 */
+    fun addImages(sources: List<suspend () -> OutgoingImage?>) {
+        val current = mutable.value
+        val take = sources.take(current.imageSlots)
+        if (take.isEmpty() || !current.imageSupport.canAdd) return
+        mutable.update { it.copy(preparingImages = it.preparingImages + take.size, imageNotice = null) }
+        scope.launch {
+            var unreadable = false
+            for (source in take) {
+                val image =
+                    try {
+                        source()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                if (image == null) unreadable = true
+                mutable.update {
+                    it.copy(
+                        preparingImages = it.preparingImages - 1,
+                        images = if (image != null && it.images.size < OutgoingMessage.MAX_IMAGES) it.images + image else it.images,
+                    )
+                }
+            }
+            if (unreadable) mutable.update { it.copy(imageNotice = ChatNotice.IMAGE_UNREADABLE) }
+        }
+    }
+
+    fun removeImage(key: String) = mutable.update { s -> s.copy(images = s.images.filterNot { it.key == key }) }
 
     fun choosePreset(preset: String) = mutable.update { it.copy(preset = preset) }
 
@@ -122,8 +178,14 @@ class NewTaskFlow(
         project: ProjectPick,
     ): Boolean {
         val current = mutable.value
-        if (current.starting || text.isBlank() || text.length > OutgoingMessage.MAX_TEXT) return false
-        mutable.update { it.copy(starting = true, error = null) }
+        val images = current.images
+        if (current.starting || (text.isBlank() && images.isEmpty()) || text.length > OutgoingMessage.MAX_TEXT) return false
+        if (current.preparingImages > 0) return false
+        if (images.isNotEmpty() && !current.imageSupport.canAdd) {
+            mutable.update { it.copy(imageNotice = imageNotice(current.imageSupport)) }
+            return false
+        }
+        mutable.update { it.copy(starting = true, error = null, imageNotice = null) }
         scope.launch {
             val workspaceId = (project as? ProjectPick.Existing)?.workspace?.workspaceId
             val sessionId =
@@ -147,10 +209,10 @@ class NewTaskFlow(
                     true
                 } ?: false
             if (!configured) {
-                finish(StartedTask(sessionId, ChatHandoff.NotSent(text)))
+                finish(StartedTask(sessionId, ChatHandoff.NotSent(text, images)))
                 return@launch
             }
-            val message = OutgoingMessage(text, PromptMode.QUEUE)
+            val message = OutgoingMessage(text, PromptMode.QUEUE, images)
             // 发一次，不自动重发；没送到和不确定交给会话页，由用户决定（落地方案 B3）
             val failure =
                 try {
@@ -161,13 +223,21 @@ class NewTaskFlow(
                 } catch (e: OfflineException) {
                     e
                 }
-            finish(StartedTask(sessionId, failure?.let { ChatHandoff.FailedFirstMessage(message, deliveryStatus(it)) }))
+            // 插件因为图片拒绝了：消息肯定没发出，文字和图片放回会话的输入框并说明（落地方案 C2）
+            val handoff =
+                failure?.let { e ->
+                    imageRejection(e)?.let { ChatHandoff.NotSent(text, images, it) }
+                        ?: ChatHandoff.FailedFirstMessage(message, deliveryStatus(e))
+                }
+            finish(StartedTask(sessionId, handoff))
         }
         return true
     }
 
     /** 界面已经进入了新会话：清掉这次的选择，下次展开从默认值开始。 */
     fun consumeStarted() = mutable.update { NewTaskState(models = it.models, presets = it.presets) }
+
+    fun dismissImageNotice() = mutable.update { it.copy(imageNotice = null) }
 
     private fun finish(started: StartedTask) = mutable.update { it.copy(starting = false, started = started) }
 

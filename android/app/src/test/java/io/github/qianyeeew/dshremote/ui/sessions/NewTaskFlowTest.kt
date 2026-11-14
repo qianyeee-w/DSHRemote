@@ -5,14 +5,17 @@ import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.ModelList
 import io.github.qianyeeew.dshremote.data.api.ModelOption
 import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingImage
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.PermissionPreset
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
+import io.github.qianyeeew.dshremote.data.image.ImageSupport
 import io.github.qianyeeew.dshremote.data.live.OfflineException
 import io.github.qianyeeew.dshremote.ui.chat.ChatHandoff
+import io.github.qianyeeew.dshremote.ui.chat.ChatNotice
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -168,6 +171,91 @@ class NewTaskFlowTest {
         assertEquals(ProjectPick.None, defaultProject(emptyList(), null))
     }
 
+    // ---------------------------------------------------------------- 图片（落地方案 C2）
+
+    private fun pic(key: String) = OutgoingImage(key, OutgoingImage.JPEG, byteArrayOf(1, 2, 3), 10, 10)
+
+    private fun source(key: String?): suspend () -> OutgoingImage? = { key?.let(::pic) }
+
+    @Test
+    fun imagesGoWithTheFirstMessage() {
+        flow.loadOptions()
+        assertEquals(ImageSupport.YES, flow.state.value.imageSupport)
+        flow.addImages(listOf(source("a"), source("b")))
+        assertTrue(flow.start("", project))
+        assertEquals(
+            listOf("a", "b"),
+            backend.prompts
+                .single()
+                .second.images
+                .map { it.key },
+        )
+        assertNull(
+            flow.state.value.started
+                ?.handoff,
+        )
+        flow.consumeStarted()
+        assertTrue(
+            "开始以后清掉",
+            flow.state.value.images
+                .isEmpty(),
+        )
+    }
+
+    @Test
+    fun imageRejectionPutsTextAndImagesBackInTheSession() {
+        flow.loadOptions()
+        flow.addImages(listOf(source("a")))
+        backend.promptError = ApiException.Http(400, ErrorCode.IMAGES_NOT_SUPPORTED, "当前模型看不了图片")
+        flow.start("看图", project)
+        val handoff =
+            flow.state.value.started
+                ?.handoff as ChatHandoff.NotSent
+        assertEquals("看图", handoff.text)
+        assertEquals(listOf("a"), handoff.images.map { it.key })
+        assertEquals(ChatNotice.IMAGES_NOT_SUPPORTED, handoff.reason)
+
+        // 设置模型失败时，图片也跟着文字放回去
+        flow.consumeStarted()
+        backend.promptError = null
+        backend.setupError = ApiException.Network(IOException("x"))
+        flow.loadOptions()
+        flow.chooseModel(reasoner)
+        flow.chooseModel(deepseek.copy(model = "deepseek-vision"))
+        flow.addImages(listOf(source("b")))
+        flow.start("再看", project)
+        val notSent =
+            flow.state.value.started
+                ?.handoff as ChatHandoff.NotSent
+        assertEquals(listOf("b"), notSent.images.map { it.key })
+        assertEquals(ChatNotice.SETUP_FAILED, notSent.reason)
+    }
+
+    @Test
+    fun textOnlyModelOrOldPluginCannotTakeImages() {
+        flow.loadOptions()
+        flow.addImages(listOf(source("a")))
+        flow.chooseModel(reasoner)
+        assertEquals(ImageSupport.TEXT_ONLY_MODEL, flow.state.value.imageSupport)
+        assertFalse("选了只读文字的模型，带着图片不开始", flow.start("看图", project))
+        assertEquals(ChatNotice.IMAGES_NOT_SUPPORTED, flow.state.value.imageNotice)
+        assertTrue(backend.created.isEmpty())
+        flow.addImages(listOf(source("b")))
+        assertEquals(
+            listOf("a"),
+            flow.state.value.images
+                .map { it.key },
+        )
+
+        backend.imageInput = false
+        val old = NewTaskFlow(CoroutineScope(UnconfinedTestDispatcher()), backend)
+        assertEquals("还没读到模型列表", ImageSupport.CHECKING, old.state.value.imageSupport)
+        old.loadOptions()
+        assertEquals(ImageSupport.OLD_PLUGIN, old.state.value.imageSupport)
+        old.explainImages()
+        assertEquals(ChatNotice.IMAGES_OLD_PLUGIN, old.state.value.imageNotice)
+    }
+
     private inner class FakeBackend : SessionCreator {
         val created = mutableListOf<String?>()
         val modelChanges = mutableListOf<Pair<String, ModelRef>>()
@@ -177,6 +265,7 @@ class NewTaskFlowTest {
         var setupError: Exception? = null
         var promptError: Exception? = null
         var gate: CompletableDeferred<Unit>? = null
+        var imageInput = true
 
         override suspend fun workspaces() = emptyList<Workspace>()
 
@@ -192,9 +281,11 @@ class NewTaskFlowTest {
                 default = deepseek,
                 models =
                     listOf(
-                        ModelOption("deepseek", "DeepSeek", "deepseek-chat", "Chat"),
-                        ModelOption("deepseek", "DeepSeek", "deepseek-reasoner", "Reasoner"),
+                        ModelOption("deepseek", "DeepSeek", "deepseek-chat", "Chat", images = true),
+                        ModelOption("deepseek", "DeepSeek", "deepseek-reasoner", "Reasoner", images = false),
+                        ModelOption("deepseek", "DeepSeek", "deepseek-vision", "Vision"),
                     ),
+                imageInput = imageInput,
             )
 
         override suspend fun presets() =

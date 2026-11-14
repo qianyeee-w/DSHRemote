@@ -4,11 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.Attention
+import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.ForkResult
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
 import io.github.qianyeeew.dshremote.data.api.ModelList
 import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingImage
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PromptMode
@@ -23,6 +25,7 @@ import io.github.qianyeeew.dshremote.data.chat.LocalMessage
 import io.github.qianyeeew.dshremote.data.chat.Outbox
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.chat.deliveryStatus
+import io.github.qianyeeew.dshremote.data.image.ImageSupport
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
@@ -172,7 +175,19 @@ data class ChatState(
     val usage: SessionUsage? = null,
     /** 计划（落地方案 B5）：目标和这一轮的任务清单。还没读到、读不到或旧插件时为 null。 */
     val plan: SessionPlan? = null,
+    /** 会话里的图片从哪台电脑、哪个会话读（落地方案 C2）。 */
+    val hostId: String = "",
+    val sessionId: String = "",
+    /** 输入框里已经加上、还没发出的图片（落地方案 C2）。 */
+    val images: List<OutgoingImage> = emptyList(),
+    /** 还在压缩的图片有几张。 */
+    val preparingImages: Int = 0,
+    /** 现在能不能加图片。 */
+    val imageSupport: ImageSupport = ImageSupport.CHECKING,
 ) {
+    /** 还能再加几张图片。 */
+    val imageSlots: Int get() = (OutgoingMessage.MAX_IMAGES - images.size - preparingImages).coerceAtLeast(0)
+
     val online: Boolean get() = link is LinkStatus.Online
 
     /** 正在运行：发消息插话。 */
@@ -209,6 +224,21 @@ enum class ChatNotice {
 
     /** 另开的对话建好了，但没有归到原来的项目（落地方案 C1）。 */
     FORK_NOT_IN_PROJECT,
+
+    /** 当前模型看不了图片：消息没发出，文字和图片放回输入框（落地方案 C2）。 */
+    IMAGES_NOT_SUPPORTED,
+
+    /** DSH 说图片坏了：消息没发出，放回输入框。 */
+    IMAGE_INVALID,
+
+    /** 有的图片读不出来（不是图片、文件没了），没有加上。 */
+    IMAGE_UNREADABLE,
+
+    /** 旧插件不能发图片。 */
+    IMAGES_OLD_PLUGIN,
+
+    /** 还没确认能不能发图片（没读到模型列表）。 */
+    IMAGES_CHECKING,
 }
 
 /** 另开对话的进度（落地方案 C1）。 */
@@ -285,13 +315,31 @@ class ChatViewModel(
     /** 存草稿。在 App 的作用域里执行，离开会话页后也会存完。 */
     private val saveDraft: (String) -> Unit = {},
 ) : ViewModel() {
+    private val hostId = hostId
+    private val sessionId = sessionId
+
     /** 模型或审批方式没设置成功、消息还没发时，放回输入框的文字。 */
     val initialDraft: String? =
         when (handoff) {
-            is ChatHandoff.NotSent -> handoff.text
+            is ChatHandoff.NotSent -> handoff.text.takeIf { it.isNotBlank() }
             is ChatHandoff.Forked -> handoff.text.takeIf { it.isNotBlank() }
             else -> null
         }
+
+    /** 输入框里的图片（只在内存里，用户确认）和模型列表（判断能不能加图片）。 */
+    private data class Composer(
+        val images: List<OutgoingImage> = emptyList(),
+        val preparing: Int = 0,
+        val models: ModelList? = null,
+    )
+
+    private val composer = MutableStateFlow(Composer(images = (handoff as? ChatHandoff.NotSent)?.images.orEmpty()))
+    private var modelsLoad: Job? = null
+
+    private val _returnedText = MutableStateFlow<String?>(null)
+
+    /** 插件拒绝了带图的消息，要放回输入框的文字（界面放回后调 [consumeReturnedText]）。 */
+    val returnedText: StateFlow<String?> = _returnedText.asStateFlow()
 
     private val _restoredDraft = MutableStateFlow<String?>(null)
 
@@ -364,7 +412,15 @@ class ChatViewModel(
             base.copy(hostName = name, projectName = projectName(base.session, projects))
         }.combine(usage) { base, u -> base.copy(usage = u) }
             .combine(plan) { base, p -> base.copy(plan = p) }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, ChatState(null, LinkStatus.Stopped, emptyList(), false, false, false, false))
+            .combine(composer) { base, c ->
+                base.copy(
+                    hostId = hostId,
+                    sessionId = sessionId,
+                    images = c.images,
+                    preparingImages = c.preparing,
+                    imageSupport = ImageSupport.of(c.models, base.session?.model),
+                )
+            }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatState(null, LinkStatus.Stopped, emptyList(), false, false, false, false))
 
     init {
         // 出现在这个页面上的事项之后在别处被处理时，提示「已在其他地方处理」
@@ -374,7 +430,7 @@ class ChatViewModel(
     private val _notice =
         MutableStateFlow(
             when (handoff) {
-                is ChatHandoff.NotSent -> ChatNotice.SETUP_FAILED
+                is ChatHandoff.NotSent -> handoff.reason
                 is ChatHandoff.Forked -> if (handoff.workspaceAttached) null else ChatNotice.FORK_NOT_IN_PROJECT
                 else -> null
             },
@@ -397,6 +453,7 @@ class ChatViewModel(
         visibleCount++
         loadWorkspaces()
         refreshUsage()
+        loadModels()
         if (subscription?.isActive == true) return
         subscription =
             viewModelScope.launch {
@@ -404,6 +461,8 @@ class ChatViewModel(
                     when (event) {
                         is SessionEvent.Resync -> {
                             reloadLatest()
+                            // 重连后插件可能换了版本，没读到过模型列表时也再读一次
+                            loadModels(force = true)
                             // 断线期间可能错过了 plan.updated
                             refreshPlan()
                         }
@@ -470,12 +529,78 @@ class ChatViewModel(
      */
     fun send(text: String): Boolean {
         val current = state.value
-        if (text.isBlank() || text.length > OutgoingMessage.MAX_TEXT || !current.canSend) return false
+        val images = current.images
+        if ((text.isBlank() && images.isEmpty()) || text.length > OutgoingMessage.MAX_TEXT || !current.canSend) return false
+        // 图片还在压缩时等一等；加上图片之后模型换成了只读文字的（或者插件换成了旧的），先说明，不发
+        if (current.preparingImages > 0) return false
+        if (images.isNotEmpty() && !current.imageSupport.canAdd) {
+            _notice.value = imageNotice(current.imageSupport)
+            return false
+        }
         val mode = if (current.running) PromptMode.STEER else PromptMode.QUEUE
-        val message = OutgoingMessage(text, mode)
+        val message = OutgoingMessage(text, mode, images)
+        composer.update { it.copy(images = emptyList()) }
         outbox.update { it.add(message) }
         deliver(message)
         return true
+    }
+
+    /**
+     * 点了加号但现在不能加图片：说明原因（设计规格 6.3「看不了图时加号不可用并说明原因」）。
+     * 还没读到模型列表时顺便再读一次。
+     */
+    fun explainImages() {
+        val support = state.value.imageSupport
+        if (support == ImageSupport.CHECKING) loadModels(force = true)
+        _notice.value = imageNotice(support)
+    }
+
+    /** 加上用户选的图片（在后台压缩）；超过张数的部分不加。读不出来的图片提示一声。 */
+    fun addImages(sources: List<suspend () -> OutgoingImage?>) {
+        val take = sources.take(state.value.imageSlots)
+        if (take.isEmpty() || !state.value.imageSupport.canAdd) return
+        composer.update { it.copy(preparing = it.preparing + take.size) }
+        viewModelScope.launch {
+            var unreadable = false
+            for (source in take) {
+                val image =
+                    try {
+                        source()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                if (image == null) unreadable = true
+                composer.update { c ->
+                    c.copy(
+                        preparing = c.preparing - 1,
+                        images = if (image != null && c.images.size < OutgoingMessage.MAX_IMAGES) c.images + image else c.images,
+                    )
+                }
+            }
+            if (unreadable) _notice.value = ChatNotice.IMAGE_UNREADABLE
+        }
+    }
+
+    fun removeImage(key: String) = composer.update { c -> c.copy(images = c.images.filterNot { it.key == key }) }
+
+    fun consumeReturnedText() {
+        _returnedText.value = null
+    }
+
+    /** 读模型列表，判断能不能加图片。已经读到时不再读，除非 [force]。读不到时保持「还没确认」。 */
+    private fun loadModels(force: Boolean = false) {
+        if ((composer.value.models != null && !force) || modelsLoad?.isActive == true) return
+        modelsLoad =
+            viewModelScope.launch {
+                try {
+                    val list = backend.models()
+                    composer.update { it.copy(models = list) }
+                } catch (_: ApiException) {
+                } catch (_: OfflineException) {
+                }
+            }
     }
 
     /**
@@ -578,7 +703,12 @@ class ChatViewModel(
     }
 
     /** 点了模型：展开它的选项；已经展开时收起；展开着审批方式时换成模型。 */
-    fun openModels() = openPicker(PickerKind.MODELS) { Picker.Models(backend.models()) }
+    fun openModels() =
+        openPicker(PickerKind.MODELS) {
+            val list = backend.models()
+            composer.update { it.copy(models = list) }
+            Picker.Models(list)
+        }
 
     fun openPresets() = openPicker(PickerKind.PRESETS) { Picker.Presets(backend.permissionPresets()) }
 
@@ -645,12 +775,39 @@ class ChatViewModel(
                     backend.prompt(message)
                     OutgoingStatus.SENT
                 } catch (e: ApiException) {
+                    if (imageRejection(e) != null) {
+                        giveBack(message, e)
+                        return@launch
+                    }
                     deliveryStatus(e)
                 } catch (e: OfflineException) {
                     deliveryStatus(e)
                 }
             outbox.update { box -> if (box.find(message.requestId) != null) box.mark(message.requestId, status) else box }
         }
+    }
+
+    /**
+     * 插件因为图片拒绝了这条消息（模型看不了图、图片坏了）：消息肯定没发出，气泡去掉，文字和图片放回输入框并说明原因。
+     * 模型看不了图时记下来，加号随之不可用。
+     */
+    private fun giveBack(
+        message: OutgoingMessage,
+        error: ApiException,
+    ) {
+        val notice = imageRejection(error) ?: return
+        if (outbox.value.find(message.requestId) == null) return
+        outbox.update { it.remove(message.requestId) }
+        if (message.text.isNotBlank()) _returnedText.value = message.text
+        composer.update { c ->
+            // 会话还没说用哪个模型时，用的是默认模型
+            val model = state.value.session?.model ?: c.models?.default
+            c.copy(
+                images = (message.images + c.images).distinctBy { it.key }.take(OutgoingMessage.MAX_IMAGES),
+                models = if (notice == ChatNotice.IMAGES_NOT_SUPPORTED && model != null) c.models?.textOnly(model) else c.models,
+            )
+        }
+        _notice.value = notice
     }
 
     private fun updateTimeline(change: (ChatTimeline) -> ChatTimeline) {
@@ -750,3 +907,19 @@ internal fun chatItems(
 
 /** 输入框停顿这么久再存草稿。 */
 private const val DRAFT_SAVE_DELAY_MILLIS = 400L
+
+/** 插件因为图片拒绝了消息时对应的提示；不是这两种错误时为 null。 */
+internal fun imageRejection(error: Exception): ChatNotice? =
+    when ((error as? ApiException.Http)?.code) {
+        ErrorCode.IMAGES_NOT_SUPPORTED -> ChatNotice.IMAGES_NOT_SUPPORTED
+        ErrorCode.IMAGE_INVALID -> ChatNotice.IMAGE_INVALID
+        else -> null
+    }
+
+/** 现在不能加图片的原因。 */
+internal fun imageNotice(support: ImageSupport): ChatNotice =
+    when (support) {
+        ImageSupport.OLD_PLUGIN -> ChatNotice.IMAGES_OLD_PLUGIN
+        ImageSupport.TEXT_ONLY_MODEL -> ChatNotice.IMAGES_NOT_SUPPORTED
+        else -> ChatNotice.IMAGES_CHECKING
+    }

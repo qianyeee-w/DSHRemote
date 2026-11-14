@@ -1,6 +1,10 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,9 +47,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.ui.DesignTheme
+import io.github.qianyeeew.dshremote.ui.chat.AddImageButton
+import io.github.qianyeeew.dshremote.ui.chat.ComposerImageStrip
 import io.github.qianyeeew.dshremote.ui.chat.contextRing
+import io.github.qianyeeew.dshremote.ui.chat.extendStart
+import io.github.qianyeeew.dshremote.ui.chat.noticeText
 import io.github.qianyeeew.dshremote.ui.chat.permissionHint
 import io.github.qianyeeew.dshremote.ui.chat.permissionLabel
 import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
@@ -69,6 +78,11 @@ class NewTaskActions(
     val onStart: (text: String, project: ProjectPick) -> Boolean = { _, _ -> false },
     /** 任务已经开始（会话已创建）：进入会话。 */
     val onStarted: (StartedTask) -> Unit = {},
+    /** 用户选了图片（落地方案 C2）。 */
+    val onAddImages: (List<Uri>) -> Unit = {},
+    val onRemoveImage: (key: String) -> Unit = {},
+    /** 点了不可用的加号：说明原因。 */
+    val onImagesUnavailable: () -> Unit = {},
 )
 
 /** 收起时：一行占位文字「新任务」（写过的字留着），右边带加号的实心圆（设计规格 7.1）。点了原地展开。 */
@@ -114,7 +128,7 @@ internal fun NewTaskBar(
 
 /**
  * 展开的新任务输入框（设计规格 7.6）：最上面一行「项目 <项目名>」，点了选项目（已有项目、不指定项目、新建或导入项目）；
- * 中间是任务内容；最下面是模型、审批方式、发送键。图片（落地方案 C2）先不做。
+ * 中间是任务内容和加上的图片（56 见方，右上角移除）；最下面是加号、模型、审批方式、发送键（落地方案 C2）。
  */
 @Composable
 internal fun NewTaskComposer(
@@ -149,6 +163,10 @@ internal fun NewTaskComposer(
         menu = null
         action()
     }
+    val pickImages =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(OutgoingMessage.MAX_IMAGES)) { uris ->
+            if (uris.isNotEmpty()) actions.onAddImages(uris)
+        }
     Column(
         modifier
             .fillMaxWidth()
@@ -252,6 +270,15 @@ internal fun NewTaskComposer(
                 }
             },
         )
+        ComposerImageStrip(state.images, state.preparingImages, actions.onRemoveImage)
+        state.imageNotice?.let { notice ->
+            Text(
+                stringResource(noticeText(notice)),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(top = 8.dp).testTag("new-task-image-notice"),
+            )
+        }
         state.error?.let { error ->
             Text(
                 stringResource(
@@ -297,7 +324,12 @@ internal fun NewTaskComposer(
             }
             DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
         }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.extendStart(12.dp).fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            AddImageButton(
+                available = online && !state.starting && state.imageSupport.canAdd && state.imageSlots > 0,
+                onAdd = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onUnavailable = { if (state.imageSlots > 0 && !state.starting) actions.onImagesUnavailable() },
+            )
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 val modelName =
                     model?.let { ref ->
@@ -320,7 +352,7 @@ internal fun NewTaskComposer(
                 ) { toggle(Menu.PRESET) }
             }
             StartKey(
-                enabled = online && text.isNotBlank() && !state.starting,
+                enabled = online && (text.isNotBlank() || state.images.isNotEmpty()) && !state.starting && state.preparingImages == 0,
                 starting = state.starting,
             ) { actions.onStart(text, project) }
         }

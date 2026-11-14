@@ -8,12 +8,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.lifecycleScope
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.service.NotificationTargets
 import io.github.qianyeeew.dshremote.service.Notifier
 import io.github.qianyeeew.dshremote.ui.AppNavigation
 import io.github.qianyeeew.dshremote.ui.DshRemoteTheme
+import io.github.qianyeeew.dshremote.ui.chat.LocalImagePreparer
+import io.github.qianyeeew.dshremote.ui.chat.LocalImageStore
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -37,7 +40,10 @@ class MainActivity : ComponentActivity() {
         handleNotification(intent)
         setContent {
             DshRemoteTheme {
-                AppNavigation(container, versionName = BuildConfig.VERSION_NAME)
+                // 图片的缓存和压缩（落地方案 C2）：会话页和首页的输入框、气泡都要用
+                CompositionLocalProvider(LocalImageStore provides container.images, LocalImagePreparer provides container.imagePreparer) {
+                    AppNavigation(container, versionName = BuildConfig.VERSION_NAME)
+                }
             }
         }
         askForNotificationsOnce()

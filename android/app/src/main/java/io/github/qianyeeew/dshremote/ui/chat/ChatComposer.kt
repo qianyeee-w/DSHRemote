@@ -1,6 +1,9 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -36,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -49,10 +53,13 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.attention.ComposerAttention
 import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
@@ -77,19 +84,21 @@ enum class SendKeyMode {
     STOP,
 }
 
+/** [hasText]：输入框里有字或者有图片（有图片时可以不写字，落地方案 C2）。 */
 fun sendKeyMode(
     state: ChatState,
     hasText: Boolean,
 ): SendKeyMode =
     when {
-        hasText && state.canSend -> SendKeyMode.SEND
+        hasText && state.canSend && state.preparingImages == 0 -> SendKeyMode.SEND
         !hasText && state.active && state.online -> SendKeyMode.STOP
         else -> SendKeyMode.IDLE
     }
 
 /**
- * 输入框（设计规格 6.3）。收起（没有焦点）时一行：占位文字、发送键；展开（获得焦点）时描边变成主文字色，
- * 上面是输入的文字，下面一行是模型、审批方式、发送键。加号（图片）和发送键外圈（上下文用量）等落地方案 C2、B4。
+ * 输入框（设计规格 6.3）。收起（没有焦点）时一行：加号、占位文字、发送键；展开（获得焦点）时描边变成主文字色，
+ * 上面是输入的文字，然后是加上的图片（7.6），下面一行是加号、模型、审批方式、发送键。加了图片时一直展开。
+ * 加号选图片用系统的照片选择器（不需要存储权限）；看不了图时加号画成不可用，点了说明原因（落地方案 C2）。
  *
  * 有待处理事项时按 [attention]：审批在等时不能写（DSH 停着等审批，消息不会改变这次审批），只留停止；
  * 只有一个问题的提问时，写的就是自己的答案，经 [onAnswer] 提交；多个问题时在面板里逐题写。
@@ -105,6 +114,8 @@ fun ChatComposer(
     initialText: String = "",
     /** 从本地恢复的草稿（落地方案 B3）：读到时输入框还是空的才放进去。 */
     restoredDraft: String? = null,
+    /** 插件因为图片拒绝了消息，放回来的文字（落地方案 C2）：输入框里已经有字时放在前面。 */
+    returnedText: String? = null,
     attention: ComposerAttention = ComposerAttention.None,
     onAnswer: (Attention, questionId: String, text: String) -> Boolean = { _, _, _ -> false },
 ) {
@@ -122,12 +133,24 @@ fun ChatComposer(
         field = value
         if (changed) actions.onDraftChange(value.text)
     }
+    LaunchedEffect(returnedText) {
+        if (returnedText != null) {
+            val merged = if (field.text.isBlank()) returnedText else "$returnedText\n${field.text}"
+            edit(TextFieldValue(merged, TextRange(merged.length)))
+            actions.onReturnedTextShown()
+        }
+    }
+    val pickImages =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(OutgoingMessage.MAX_IMAGES)) { uris ->
+            if (uris.isNotEmpty()) actions.onAddImages(uris)
+        }
+    val hasImages = state.images.isNotEmpty() || state.preparingImages > 0
     var focused by remember { mutableStateOf(false) }
     val pickerOpen = picker != Picker.Closed
     // 长按发送键展开的用量（7.11）。和模型、审批方式的选项一次只展开一个
     var usageOpen by remember { mutableStateOf(false) }
     LaunchedEffect(pickerOpen) { if (pickerOpen) usageOpen = false }
-    val expanded = focused || pickerOpen || usageOpen
+    val expanded = focused || pickerOpen || usageOpen || hasImages
     // 收起的动画期间还要画最后一次展开的选项
     var lastPicker by remember { mutableStateOf<Picker>(Picker.Closed) }
     if (pickerOpen) lastPicker = picker
@@ -162,6 +185,16 @@ fun ChatComposer(
             },
         )
     val writable = state.canSend && attention !is ComposerAttention.Approval && attention !is ComposerAttention.AnswerAbove
+    // 回答提问时写的是答案，不能带图片
+    val showAddImage = attention == ComposerAttention.None
+    val addImage: @Composable (Modifier) -> Unit = { modifier ->
+        AddImageButton(
+            available = writable && state.imageSupport.canAdd && state.imageSlots > 0,
+            onAdd = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onUnavailable = { if (state.imageSlots > 0) actions.onImagesUnavailable() },
+            modifier = modifier,
+        )
+    }
     val send = {
         val accepted =
             when (attention) {
@@ -174,7 +207,7 @@ fun ChatComposer(
             haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
         }
     }
-    val mode = sendKeyMode(state, text.isNotBlank() && writable)
+    val mode = sendKeyMode(state, (text.isNotBlank() || (state.images.isNotEmpty() && attention == ComposerAttention.None)) && writable)
     val shape = RoundedCornerShape(if (expanded) 22.dp else 26.dp)
     Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
         Column(
@@ -182,11 +215,16 @@ fun ChatComposer(
                 .fillMaxWidth()
                 .designPanel(shape, focused = expanded)
                 .animateContentSize(tween(160))
-                .padding(start = 16.dp, end = 6.dp, top = if (expanded) 12.dp else 0.dp, bottom = if (expanded) 6.dp else 0.dp)
-                .testTag("chat-composer"),
+                .padding(
+                    start = if (!expanded && showAddImage) 4.dp else 16.dp,
+                    end = 6.dp,
+                    top = if (expanded) 12.dp else 0.dp,
+                    bottom = if (expanded) 6.dp else 0.dp,
+                ).testTag("chat-composer"),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(Modifier.heightIn(min = if (expanded) 24.dp else 50.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!expanded && showAddImage) addImage(Modifier)
                 BasicTextField(
                     value = field,
                     onValueChange = edit,
@@ -221,6 +259,7 @@ fun ChatComposer(
                 )
                 if (!expanded) SendKey(mode, ratio, onSend = send, onStop = actions.onCancelRun, onLongPress = toggleUsage)
             }
+            if (expanded && showAddImage) ComposerImageStrip(state.images, state.preparingImages, actions.onRemoveImage)
             // 选项在最下面一行的正上方展开，输入框卡片向上长；不另开窗口，焦点和键盘都不变
             InlineChoices(visible = expanded && pickerOpen) {
                 DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp, bottom = 4.dp))
@@ -234,10 +273,15 @@ fun ChatComposer(
             }
             if (expanded) {
                 Row(
-                    Modifier.fillMaxWidth().testTag("chat-composer-options"),
+                    // 有加号时这一行向左伸进内边距：加号的点按区域比图标大，图标和上面的文字对齐（设计稿 margin-left -12）
+                    Modifier
+                        .let { if (showAddImage) it.extendStart(12.dp) else it }
+                        .fillMaxWidth()
+                        .testTag("chat-composer-options"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    if (showAddImage) addImage(Modifier)
                     val model = state.session?.model?.model ?: stringResource(R.string.design_choose_model)
                     val preset = permissionLabel(state.session?.permissionPreset)
                     // 两项各自按内容宽度，都很长时各占一半
@@ -450,4 +494,18 @@ internal fun permissionHint(preset: String): String? =
         "workspace-write" -> stringResource(R.string.design_permission_workspace_hint)
         "danger-full-access" -> stringResource(R.string.design_permission_full_hint)
         else -> null
+    }
+
+/** 向左多占 [by] 的宽度（像 CSS 的负 margin-left），右边界不变。 */
+internal fun Modifier.extendStart(by: Dp): Modifier =
+    layout { measurable, constraints ->
+        val extra = by.roundToPx()
+        val placeable =
+            measurable.measure(
+                constraints.copy(
+                    minWidth = (constraints.minWidth + extra).coerceAtMost(Constraints.Infinity),
+                    maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + extra else Constraints.Infinity,
+                ),
+            )
+        layout(placeable.width - extra, placeable.height) { placeable.place(-extra, 0) }
     }

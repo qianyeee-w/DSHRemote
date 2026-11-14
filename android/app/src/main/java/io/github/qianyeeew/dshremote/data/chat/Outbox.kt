@@ -1,6 +1,7 @@
 package io.github.qianyeeew.dshremote.data.chat
 
 import io.github.qianyeeew.dshremote.data.api.ApiException
+import io.github.qianyeeew.dshremote.data.api.ImagePart
 import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.TextPart
@@ -43,8 +44,8 @@ data class LocalMessage(
  * 发出去、但还没在会话日志里出现的消息（m2-android.md 3.4「发送消息」）。界面上显示在最后，
  * 状态为「发送中 / 已发送 / 失败，点此重试 / 不确定是否送达」。
  *
- * 插件推送回来的用户消息 id 和 requestId 无关，所以按文字匹配：时间线里每出现一条**之前没见过的**用户消息，
- * 就去掉第一条文字相同的本地消息（同样的文字发了两次时按先后顺序对应）。失败和不确定的消息也参与匹配：
+ * 插件推送回来的用户消息 id 和 requestId 无关，所以按内容匹配：时间线里每出现一条**之前没见过的**用户消息，
+ * 就去掉第一条文字相同、图片张数也相同的本地消息（同样的内容发了两次时按先后顺序对应）。失败和不确定的消息也参与匹配：
  * 可能请求其实已经到达，只是响应丢了。
  */
 data class Outbox(
@@ -61,6 +62,9 @@ data class Outbox(
 
     fun find(requestId: String): LocalMessage? = items.firstOrNull { it.outgoing.requestId == requestId }
 
+    /** 去掉一条本地消息（插件明确拒绝、内容放回输入框时）。 */
+    fun remove(requestId: String): Outbox = copy(items = items.filterNot { it.outgoing.requestId == requestId })
+
     /** 时间线变化后调用。第一次读到历史时只记下已有的用户消息，不做匹配。 */
     fun reconcile(timeline: ChatTimeline): Outbox {
         if (!timeline.loaded) return this
@@ -75,7 +79,8 @@ data class Outbox(
                     .filterIsInstance<TextPart>()
                     .joinToString("") { it.text }
                     .trim()
-            val index = remaining.indexOfFirst { it.outgoing.text.trim() == text }
+            val images = message.parts.count { it is ImagePart }
+            val index = remaining.indexOfFirst { it.outgoing.text.trim() == text && it.outgoing.images.size == images }
             if (index >= 0) remaining = remaining.filterIndexed { i, _ -> i != index }
         }
         return copy(items = remaining, seenUserIds = seenUserIds + fresh.map { it.id })

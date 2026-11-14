@@ -7,6 +7,8 @@ import android.provider.Settings
 import android.util.Log
 import io.github.qianyeeew.dshremote.data.chat.DraftStore
 import io.github.qianyeeew.dshremote.data.host.HostRepository
+import io.github.qianyeeew.dshremote.data.image.ImagePreparer
+import io.github.qianyeeew.dshremote.data.image.ImageStore
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.NetworkMonitor
 import io.github.qianyeeew.dshremote.data.net.ClientFactory
@@ -112,6 +114,16 @@ class AppContainer(
             visibleSession,
             onSessionsKnown = { hostId, sessions -> drafts.prune(hostId, sessions) },
         ).also { it.start() }
+
+    /** 图片的缓存（落地方案 C2）：会话里的图片按引用从电脑读，缩略图放在内存，原图放在私有缓存目录。 */
+    val images: ImageStore =
+        ImageStore(appContext.cacheDir, fetch = { ref -> connections.api(ref.hostId)?.image(ref.sessionId, ref.imageId) }).also { store ->
+            // 主机被删掉（取消配对）时，它的图片缓存一起删
+            scope.launch { hosts.hosts.collect { list -> store.retainHosts(list.mapTo(HashSet()) { it.hostId }) } }
+        }
+
+    /** 把用户选的图片压缩成可以发出的文件。 */
+    val imagePreparer = ImagePreparer(appContext.contentResolver)
 
     /** 点通知后要打开的页面，由导航取走。 */
     val pendingTarget = MutableStateFlow<NotificationTarget?>(null)

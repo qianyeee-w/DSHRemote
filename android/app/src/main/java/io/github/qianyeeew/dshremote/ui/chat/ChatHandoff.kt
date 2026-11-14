@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
+import io.github.qianyeeew.dshremote.data.api.OutgoingImage
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import java.util.concurrent.ConcurrentHashMap
@@ -30,12 +31,17 @@ sealed interface ChatHandoff {
         override fun toString(): String = "Forked(${text.length} 个字符, $workspaceAttached)"
     }
 
-    /** 模型或审批方式没有设置成功，消息还没发：文字放回输入框，并提示原因。 */
+    /**
+     * 消息没发出：模型或审批方式没有设置成功，或者插件因为图片拒绝了这条消息（落地方案 C2）。
+     * 文字和图片放回输入框，并按 [reason] 提示原因。
+     */
     data class NotSent(
         val text: String,
+        val images: List<OutgoingImage> = emptyList(),
+        val reason: ChatNotice = ChatNotice.SETUP_FAILED,
     ) : ChatHandoff {
         /** 不输出消息内容。 */
-        override fun toString(): String = "NotSent(${text.length} 个字符)"
+        override fun toString(): String = "NotSent(${text.length} 个字符, ${images.size} 张图片, $reason)"
     }
 }
 

@@ -59,6 +59,12 @@ enum class ErrorCode {
     DIRECTORY_CREATE_FAILED,
     UNSUPPORTED_MEDIA_TYPE,
     PAYLOAD_TOO_LARGE,
+
+    /** DSH 认为消息里的图片已损坏或格式不支持，消息没有发出（落地方案 C2）。 */
+    IMAGE_INVALID,
+
+    /** 当前模型看不了图片，消息没有发出（落地方案 C2）。 */
+    IMAGES_NOT_SUPPORTED,
     INTERNAL,
     UNKNOWN,
     ;

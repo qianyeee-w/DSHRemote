@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.serializer
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl
@@ -22,7 +23,10 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.BufferedSink
+import okio.ByteString
+import okio.ByteString.Companion.encodeUtf8
 import java.io.IOException
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -151,7 +155,7 @@ class PluginApi(
         requireId(sessionId)
         // 请求体开始写出之前就失败（连不上、握手失败），插件肯定没收到；之后失败就说不准（落地方案 B3）
         val written = AtomicBoolean(false)
-        val body = encode(PromptRequest.serializer(), PromptRequest(message.requestId, message.text, message.mode)).tracked(written)
+        val body = PromptBody(message).tracked(written)
         try {
             send("POST", listOf("sessions", sessionId, "prompt"), body = body) { decode(Accepted.serializer(), it) }
         } catch (e: ApiException.Network) {
@@ -171,6 +175,33 @@ class PluginApi(
         requireId(sessionId)
         val body = encode(ForkRequest.serializer(), ForkRequest(requestId, beforeTurn))
         return send("POST", listOf("sessions", sessionId, "fork"), body = body) { decode(ForkResult.serializer(), it) }
+    }
+
+    /**
+     * 读这个会话里的一张图片（protocol.md 第 4 节「图片」），返回图片文件的字节。图片不属于这个会话、
+     * 或者旧插件时 `404`。响应体超过 [MAX_IMAGE_RESPONSE_BYTES] 时视为插件返回了无法处理的内容。
+     */
+    suspend fun image(
+        sessionId: String,
+        imageId: String,
+    ): ByteArray {
+        requireId(sessionId)
+        require(IMAGE_ID.matches(imageId)) { "图片 id 格式不对" }
+        return exchange("GET", listOf("sessions", sessionId, "images", imageId), accept = "image/*") { response ->
+            val declared = response.body.contentLength()
+            if (declared > MAX_IMAGE_RESPONSE_BYTES) throw ApiException.BadResponse("图片太大")
+            val bytes =
+                try {
+                    response.body.source().use { source ->
+                        // 先确认不超过上限再一次读完（request 返回 false 表示已经读到结尾）
+                        if (source.request(MAX_IMAGE_RESPONSE_BYTES + 1)) throw ApiException.BadResponse("图片太大")
+                        source.readByteArray()
+                    }
+                } catch (e: IOException) {
+                    throw ApiException.Network(e)
+                }
+            bytes
+        }
     }
 
     /** 停止当前任务。会话空闲时也成功。 */
@@ -255,6 +286,27 @@ class PluginApi(
         /** 成功的响应到达时调用（读取响应头）。 */
         onResponse: (Response) -> Unit = {},
         parse: (String) -> T,
+    ): T =
+        exchange(method, path, query, body, auth) {
+            val text =
+                try {
+                    it.body.string()
+                } catch (e: IOException) {
+                    throw ApiException.Network(e)
+                }
+            onResponse(it)
+            parse(text)
+        }
+
+    /** 发出请求；失败的响应转成 [ApiException.Http]，成功时交给 [onSuccess] 读取（在 IO 线程上）。 */
+    private suspend fun <T> exchange(
+        method: String,
+        path: List<String>,
+        query: Map<String, String> = emptyMap(),
+        body: RequestBody? = null,
+        auth: Boolean = true,
+        accept: String = "application/json",
+        onSuccess: (Response) -> T,
     ): T {
         val url =
             base
@@ -268,7 +320,7 @@ class PluginApi(
             Request
                 .Builder()
                 .url(url)
-                .header("Accept", "application/json")
+                .header("Accept", accept)
                 .apply {
                     if (auth) {
                         val bearer = checkNotNull(token) { "没有 token，只能调用无需认证的接口" }
@@ -284,15 +336,16 @@ class PluginApi(
                     throw if (e.isFingerprintMismatch()) ApiException.FingerprintMismatch(e) else ApiException.Network(e)
                 }
             response.use {
-                val text =
-                    try {
-                        it.body.string()
-                    } catch (e: IOException) {
-                        throw ApiException.Network(e)
-                    }
-                if (!it.isSuccessful) throw httpError(it, text)
-                onResponse(it)
-                parse(text)
+                if (!it.isSuccessful) {
+                    val text =
+                        try {
+                            it.body.string()
+                        } catch (e: IOException) {
+                            throw ApiException.Network(e)
+                        }
+                    throw httpError(it, text)
+                }
+                onSuccess(it)
             }
         }
     }
@@ -336,6 +389,10 @@ class PluginApi(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_BODY = ByteArray(0).toRequestBody(null)
         private val ID = Regex("^[A-Za-z0-9_-]{1,128}$")
+        private val IMAGE_ID = Regex("^[0-9a-f]{64}$")
+
+        /** 读一张图片最多接受多少字节：DSH 允许电脑上发的图片单张 50 MB。 */
+        const val MAX_IMAGE_RESPONSE_BYTES = 50L * 1024 * 1024
 
         /** protocol.md 4：路径中的 id 只能由字母、数字、`_`、`-` 组成，最长 128 个字符。也防止 `..` 之类改变路径。 */
         private fun requireId(id: String) = require(ID.matches(id)) { "id 格式不对" }
@@ -356,19 +413,107 @@ data class PairResult(
 class OutgoingMessage(
     val text: String,
     val mode: PromptMode,
+    /** 附带的图片（落地方案 C2），已经在手机上压缩过。重试时一起重发同样的字节。 */
+    val images: List<OutgoingImage> = emptyList(),
     val requestId: String = UUID.randomUUID().toString(),
 ) {
     init {
-        require(text.isNotBlank()) { "消息不能为空" }
+        require(text.isNotBlank() || images.isNotEmpty()) { "消息不能为空" }
         require(text.length <= MAX_TEXT) { "消息太长" }
+        require(images.size <= MAX_IMAGES) { "图片太多" }
         require(Regex("^[A-Za-z0-9_-]{1,128}$").matches(requestId)) { "requestId 格式不对" }
     }
 
     /** 不输出消息内容（可能包含用户的隐私）。 */
-    override fun toString(): String = "OutgoingMessage(requestId=$requestId, mode=$mode, length=${text.length})"
+    override fun toString(): String = "OutgoingMessage(requestId=$requestId, mode=$mode, length=${text.length}, images=${images.size})"
 
     companion object {
         const val MAX_TEXT = 100_000
+
+        /** 每条消息最多几张图片（protocol.md 第 4 节「图片」）。 */
+        const val MAX_IMAGES = 4
+    }
+}
+
+/**
+ * 一张要发出的图片：压缩好的 JPEG 或 PNG 文件（落地方案 C2）。[key] 在这台手机上唯一，界面和缩略图缓存用它区分。
+ */
+class OutgoingImage(
+    val key: String,
+    val mediaType: String,
+    val bytes: ByteArray,
+    val width: Int,
+    val height: Int,
+) {
+    init {
+        require(mediaType == JPEG || mediaType == PNG) { "只能是 JPEG 或 PNG" }
+        require(bytes.size <= MAX_BYTES) { "图片太大" }
+    }
+
+    /** 不输出图片内容。 */
+    override fun toString(): String = "OutgoingImage($key, $mediaType, ${width}x$height, ${bytes.size} 字节)"
+
+    companion object {
+        const val JPEG = "image/jpeg"
+        const val PNG = "image/png"
+
+        /** 单张最多多少字节（解码后，protocol.md 第 4 节「图片」）。 */
+        const val MAX_BYTES = 8 * 1024 * 1024
+    }
+}
+
+/**
+ * 发消息的请求体 `{ requestId, text, mode, images? }`。图片的 base64 边编码边写出，不在内存里拼成整个 JSON 字符串
+ * （4 张大图编码后有几十 MB）。没有图片时不带 `images`。
+ */
+internal class PromptBody(
+    private val message: OutgoingMessage,
+) : RequestBody() {
+    private val head: ByteString =
+        buildString {
+            append("{\"requestId\":").append(jsonString(message.requestId))
+            append(",\"text\":").append(jsonString(message.text))
+            append(",\"mode\":").append(ApiJson.encodeToString(PromptMode.serializer(), message.mode))
+            if (message.images.isNotEmpty()) append(",\"images\":[")
+        }.encodeUtf8()
+    private val tail: ByteString = (if (message.images.isNotEmpty()) "]}" else "}").encodeUtf8()
+
+    private fun imageHead(
+        index: Int,
+        image: OutgoingImage,
+    ): ByteString = "${if (index > 0) "," else ""}{\"mediaType\":${jsonString(image.mediaType)},\"data\":\"".encodeUtf8()
+
+    override fun contentType() = JSON_MEDIA_TYPE
+
+    override fun contentLength(): Long =
+        head.size.toLong() + tail.size +
+            message.images.withIndex().sumOf { (i, image) -> imageHead(i, image).size + base64Length(image.bytes.size) + IMAGE_TAIL.size }
+
+    override fun writeTo(sink: BufferedSink) {
+        sink.write(head)
+        val encoder = Base64.getEncoder()
+        message.images.forEachIndexed { index, image ->
+            sink.write(imageHead(index, image))
+            var offset = 0
+            while (offset < image.bytes.size) {
+                // 每段是 3 的倍数个字节：中间各段编码后没有填充，拼起来就是整个文件的 base64
+                val end = minOf(offset + CHUNK, image.bytes.size)
+                sink.write(encoder.encode(image.bytes.copyOfRange(offset, end)))
+                offset = end
+            }
+            sink.write(IMAGE_TAIL)
+        }
+        sink.write(tail)
+    }
+
+    private companion object {
+        val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        val IMAGE_TAIL = "\"}".encodeUtf8()
+        const val CHUNK = 3 * 16 * 1024
+
+        fun jsonString(value: String): String = ApiJson.encodeToString(String.serializer(), value)
+
+        fun base64Length(bytes: Int): Long = (bytes.toLong() + 2) / 3 * 4
     }
 }
 

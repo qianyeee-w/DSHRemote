@@ -8,11 +8,13 @@ import io.github.qianyeeew.dshremote.data.net.TlsTestSupport
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.RecordedRequest
 import mockwebserver3.SocketEffect
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,6 +24,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.net.ServerSocket
+import java.util.Base64
 
 /**
  * PluginApi 对 protocol.md 第 2、4、5、7 节的实现。插件的响应用手写的 JSON 固定数据模拟，
@@ -233,12 +236,14 @@ class PluginApiTest {
             respond(
                 """
                 {"messages":[
-                  {"id":"m1","role":"user","parts":[{"type":"text","text":"你好"}],"createdAt":1},
+                  {"id":"m1","role":"user","parts":[{"type":"image","id":"${"ab".repeat(
+                    32,
+                )}","mediaType":"image/png","width":640,"height":480},{"type":"text","text":"你好"}],"createdAt":1},
                   {"id":"m2","role":"assistant","createdAt":2,"turn":3,"parts":[
                     {"type":"thinking","text":"想一想"},
                     {"type":"tool","callId":"c1","name":"bash","summary":"运行命令：npm test","status":"done",
                      "input":{"command":"npm test"},"output":"a\nz\n","truncated":true,"omitted":{"offset":2,"chars":40,"lines":20},"outputSaved":true},
-                    {"type":"image","url":"x"},
+                    {"type":"video","url":"x"},
                     {"type":"text","text":"完成"}
                   ]}
                 ],"hasMore":true,"cursor":"opaque-cursor/==",
@@ -260,6 +265,8 @@ class PluginApiTest {
             assertEquals(UnknownPart, parts[2])
             assertEquals(TextPart("完成"), parts[3])
             assertEquals(MessageRole.USER, page.messages[0].role)
+            // 落地方案 C2：用户消息里的图片是引用
+            assertEquals(ImagePart("ab".repeat(32), "image/png", 640, 480), page.messages[0].parts[0])
             assertEquals(
                 listOf(Turn(2, endedAt = 9, result = TurnResult.STOPPED, stoppedBy = "user"), Turn(3, startedAt = 10)),
                 page.turns,
@@ -324,6 +331,112 @@ class PluginApiTest {
         assertTrue(runCatching { OutgoingMessage("x", PromptMode.QUEUE, requestId = "a/b") }.exceptionOrNull() is IllegalArgumentException)
         OutgoingMessage("x".repeat(OutgoingMessage.MAX_TEXT), PromptMode.QUEUE)
     }
+
+    // ---------------------------------------------------------------- 图片（落地方案 C2）
+
+    private fun image(
+        size: Int,
+        key: String = "k$size",
+    ) = OutgoingImage(key, OutgoingImage.PNG, ByteArray(size) { (it * 7).toByte() }, 10, 20)
+
+    @Test
+    fun promptStreamsImagesAsBase64() =
+        runBlocking<Unit> {
+            respond("""{"accepted":true}""")
+            respond("""{"accepted":true}""")
+            // 各种长度：base64 末尾两个、一个、没有填充，以及跨过分段写出的边界
+            val images = listOf(image(1), image(2), image(3 * 16 * 1024 + 1))
+            api.prompt("s1", OutgoingMessage("看图\n\"引号\"", PromptMode.STEER, images))
+            api.prompt("s1", OutgoingMessage("", PromptMode.QUEUE, listOf(image(5))))
+            val request = server.takeRequest()
+            assertEquals(request.bodySize, request.headers["Content-Length"]!!.toLong())
+            val body = bodyOf(request)
+            assertEquals("看图\n\"引号\"", body.string("text"))
+            assertEquals("steer", body.string("mode"))
+            val sent = body.getValue("images").jsonArray.map { it.jsonObject }
+            assertEquals(images.map { "image/png" }, sent.map { it.string("mediaType") })
+            assertEquals(images.map { Base64.getEncoder().encodeToString(it.bytes) }, sent.map { it.string("data") })
+            val imageOnly = bodyOf(server.takeRequest())
+            assertEquals("", imageOnly.string("text"))
+            assertEquals(1, imageOnly.getValue("images").jsonArray.size)
+        }
+
+    @Test
+    fun promptWithoutImagesHasNoImagesField() =
+        runBlocking<Unit> {
+            respond("""{"accepted":true}""")
+            api.prompt("s1", OutgoingMessage("你好", PromptMode.QUEUE))
+            assertFalse(bodyOf(server.takeRequest()).containsKey("images"))
+        }
+
+    @Test
+    fun outgoingImagesAreValidatedAndHidden() {
+        assertTrue(runCatching { OutgoingMessage("", PromptMode.QUEUE) }.exceptionOrNull() is IllegalArgumentException)
+        val five = (1..5).map { image(1, "k$it") }
+        assertTrue(runCatching { OutgoingMessage("x", PromptMode.QUEUE, five) }.exceptionOrNull() is IllegalArgumentException)
+        OutgoingMessage("", PromptMode.QUEUE, five.take(4))
+        assertTrue(runCatching { OutgoingImage("k", "image/gif", ByteArray(1), 1, 1) }.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(
+            runCatching { OutgoingImage("k", OutgoingImage.JPEG, ByteArray(OutgoingImage.MAX_BYTES + 1), 1, 1) }.exceptionOrNull()
+                is IllegalArgumentException,
+        )
+        assertTrue(
+            OutgoingMessage("秘密", PromptMode.QUEUE, listOf(image(3))).toString().let { it.contains("images=1") && !it.contains("秘密") },
+        )
+    }
+
+    @Test
+    fun readsImageBytes() =
+        runBlocking<Unit> {
+            val bytes = ByteArray(300) { (it - 128).toByte() }
+            server.enqueue(
+                MockResponse
+                    .Builder()
+                    .addHeader("Content-Type", "image/png")
+                    .body(Buffer().write(bytes))
+                    .build(),
+            )
+            assertTrue(bytes.contentEquals(api.image("s1", "ab".repeat(32))))
+            val request = server.takeRequest()
+            assertEquals("/v1/sessions/s1/images/${"ab".repeat(32)}", request.url.encodedPath)
+            assertEquals("image/*", request.headers["Accept"])
+            assertEquals("Bearer $tokenText", request.headers["Authorization"])
+
+            error(404, """{"error":{"code":"NOT_FOUND","message":"图片不存在"}}""")
+            assertEquals(ErrorCode.NOT_FOUND, assertApiError<ApiException.Http> { api.image("s1", "cd".repeat(32)) }.code)
+        }
+
+    @Test
+    fun badImageIdIsRejectedBeforeSending() =
+        runBlocking<Unit> {
+            for (bad in listOf("AB".repeat(32), "ab", "sha256:${"ab".repeat(32)}", "../${"ab".repeat(31)}", "ab".repeat(32) + "/x")) {
+                assertTrue(bad, runCatching { api.image("s1", bad) }.exceptionOrNull() is IllegalArgumentException)
+            }
+            assertEquals(0, server.requestCount)
+        }
+
+    @Test
+    fun parsesImageSupportOfModels() =
+        runBlocking<Unit> {
+            respond(
+                """
+                {"default":{"provider":"p","model":"a"},"imageInput":true,"models":[
+                  {"provider":"p","providerName":"P","model":"a","name":"A","images":true},
+                  {"provider":"p","providerName":"P","model":"b","name":"B","images":false},
+                  {"provider":"p","providerName":"P","model":"c","name":"C"}
+                ]}
+                """.trimIndent(),
+            )
+            respond("""{"default":null,"models":[]}""")
+            val models = api.models()
+            assertTrue(models.imageInput)
+            assertEquals(true, models.imagesOf(ModelRef("p", "a")))
+            assertEquals(false, models.imagesOf(ModelRef("p", "b")))
+            assertNull(models.imagesOf(ModelRef("p", "c")))
+            assertNull(models.imagesOf(ModelRef("p", "missing")))
+            assertEquals(false, models.textOnly(ModelRef("p", "c")).imagesOf(ModelRef("p", "c")))
+            assertFalse("旧插件没有 imageInput", api.models().imageInput)
+        }
 
     @Test
     fun cancelPostsEmptyBody() =
@@ -418,6 +531,11 @@ class PluginApiTest {
             error(401, """{"error":{"code":"TOKEN_INVALID","message":"token 无效"}}""")
             val unauthorized = assertApiError<ApiException.Http> { api.sessions() }
             assertEquals(ErrorCode.TOKEN_INVALID, unauthorized.code)
+            error(400, """{"error":{"code":"IMAGES_NOT_SUPPORTED","message":"当前模型看不了图片"}}""")
+            error(400, """{"error":{"code":"IMAGE_INVALID","message":"图片已损坏"}}""")
+            val message = OutgoingMessage("看图", PromptMode.QUEUE, listOf(image(3)))
+            assertEquals(ErrorCode.IMAGES_NOT_SUPPORTED, assertApiError<ApiException.Http> { api.prompt("s1", message) }.code)
+            assertEquals(ErrorCode.IMAGE_INVALID, assertApiError<ApiException.Http> { api.prompt("s1", message) }.code)
             assertTrue(unauthorized.isTokenInvalid)
 
             error(409, """{"error":{"code":"ATTENTION_RESOLVED","message":"已在别处处理"}}""")

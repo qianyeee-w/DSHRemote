@@ -319,6 +319,19 @@ data class OutputOmission(
     val lines: Int,
 )
 
+/**
+ * 用户消息里的一张图片（protocol.md 第 4 节「图片」，落地方案 C2）。图片本身按 [id] 经
+ * `GET /v1/sessions/{id}/images/{imageId}` 读取。旧插件的图片是占位文字 `[图片]`。
+ */
+@Serializable
+data class ImagePart(
+    /** 64 位小写十六进制（图片内容的 sha256）。 */
+    val id: String,
+    val mediaType: String,
+    val width: Int,
+    val height: Int,
+) : MessagePart
+
 /** 这个版本的 App 不认识的 part 类型，界面上忽略。 */
 @Serializable
 data object UnknownPart : MessagePart
@@ -329,6 +342,7 @@ internal object MessagePartSerializer : JsonContentPolymorphicSerializer<Message
             "text" -> TextPart.serializer()
             "thinking" -> ThinkingPart.serializer()
             "tool" -> ToolPart.serializer()
+            "image" -> ImagePart.serializer()
             else -> UnknownPart.serializer()
         }
 }
@@ -357,13 +371,6 @@ enum class PromptMode {
 }
 
 @Serializable
-internal data class PromptRequest(
-    val requestId: String,
-    val text: String,
-    val mode: PromptMode,
-)
-
-@Serializable
 internal data class Accepted(
     val accepted: Boolean,
 )
@@ -377,13 +384,25 @@ data class ModelOption(
     val model: String,
     val name: String,
     val description: String? = null,
+    /** 能不能看图（protocol.md 第 4 节「图片」）：null 是不知道（DSH 没说，或者旧插件）。 */
+    val images: Boolean? = null,
 )
 
 @Serializable
 data class ModelList(
     val default: ModelRef? = null,
     val models: List<ModelOption>,
-)
+    /** 插件能发图片。旧插件没有这个字段，而且会忽略图片，所以为 false 时不让加图片。 */
+    val imageInput: Boolean = false,
+) {
+    /** [model] 能不能看图；列表里没有它时为 null（不知道）。 */
+    fun imagesOf(model: ModelRef?): Boolean? =
+        model?.let { ref -> models.firstOrNull { it.provider == ref.provider && it.model == ref.model }?.images }
+
+    /** DSH 说 [model] 看不了图（发送被拒绝）之后，记成只能读文字。 */
+    fun textOnly(model: ModelRef): ModelList =
+        copy(models = models.map { if (it.provider == model.provider && it.model == model.model) it.copy(images = false) else it })
+}
 
 @Serializable
 internal data class SetModelResponse(

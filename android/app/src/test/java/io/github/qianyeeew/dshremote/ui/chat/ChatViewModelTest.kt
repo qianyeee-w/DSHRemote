@@ -5,13 +5,16 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.ContextUsage
+import io.github.qianyeeew.dshremote.data.api.ErrorCode
 import io.github.qianyeeew.dshremote.data.api.ForkResult
 import io.github.qianyeeew.dshremote.data.api.GoalStatus
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
 import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.ModelList
+import io.github.qianyeeew.dshremote.data.api.ModelOption
 import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingImage
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.data.api.PermissionPresetList
 import io.github.qianyeeew.dshremote.data.api.PlanGoal
@@ -29,6 +32,7 @@ import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.host.HostAddress
+import io.github.qianyeeew.dshremote.data.image.ImageSupport
 import io.github.qianyeeew.dshremote.data.live.HostLiveState
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.data.live.OfflineException
@@ -668,6 +672,183 @@ class ChatViewModelTest {
         store.clear()
     }
 
+    // ---------------------------------------------------------------- 图片（落地方案 C2）
+
+    private fun pic(key: String) = OutgoingImage(key, OutgoingImage.JPEG, byteArrayOf(1, 2, 3), 10, 10)
+
+    private fun source(key: String?): suspend () -> OutgoingImage? = { key?.let(::pic) }
+
+    private fun withModels(
+        images: Boolean?,
+        imageInput: Boolean = true,
+    ) {
+        backend.models =
+            ModelList(
+                default = ModelRef("p", "m"),
+                models = listOf(ModelOption("p", "P", "m", "M", images = images), ModelOption("p", "P", "t", "T", images = false)),
+                imageInput = imageInput,
+            )
+    }
+
+    private fun ChatViewModel.imageKeys() = state.value.images.map { it.key }
+
+    @Test
+    fun imagesAreSentWithTheMessageAndLeaveTheComposer() {
+        withModels(images = true)
+        val vm = visible()
+        assertEquals(ImageSupport.YES, vm.state.value.imageSupport)
+        vm.addImages(listOf(source("a"), source("b")))
+        assertEquals(listOf("a", "b"), vm.imageKeys())
+        assertEquals(0, vm.state.value.preparingImages)
+
+        assertTrue(vm.send("看图"))
+        assertEquals(
+            listOf("a", "b"),
+            backend.prompts
+                .single()
+                .images
+                .map { it.key },
+        )
+        assertEquals(emptyList<String>(), vm.imageKeys())
+        // 还没出现在会话里时，本地气泡带着图片
+        assertEquals(
+            listOf("a", "b"),
+            vm
+                .locals()
+                .single()
+                .outgoing.images
+                .map { it.key },
+        )
+
+        // 只有图片、没有文字也能发
+        vm.addImages(listOf(source("c")))
+        assertTrue(vm.send(""))
+        assertEquals("", backend.prompts.last().text)
+        assertFalse("没字也没图不能发", vm.send("  "))
+    }
+
+    @Test
+    fun atMostFourImagesAndUnreadableOnesAreReported() {
+        withModels(images = null)
+        val vm = visible()
+        assertEquals(ImageSupport.UNKNOWN, vm.state.value.imageSupport)
+        vm.addImages(listOf(source("a"), source(null), source("c")))
+        assertEquals(listOf("a", "c"), vm.imageKeys())
+        assertEquals(ChatNotice.IMAGE_UNREADABLE, vm.notice.value)
+        vm.addImages((1..5).map { source("x$it") })
+        assertEquals(listOf("a", "c", "x1", "x2"), vm.imageKeys())
+        assertEquals(0, vm.state.value.imageSlots)
+        vm.removeImage("c")
+        assertEquals(listOf("a", "x1", "x2"), vm.imageKeys())
+    }
+
+    @Test
+    fun oldPluginOrUnknownCapabilityKeepsThePlusUnavailable() {
+        withModels(images = true, imageInput = false)
+        val vm = visible()
+        assertEquals(ImageSupport.OLD_PLUGIN, vm.state.value.imageSupport)
+        vm.addImages(listOf(source("a")))
+        assertEquals(emptyList<String>(), vm.imageKeys())
+        vm.explainImages()
+        assertEquals(ChatNotice.IMAGES_OLD_PLUGIN, vm.notice.value)
+
+        // 读不到模型列表时还不确定，也不让加
+        backend.offline = true
+        val unknown = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved).also { it.onVisible() }
+        assertEquals(ImageSupport.CHECKING, unknown.state.value.imageSupport)
+        unknown.explainImages()
+        assertEquals(ChatNotice.IMAGES_CHECKING, unknown.notice.value)
+    }
+
+    @Test
+    fun switchingToATextOnlyModelStopsSendingImages() {
+        withModels(images = true)
+        val vm = visible()
+        vm.addImages(listOf(source("a")))
+        states.value = live(SessionStatus.IDLE, model = ModelRef("p", "t"))
+        assertEquals(ImageSupport.TEXT_ONLY_MODEL, vm.state.value.imageSupport)
+        assertFalse(vm.send("看图"))
+        assertEquals(ChatNotice.IMAGES_NOT_SUPPORTED, vm.notice.value)
+        assertTrue(backend.prompts.isEmpty())
+        assertEquals("图片留在输入框里", listOf("a"), vm.imageKeys())
+    }
+
+    @Test
+    fun rejectedImagesGoBackToTheComposer() {
+        withModels(images = null)
+        val vm = visible()
+        vm.addImages(listOf(source("a"), source("b")))
+        backend.promptError = ApiException.Http(400, ErrorCode.IMAGES_NOT_SUPPORTED, "当前模型看不了图片")
+        assertTrue(vm.send("看图"))
+        // 消息肯定没发出：气泡去掉，文字和图片放回输入框，说明原因
+        assertTrue(vm.locals().isEmpty())
+        assertEquals("看图", vm.returnedText.value)
+        assertEquals(listOf("a", "b"), vm.imageKeys())
+        assertEquals(ChatNotice.IMAGES_NOT_SUPPORTED, vm.notice.value)
+        // DSH 说这个模型看不了图：加号随之不可用
+        assertEquals(ImageSupport.TEXT_ONLY_MODEL, vm.state.value.imageSupport)
+        vm.consumeReturnedText()
+        assertNull(vm.returnedText.value)
+        // 假的后台只有一条推送通道：先让这个页面停止订阅
+        vm.onHidden()
+
+        withModels(images = true)
+        val other = visible()
+        other.addImages(listOf(source("c")))
+        backend.promptError = ApiException.Http(400, ErrorCode.IMAGE_INVALID, "图片已损坏")
+        assertTrue(other.send(""))
+        assertTrue(other.locals().isEmpty())
+        assertNull("没有文字时不放回空字符串", other.returnedText.value)
+        assertEquals(listOf("c"), other.imageKeys())
+        assertEquals(ChatNotice.IMAGE_INVALID, other.notice.value)
+        assertEquals(ImageSupport.YES, other.state.value.imageSupport)
+    }
+
+    @Test
+    fun otherFailuresWithImagesStayAsFailedBubbles() {
+        withModels(images = true)
+        val vm = visible()
+        vm.addImages(listOf(source("a")))
+        backend.promptError = ApiException.Http(502, ErrorCode.DSH_ERROR, null)
+        assertTrue(vm.send("看图"))
+        // 不是因为图片：照旧显示成失败的气泡，重试时带着同样的图片
+        assertEquals(OutgoingStatus.FAILED, vm.locals().single().status)
+        assertEquals(emptyList<String>(), vm.imageKeys())
+        backend.promptError = null
+        vm.retrySend(
+            vm
+                .locals()
+                .single()
+                .outgoing.requestId,
+        )
+        assertEquals(
+            listOf("a"),
+            backend.prompts
+                .last()
+                .images
+                .map { it.key },
+        )
+        assertEquals(backend.prompts[0].requestId, backend.prompts[1].requestId)
+    }
+
+    @Test
+    fun notSentHandoffBringsBackImagesAndReason() {
+        withModels(images = true)
+        val vm =
+            ChatViewModel(
+                "h1",
+                SESSION,
+                states,
+                backend,
+                { _, _ -> },
+                resolved,
+                handoff = ChatHandoff.NotSent("看图", listOf(pic("a")), ChatNotice.IMAGE_INVALID),
+            )
+        assertEquals("看图", vm.initialDraft)
+        assertEquals(listOf("a"), vm.imageKeys())
+        assertEquals(ChatNotice.IMAGE_INVALID, vm.notice.value)
+    }
+
     private fun viewModel() = ChatViewModel("h1", SESSION, states, backend, { _, _ -> }, resolved)
 
     private fun visible(page: MessagePage = MessagePage(emptyList(), hasMore = false, cursor = null)): ChatViewModel {
@@ -678,14 +859,16 @@ class ChatViewModelTest {
         }
     }
 
-    private fun live(status: SessionStatus) =
-        mapOf(
-            "h1" to
-                HostLiveState(
-                    LinkStatus.Online(address),
-                    sessions = mapOf(SESSION to SessionSummary(sessionId = SESSION, status = status, updatedAt = 0)),
-                ),
-        )
+    private fun live(
+        status: SessionStatus,
+        model: ModelRef? = null,
+    ) = mapOf(
+        "h1" to
+            HostLiveState(
+                LinkStatus.Online(address),
+                sessions = mapOf(SESSION to SessionSummary(sessionId = SESSION, status = status, updatedAt = 0, model = model)),
+            ),
+    )
 
     private fun ChatViewModel.keys() =
         state.value.items
@@ -721,7 +904,7 @@ class ChatViewModelTest {
         var promptError: Exception? = null
         var promptGate: CompletableDeferred<Unit>? = null
         var cancels = 0
-        val models = ModelList(default = null, models = emptyList())
+        var models = ModelList(default = null, models = emptyList())
         val presets = PermissionPresetList(default = null, presets = emptyList())
         val modelChanges = mutableListOf<ModelRef>()
         val presetChanges = mutableListOf<String>()

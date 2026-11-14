@@ -69,6 +69,7 @@ import io.github.qianyeeew.dshremote.ui.attention.AttentionUi
 import io.github.qianyeeew.dshremote.ui.attention.Resolution
 import io.github.qianyeeew.dshremote.ui.attention.approvalAction
 import io.github.qianyeeew.dshremote.ui.attention.approvalTarget
+import io.github.qianyeeew.dshremote.ui.chat.LocalImagePreparer
 import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
 import io.github.qianyeeew.dshremote.ui.common.ChoiceList
 import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
@@ -127,6 +128,7 @@ fun SessionListScreen(
     val defaultProject by viewModel.defaultProject.collectAsStateWithLifecycle()
     val project by viewModel.projects.state.collectAsStateWithLifecycle()
     val attentionNotice by viewModel.attention.notice.collectAsStateWithLifecycle()
+    val preparer = LocalImagePreparer.current
     // 项目名来自电脑上登记的项目：页面可见并且在线时刷新一次
     val online = state?.status is LinkStatus.Online
     LifecycleStartEffect(online) {
@@ -157,6 +159,9 @@ fun SessionListScreen(
                     navigation.onTaskStarted(it)
                     viewModel.newTask.consumeStarted()
                 },
+                onAddImages = { uris -> viewModel.newTask.addImages(uris.map { uri -> suspend { preparer?.prepare(uri) } }) },
+                onRemoveImage = viewModel.newTask::removeImage,
+                onImagesUnavailable = viewModel.newTask::explainImages,
             ),
         onProject = viewModel.projects::open,
         attentionActions = AttentionCardActions.of(viewModel.attention),

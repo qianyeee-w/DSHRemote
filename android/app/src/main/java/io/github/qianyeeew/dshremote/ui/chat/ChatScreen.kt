@@ -2,6 +2,7 @@ package io.github.qianyeeew.dshremote.ui.chat
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -63,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
+import io.github.qianyeeew.dshremote.data.image.ImageRef
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCard
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
@@ -106,6 +108,13 @@ class ChatActions(
     val onChoosePreset: (String) -> Unit = {},
     val onClosePicker: () -> Unit = {},
     val onDismissNotice: () -> Unit = {},
+    /** 用户选了图片（落地方案 C2）：在后台压缩后加进输入框。 */
+    val onAddImages: (List<Uri>) -> Unit = {},
+    val onRemoveImage: (key: String) -> Unit = {},
+    /** 点了不可用的加号：说明原因。 */
+    val onImagesUnavailable: () -> Unit = {},
+    /** 插件拒绝了带图的消息，文字已经放回输入框。 */
+    val onReturnedTextShown: () -> Unit = {},
 )
 
 @Composable
@@ -121,7 +130,9 @@ fun ChatScreen(
     val picker by viewModel.picker.collectAsStateWithLifecycle()
     val attentionNotice by viewModel.attention.notice.collectAsStateWithLifecycle()
     val restoredDraft by viewModel.restoredDraft.collectAsStateWithLifecycle()
+    val returnedText by viewModel.returnedText.collectAsStateWithLifecycle()
     val fork by viewModel.fork.collectAsStateWithLifecycle()
+    val preparer = LocalImagePreparer.current
     LaunchedEffect(fork) {
         (fork as? ForkState.Done)?.let {
             onForked(it)
@@ -157,12 +168,17 @@ fun ChatScreen(
                 onChoosePreset = viewModel::choosePreset,
                 onClosePicker = viewModel::closePicker,
                 onDismissNotice = viewModel::dismissNotice,
+                onAddImages = { uris -> viewModel.addImages(uris.map { uri -> suspend { preparer?.prepare(uri) } }) },
+                onRemoveImage = viewModel::removeImage,
+                onImagesUnavailable = viewModel::explainImages,
+                onReturnedTextShown = viewModel::consumeReturnedText,
             ),
         attentionActions = AttentionCardActions.of(viewModel.attention),
         attentionNotice = attentionNotice,
         onDismissAttentionNotice = viewModel.attention::dismissNotice,
         initialDraft = viewModel.initialDraft,
         restoredDraft = restoredDraft,
+        returnedText = returnedText,
         fork = fork,
     )
 }
@@ -178,6 +194,7 @@ fun ChatContent(
     onDismissAttentionNotice: () -> Unit = {},
     initialDraft: String? = null,
     restoredDraft: String? = null,
+    returnedText: String? = null,
     fork: ForkState = ForkState.Idle,
 ) {
     val snackbar = remember { SnackbarHostState() }
@@ -280,6 +297,7 @@ fun ChatContent(
                             picker = picker,
                             initialText = initialDraft.orEmpty(),
                             restoredDraft = restoredDraft,
+                            returnedText = returnedText,
                             attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
                             onAnswer = attentionActions.onAnswerWithCustom,
                         )
@@ -321,7 +339,16 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
-    val blocks = remember(state.items, state.turns) { chatBlocks(state.items, state.turns) }
+    val blocks =
+        remember(
+            state.items,
+            state.turns,
+            state.hostId,
+            state.sessionId,
+        ) { chatBlocks(state.items, state.turns, state.hostId, state.sessionId) }
+    // 点了气泡里的图片：全屏看
+    var viewing by remember { mutableStateOf<ImageRef?>(null) }
+    viewing?.let { ImageViewer(it, onDismiss = { viewing = null }) }
     val reversed = remember(blocks) { blocks.asReversed() }
     // 停在底部时跟随新消息。「是否停在底部」只在用户自己滚动之后更新：新消息连续到达时，
     // 列表会把原来的那一项留在原位，不能拿那一刻的位置来判断
@@ -384,6 +411,8 @@ private fun MessageList(
                         UserBubble(
                             block.text,
                             block.local,
+                            images = block.images,
+                            onOpenImage = { viewing = it },
                             onCheck = { block.local?.let { actions.onCheckSend(it.outgoing.requestId) } },
                             onLongPress = { onLongPress(block) },
                             highlighted = block.key == highlightKey,
@@ -535,7 +564,7 @@ private class ConfirmingUriHandler(
     override fun openUri(uri: String) = onRequest(uri)
 }
 
-private fun noticeText(notice: ChatNotice): Int =
+internal fun noticeText(notice: ChatNotice): Int =
     when (notice) {
         ChatNotice.OFFLINE -> R.string.chat_notice_offline
         ChatNotice.CANCEL_FAILED -> R.string.chat_notice_cancel_failed
@@ -544,6 +573,11 @@ private fun noticeText(notice: ChatNotice): Int =
         ChatNotice.SETUP_FAILED -> R.string.chat_notice_setup_failed
         ChatNotice.NOT_IN_SESSION -> R.string.chat_notice_not_in_session
         ChatNotice.FORK_NOT_IN_PROJECT -> R.string.chat_notice_fork_not_in_project
+        ChatNotice.IMAGES_NOT_SUPPORTED -> R.string.chat_notice_images_not_supported
+        ChatNotice.IMAGE_INVALID -> R.string.chat_notice_image_invalid
+        ChatNotice.IMAGE_UNREADABLE -> R.string.chat_notice_image_unreadable
+        ChatNotice.IMAGES_OLD_PLUGIN -> R.string.chat_notice_images_old_plugin
+        ChatNotice.IMAGES_CHECKING -> R.string.chat_notice_images_checking
     }
 
 /** 对一条消息操作时，其余内容的透明度（设计规格 7.13「其余内容变淡」）。 */

@@ -273,7 +273,7 @@ class ChatBlocksTest {
 
     @Test
     fun localMessageComesAfterTheEndOfThePreviousTurn() {
-        val local = LocalMessage(OutgoingMessage("下一步", PromptMode.QUEUE, "r1"), OutgoingStatus.SENDING)
+        val local = LocalMessage(OutgoingMessage("下一步", PromptMode.QUEUE, requestId = "r1"), OutgoingStatus.SENDING)
         val blocks =
             chatBlocks(
                 listOf(reply("a1", TextPart("好了"), turn = 1), ChatItem.Local("local:r1", local)),

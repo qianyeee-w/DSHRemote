@@ -1,6 +1,9 @@
 package io.github.qianyeeew.dshremote.devserver
 
+import io.github.qianyeeew.dshremote.data.api.ImagePart
 import io.github.qianyeeew.dshremote.data.api.MessageRole
+import io.github.qianyeeew.dshremote.data.api.ModelRef
+import io.github.qianyeeew.dshremote.data.api.OutgoingImage
 import io.github.qianyeeew.dshremote.data.api.PluginApi
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.StepStatus
@@ -9,6 +12,7 @@ import io.github.qianyeeew.dshremote.data.api.TurnResult
 import io.github.qianyeeew.dshremote.data.chat.OutgoingStatus
 import io.github.qianyeeew.dshremote.data.host.Credentials
 import io.github.qianyeeew.dshremote.data.host.Host
+import io.github.qianyeeew.dshremote.data.image.ImageSupport
 import io.github.qianyeeew.dshremote.data.live.Backoff
 import io.github.qianyeeew.dshremote.data.live.ConnectionManager
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
@@ -44,7 +48,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.BeforeClass
 import org.junit.Test
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
+import javax.imageio.ImageIO
 
 /**
  * 会话详情对真实 dev-server 的集成测试（m2-android.md T9）：用真实的 ChatViewModel 和实时连接，
@@ -250,6 +257,43 @@ class ChatDevServerTest {
                     .single { it.result == TurnResult.STOPPED }
                     .stoppedBy,
             )
+        }
+
+    /**
+     * 落地方案 C2：默认模型能看图；带一张图片发出去，假模型回复「看到了 1 张图片」，会话里的消息是图片引用，
+     * 按引用读回的就是发出的那张；换成只读文字的模型后加号不可用。
+     */
+    @Test
+    fun imagesGoOutAndComeBackByReference() =
+        runBlocking<Unit> {
+            await("确认能发图片") { it.imageSupport == ImageSupport.YES }
+            val png =
+                ByteArrayOutputStream().use { out ->
+                    ImageIO.write(BufferedImage(30, 20, BufferedImage.TYPE_INT_RGB), "png", out)
+                    out.toByteArray()
+                }
+            val image = OutgoingImage("dev-image", OutgoingImage.PNG, png, 30, 20)
+            withContext(main) { vm.addImages(listOf(suspend { image })) }
+            await("图片加进输入框") { it.images.size == 1 }
+            assertTrue(withContext(main) { vm.send("看图") })
+            val replied =
+                await("模型看到了图片", 60_000) { state ->
+                    state.items.none { it is ChatItem.Local } && state.entries().any { it.text().contains("看到了 1 张图片") }
+                }
+            val user = replied.entries().first { it.message.role == MessageRole.USER }
+            val part =
+                user.message.parts
+                    .filterIsInstance<ImagePart>()
+                    .single()
+            assertEquals(30 to 20, part.width to part.height)
+            assertEquals("看图", user.text())
+            assertTrue(png.contentEquals(api.image(sessionId, part.id)))
+
+            withContext(main) { vm.openModels() }
+            val models = withTimeout(10_000) { vm.picker.first { it is Picker.Models } } as Picker.Models
+            val textOnly = models.list.models.first { it.images == false }
+            withContext(main) { vm.chooseModel(ModelRef(textOnly.provider, textOnly.model)) }
+            await("换成只读文字的模型后不能加图片") { it.imageSupport == ImageSupport.TEXT_ONLY_MODEL }
         }
 
     @Test

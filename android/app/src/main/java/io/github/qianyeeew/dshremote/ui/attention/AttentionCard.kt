@@ -437,4 +437,3 @@ private val APPROVAL_TARGET_MAX = 132.dp
 private val APPROVAL_FADE = 24.dp
 
 const val APPROVAL_TARGET_SCROLL_TAG = "approval-target-scroll"
-

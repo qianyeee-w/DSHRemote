@@ -1,14 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 临时图标：手机外框加一个提示符（108dp 画布，内容在中间 72dp 的安全区内） -->
+<!-- 图标：命令提示符「>_」，「_」是琥珀色的水面，一条鲸尾从水面钻出来（原创图形，108dp 画布，内容在中间 66dp 的安全区内）。
+     monochrome 层也用它：主题图标只取形状，三部分同一个颜色。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M42,32h24a4,4 0,0 1,4 4v36a4,4 0,0 1,-4 4h-24a4,4 0,0 1,-4 -4v-36a4,4 0,0 1,4 -4zM42,38v30h24v-30z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46,46l6,5 -6,5 -2,-2.2 3.4,-2.8 -3.4,-2.8zM53,55h8v3h-8z" />
+    <group
+        android:scaleX="0.9"
+        android:scaleY="0.9"
+        android:translateX="2.7"
+        android:translateY="1">
+        <path
+            android:pathData="M28,40l13,11l-13,11"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="6.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M58.5,72C59.5,65.5 60.5,60.5 61.5,57C54,58.5 47,55 44.5,47.5C43.5,44.2 45.5,41.8 48.5,42.6C55.5,44.4 61,47.5 65,52C69,47.5 74.5,44.4 81.5,42.6C84.5,41.8 86.5,44.2 85.5,47.5C83,55 76,58.5 68.5,57C69.5,60.5 70.5,65.5 71.5,72Z" />
+        <path
+            android:fillColor="#E0A040"
+            android:pathData="M46.75,72h36.5a2.75,2.75 0,0 1,0 5.5h-36.5a2.75,2.75 0,0 1,0 -5.5z" />
+    </group>
 </vector>

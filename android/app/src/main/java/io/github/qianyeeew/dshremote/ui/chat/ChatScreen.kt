@@ -74,9 +74,12 @@ import io.github.qianyeeew.dshremote.ui.attention.ComposerAttention
 import io.github.qianyeeew.dshremote.ui.attention.Resolution
 import io.github.qianyeeew.dshremote.ui.attention.composerAttention
 import io.github.qianyeeew.dshremote.ui.common.DesignBackBar
+import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.PillButton
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
+import io.github.qianyeeew.dshremote.ui.common.dismissPanelOnOutsideTap
+import io.github.qianyeeew.dshremote.ui.common.rememberPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.sessionTitleText
 import io.github.qianyeeew.dshremote.ui.hosts.needsAttention
 import io.github.qianyeeew.dshremote.ui.hosts.statusDetail
@@ -234,74 +237,82 @@ fun ChatContent(
     LaunchedEffect(fork) { if (fork is ForkState.Done) forking = null }
     val clipboard = LocalClipboardManager.current
 
-    Scaffold(topBar = { ChatTopBar(state, actions) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        // 输入区这一栏的实际高度（已经扣掉键盘），面板最多占一半，其余都给消息列表。
-        // consumeWindowInsets：Scaffold 的内边距里已经有导航条，不让 imePadding 再算一次（否则输入框和键盘之间空一截）
-        BoxWithConstraints(
-            Modifier
-                .padding(padding)
-                .consumeWindowInsets(padding)
-                .fillMaxSize()
-                .imePadding(),
-        ) {
-            val panelMax = maxHeight / 2
-            Column(Modifier.fillMaxSize()) {
-                // 计划条（设计规格 6.9）：会话顶栏下面
-                PlanStrip(state.plan, actions.onOpenPlan)
-                if (!state.online) LinkBanner(state)
-                // 等待处理、但事项还没到（或者不在这台手机能看到的范围）时，至少提示一下
-                if (state.session?.status == SessionStatus.WAITING && state.attention.isEmpty()) WaitingBanner()
-                CompositionLocalProvider(LocalUriHandler provides confirmingHandler) {
-                    // Android 13 起系统会自己显示复制成功的提示，不再重复提示
-                    val onCopied = {
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
-                    }
-                    MessageList(
-                        state,
-                        actions,
-                        onCopied = { onCopied() },
-                        modifier = Modifier.weight(1f),
-                        highlightKey = target?.key,
-                        onLongPress = { actionsFor = it },
-                        onDismissTarget = closeActions,
-                    )
-                }
-                val choosing = actionsFor
-                val confirming = forking
-                when {
-                    confirming != null ->
-                        ForkConfirmPanel(
-                            fork,
-                            onCancel = closeActions,
-                            onConfirm = { confirming.turn?.let { actions.onFork(it, confirming.text) } },
-                        )
-                    choosing != null ->
-                        MessageActionsPanel(
-                            canFork = choosing.turn != null && choosing.local == null,
-                            online = state.online,
-                            onCopy = {
-                                clipboard.setText(AnnotatedString(choosing.text))
-                                actionsFor = null
-                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
-                            },
-                            onFork = {
-                                forking = choosing
-                                actionsFor = null
-                            },
-                        )
-                    else -> {
-                        // 不能和列表各用一个权重：面板用不完自己那一半时，剩下的空间会空着，输入框就不贴底了
-                        AttentionPanel(state, attentionActions, Modifier.heightIn(max = panelMax))
-                        ChatComposer(
+    // 模型、审批方式、用量的面板开着时，点输入区外面收起
+    val panelDismiss = rememberPanelDismiss()
+    CompositionLocalProvider(LocalPanelDismiss provides panelDismiss) {
+        Scaffold(
+            topBar = { ChatTopBar(state, actions) },
+            snackbarHost = { SnackbarHost(snackbar) },
+            modifier = Modifier.dismissPanelOnOutsideTap(panelDismiss),
+        ) { padding ->
+            // 输入区这一栏的实际高度（已经扣掉键盘），面板最多占一半，其余都给消息列表。
+            // consumeWindowInsets：Scaffold 的内边距里已经有导航条，不让 imePadding 再算一次（否则输入框和键盘之间空一截）
+            BoxWithConstraints(
+                Modifier
+                    .padding(padding)
+                    .consumeWindowInsets(padding)
+                    .fillMaxSize()
+                    .imePadding(),
+            ) {
+                val panelMax = maxHeight / 2
+                Column(Modifier.fillMaxSize()) {
+                    // 计划条（设计规格 6.9）：会话顶栏下面
+                    PlanStrip(state.plan, actions.onOpenPlan)
+                    if (!state.online) LinkBanner(state)
+                    // 等待处理、但事项还没到（或者不在这台手机能看到的范围）时，至少提示一下
+                    if (state.session?.status == SessionStatus.WAITING && state.attention.isEmpty()) WaitingBanner()
+                    CompositionLocalProvider(LocalUriHandler provides confirmingHandler) {
+                        // Android 13 起系统会自己显示复制成功的提示，不再重复提示
+                        val onCopied = {
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
+                        }
+                        MessageList(
                             state,
                             actions,
-                            picker = picker,
-                            initialText = initialDraft.orEmpty(),
-                            restoredDraft = restoredDraft,
-                            returnedText = returnedText,
-                            attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
-                            onAnswer = attentionActions.onAnswerWithCustom,
+                            onCopied = { onCopied() },
+                            modifier = Modifier.weight(1f),
+                            highlightKey = target?.key,
+                            onLongPress = { actionsFor = it },
+                            onDismissTarget = closeActions,
                         )
+                    }
+                    val choosing = actionsFor
+                    val confirming = forking
+                    when {
+                        confirming != null ->
+                            ForkConfirmPanel(
+                                fork,
+                                onCancel = closeActions,
+                                onConfirm = { confirming.turn?.let { actions.onFork(it, confirming.text) } },
+                            )
+                        choosing != null ->
+                            MessageActionsPanel(
+                                canFork = choosing.turn != null && choosing.local == null,
+                                online = state.online,
+                                onCopy = {
+                                    clipboard.setText(AnnotatedString(choosing.text))
+                                    actionsFor = null
+                                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
+                                },
+                                onFork = {
+                                    forking = choosing
+                                    actionsFor = null
+                                },
+                            )
+                        else -> {
+                            // 不能和列表各用一个权重：面板用不完自己那一半时，剩下的空间会空着，输入框就不贴底了
+                            AttentionPanel(state, attentionActions, Modifier.heightIn(max = panelMax))
+                            ChatComposer(
+                                state,
+                                actions,
+                                picker = picker,
+                                initialText = initialDraft.orEmpty(),
+                                restoredDraft = restoredDraft,
+                                returnedText = returnedText,
+                                attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
+                                onAnswer = attentionActions.onAnswerWithCustom,
+                            )
+                        }
                     }
                 }
             }

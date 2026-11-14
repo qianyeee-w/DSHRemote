@@ -6,6 +6,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -28,20 +31,30 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -52,14 +65,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.ui.DesignTheme
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------------
 // 输入框下面的配置行和选项面板。
 // 平时输入框下面常驻一行「模型 · 审批方式」，键盘弹出时这一行收起；点了其中一项，键盘收起，
-// 原来键盘的位置换成选项面板，高度和键盘一样，所以输入框不动。点输入框时键盘回来、面板让位。
+// 原来键盘的位置换成选项面板，高度跟着选项走（最多和键盘一样高）。点输入框时键盘回来、面板让位；点输入区外面收起面板。
 // ---------------------------------------------------------------------------
 
 /** 还没见过键盘时面板的高度（不含导航条）。 */
@@ -91,8 +104,11 @@ fun TrackKeyboardHeight() {
 }
 
 /**
- * 输入框下面的选项面板。[open] 时出现在原来键盘的位置，高度和键盘一样（不含导航条，导航条那一截也画成面板底色）；
- * 键盘还在的时候只补上键盘让出来的那一截，所以输入框始终不动。面板顶部一行小字 [title]，下面是选项。
+ * 输入框下面的选项面板。[open] 时出现在原来键盘的位置。高度跟着内容走，最多和键盘一样高（不含导航条，
+ * 导航条那一截也画成面板底色），装不下时里面滚动；选项少时只占它们自己的高度（用户真机走查：两个模型占了半屏）。
+ * 键盘还在的时候只补上键盘让出来的那一截，键盘收起时输入框跟着落到面板上沿。面板顶部一行小字 [title]，下面是选项。
+ *
+ * 打开时把 [onDismiss] 交给页面的 [PanelDismiss]：点输入区以外的地方收起面板（见 [dismissPanelOnOutsideTap]）。
  *
  * 外层要用 imePadding（扣掉导航条）把输入框放在键盘上面，面板放在输入框下面。
  */
@@ -102,9 +118,11 @@ fun KeyboardPanel(
     open: Boolean,
     title: String,
     modifier: Modifier = Modifier,
+    onDismiss: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     TrackKeyboardHeight()
+    RegisterPanelDismiss(open, onDismiss)
     val colors = DesignTheme.colors
     val density = LocalDensity.current
     val nav = WindowInsets.navigationBars.getBottom(density)
@@ -116,9 +134,13 @@ fun KeyboardPanel(
         } else {
             with(density) { DefaultPanelHeight.roundToPx() }
         }
+    // 内容自己的高度（最多 full）；还没量过时先按 full 算，量到后马上换掉
+    var contentPx by remember { mutableIntStateOf(0) }
+    val target = if (contentPx > 0) contentPx.coerceAtMost(full) else full
     // 面板「有」多少：1 是整块。键盘在的时候直接是 1，只露出键盘让出来的部分
     val shown = remember { Animatable(0f) }
     val currentIme by rememberUpdatedState(ime)
+    val currentTarget by rememberUpdatedState(target)
     val coming by rememberUpdatedState(keyboardComing)
     LaunchedEffect(open) {
         if (open) {
@@ -127,34 +149,38 @@ fun KeyboardPanel(
             // 收起：键盘要回来时等它弹到位再拿掉面板（面板一直补足键盘还没占的那一截）；键盘不来就自己收起
             val keyboard = withTimeoutOrNull(KEYBOARD_WAIT_MILLIS) { snapshotFlow { coming }.first { it } }
             if (keyboard != null) {
-                withTimeoutOrNull(KEYBOARD_ANIMATION_LIMIT) { snapshotFlow { currentIme >= full }.first { it } }
+                withTimeoutOrNull(KEYBOARD_ANIMATION_LIMIT) { snapshotFlow { currentIme >= currentTarget }.first { it } }
                 shown.snapTo(0f)
             } else {
                 shown.animateTo(0f, tween(PANEL_MILLIS, easing = FastOutSlowInEasing))
             }
         }
     }
-    val heightPx = ((full * shown.value).roundToInt() - ime).coerceAtLeast(0)
-    if (heightPx == 0) return
+    val heightPx = ((target * shown.value).roundToInt() - ime).coerceAtLeast(0)
+    // 打开时即使还是 0 高也要排一次，才能量到内容的高度
+    if (heightPx == 0 && !open) return
     val panelColor = colors.panel
     val border = colors.panelBorder
+    val fullDp = with(density) { full.toDp() }
     Column(
         modifier
             .fillMaxWidth()
             .height(with(density) { heightPx.toDp() })
             // 导航条那一截也画成面板底色，不留一道缝
-            .drawBehind { drawRect(panelColor, Offset(0f, size.height), Size(size.width, nav.toFloat())) }
+            .drawBehind { if (heightPx > 0) drawRect(panelColor, Offset(0f, size.height), Size(size.width, nav.toFloat())) }
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .background(panelColor)
             .border(1.dp, border, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .testTag(KEYBOARD_PANEL_TAG),
     ) {
-        // 内容按整块的高度排，面板没长全时下面被裁掉，不挤压内容
+        // 内容按自己的整块高度排，面板没长全时下面被裁掉，不挤压内容
         Column(
             Modifier
                 .fillMaxWidth()
-                .height(with(density) { full.toDp() })
-                .padding(start = 8.dp, end = 8.dp, top = 10.dp),
+                .wrapContentHeight(Alignment.Top, unbounded = true)
+                .heightIn(max = fullDp)
+                .onSizeChanged { contentPx = it.height }
+                .padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 12.dp),
         ) {
             Text(
                 title,
@@ -162,10 +188,74 @@ fun KeyboardPanel(
                 color = colors.textSecondary,
                 modifier = Modifier.padding(start = 12.dp, bottom = 6.dp),
             )
-            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), content = content)
+            Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()), content = content)
         }
     }
 }
+
+/**
+ * 页面上「点外面收起面板」的登记处。页面用 [rememberPanelDismiss] 建一个，通过 [LocalPanelDismiss] 交给下面的输入区；
+ * 页面根部加 [dismissPanelOnOutsideTap]，输入区（输入框和面板）加 [panelArea]，点在输入区以外就收起正在开着的面板。
+ */
+@Stable
+class PanelDismiss {
+    internal var onDismiss: (() -> Unit)? = null
+    internal var area: Rect? = null
+    internal var root: LayoutCoordinates? = null
+}
+
+val LocalPanelDismiss = staticCompositionLocalOf<PanelDismiss?> { null }
+
+@Composable
+fun rememberPanelDismiss(): PanelDismiss = remember { PanelDismiss() }
+
+@Composable
+private fun RegisterPanelDismiss(
+    open: Boolean,
+    onDismiss: (() -> Unit)?,
+) {
+    val holder = LocalPanelDismiss.current ?: return
+    val current by rememberUpdatedState(onDismiss)
+    DisposableEffect(holder, open, onDismiss != null) {
+        val dismiss: () -> Unit = { current?.invoke() }
+        if (open && onDismiss != null) holder.onDismiss = dismiss
+        onDispose { if (holder.onDismiss === dismiss) holder.onDismiss = null }
+    }
+}
+
+/** 输入区（输入框和下面的面板）：点在这里面不算「外面」。 */
+fun Modifier.panelArea(holder: PanelDismiss?): Modifier =
+    if (holder == null) this else onGloballyPositioned { holder.area = it.boundsInRoot() }
+
+/**
+ * 页面根部：面板开着时，点在输入区以外的地方只收起面板，这一下不再交给下面的控件（不会顺手点开别的）。
+ * 拖动（滚动列表）不收起。
+ */
+fun Modifier.dismissPanelOnOutsideTap(holder: PanelDismiss): Modifier =
+    onGloballyPositioned { holder.root = it }
+        .pointerInput(holder) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val dismiss = holder.onDismiss ?: return@awaitEachGesture
+                val root = holder.root
+                val area = holder.area
+                if (root != null && area != null && root.isAttached && area.contains(root.localToRoot(down.position))) {
+                    return@awaitEachGesture
+                }
+                var moved = false
+                while (true) {
+                    val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                    if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                    if (!change.pressed) {
+                        if (!moved) {
+                            change.consume()
+                            dismiss()
+                        }
+                        break
+                    }
+                }
+            }
+        }
 
 /** 键盘弹出的动画一般三百毫秒左右，超过这个时间还没到位就不等了。 */
 private const val KEYBOARD_ANIMATION_LIMIT = 600L

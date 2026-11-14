@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +24,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -147,19 +152,40 @@ private fun ApprovalContent(
     )
     val target = approvalTarget(approval)
     if (target != null) {
-        Text(
-            target,
-            style = CodeTextStyles.approval,
-            color = colors.text,
-            modifier = Modifier.padding(top = 10.dp).testTag("approval-target"),
-        )
-        cwd?.takeIf { it.isNotBlank() }?.let {
+        // 长命令在这一块里滚动，「拒绝」「允许」始终看得见（用户真机走查：长命令把按钮挤出了屏幕）
+        val scroll = rememberScrollState()
+        val fade = colors.panel
+        Column(
+            Modifier
+                .padding(top = 10.dp)
+                .heightIn(max = APPROVAL_TARGET_MAX)
+                .drawWithContent {
+                    drawContent()
+                    // 下面还有内容：底边渐隐，提示可以往下滑
+                    if (scroll.canScrollForward) {
+                        val h = APPROVAL_FADE.toPx()
+                        drawRect(
+                            Brush.verticalGradient(listOf(fade.copy(alpha = 0f), fade), startY = size.height - h, endY = size.height),
+                            topLeft = Offset(0f, size.height - h),
+                        )
+                    }
+                }.verticalScroll(scroll)
+                .testTag(APPROVAL_TARGET_SCROLL_TAG),
+        ) {
             Text(
-                it,
-                style = CodeTextStyles.diff.copy(lineHeight = CodeTextStyles.command.lineHeight),
-                color = colors.textSecondary,
-                modifier = Modifier.padding(top = 2.dp),
+                target,
+                style = CodeTextStyles.approval,
+                color = colors.text,
+                modifier = Modifier.testTag("approval-target"),
             )
+            cwd?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it,
+                    style = CodeTextStyles.diff.copy(lineHeight = CodeTextStyles.command.lineHeight),
+                    color = colors.textSecondary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
     } else {
         Text(
@@ -403,3 +429,12 @@ private fun StatusLine(
 
 /** 换个时间再试可能成功的错误。没回答、太长这类要先改内容。 */
 private val RETRYABLE = setOf(AttentionError.OFFLINE, AttentionError.FAILED, AttentionError.REJECTED)
+
+/** 审批的命令或文件最多占多高（约 6 行），再长就在里面滚动。 */
+private val APPROVAL_TARGET_MAX = 132.dp
+
+/** 底边渐隐的高度。 */
+private val APPROVAL_FADE = 24.dp
+
+const val APPROVAL_TARGET_SCROLL_TAG = "approval-target-scroll"
+

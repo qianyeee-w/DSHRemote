@@ -40,6 +40,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,13 +86,16 @@ import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
 import io.github.qianyeeew.dshremote.ui.common.Covered
 import io.github.qianyeeew.dshremote.ui.common.DesignDivider
 import io.github.qianyeeew.dshremote.ui.common.InlinePanel
+import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.PillButton
 import io.github.qianyeeew.dshremote.ui.common.PillPair
 import io.github.qianyeeew.dshremote.ui.common.PillSize
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
+import io.github.qianyeeew.dshremote.ui.common.dismissPanelOnOutsideTap
 import io.github.qianyeeew.dshremote.ui.common.relativeTime
+import io.github.qianyeeew.dshremote.ui.common.rememberPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.serverNow
 import io.github.qianyeeew.dshremote.ui.common.sessionTitleText
 import io.github.qianyeeew.dshremote.ui.hosts.HostRow
@@ -394,32 +398,35 @@ fun SessionListContent(
         }
     }
     if (expanded) {
-        // 展开时后面的首页盖一层页面底色，点外面收起，已输入的内容保留
-        Box(Modifier.fillMaxSize()) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(colors.page.copy(alpha = SCRIM_ALPHA))
-                    .clickable(interactionSource = null, indication = null, onClickLabel = stringResource(R.string.new_task_collapse)) {
-                        expanded =
-                            false
-                    }.testTag("new-task-scrim"),
-            )
-            NewTaskComposer(
-                text = taskText,
-                onText = { taskText = it },
-                state = newTask,
-                project = target ?: defaultProject,
-                hint = hint,
-                online = online,
-                actions = newTaskActions,
-                startMenu = startMenu,
-                modifier =
+        // 展开时后面的首页盖一层页面底色，点外面收起，已输入的内容保留。选项面板开着时，点外面先只收起面板
+        val panelDismiss = rememberPanelDismiss()
+        CompositionLocalProvider(LocalPanelDismiss provides panelDismiss) {
+            Box(Modifier.fillMaxSize().dismissPanelOnOutsideTap(panelDismiss)) {
+                Box(
                     Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .imePadding(),
-            )
+                        .fillMaxSize()
+                        .background(colors.page.copy(alpha = SCRIM_ALPHA))
+                        .clickable(interactionSource = null, indication = null, onClickLabel = stringResource(R.string.new_task_collapse)) {
+                            expanded =
+                                false
+                        }.testTag("new-task-scrim"),
+                )
+                NewTaskComposer(
+                    text = taskText,
+                    onText = { taskText = it },
+                    state = newTask,
+                    project = target ?: defaultProject,
+                    hint = hint,
+                    online = online,
+                    actions = newTaskActions,
+                    startMenu = startMenu,
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .imePadding(),
+                )
+            }
         }
     }
     if (choosingRepair) {

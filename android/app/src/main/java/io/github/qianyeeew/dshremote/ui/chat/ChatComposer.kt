@@ -73,10 +73,12 @@ import io.github.qianyeeew.dshremote.ui.common.ComposerOption
 import io.github.qianyeeew.dshremote.ui.common.ComposerOptionDot
 import io.github.qianyeeew.dshremote.ui.common.ComposerOptionsRow
 import io.github.qianyeeew.dshremote.ui.common.KeyboardPanel
+import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
+import io.github.qianyeeew.dshremote.ui.common.panelArea
 import io.github.qianyeeew.dshremote.ui.common.presetTint
 import io.github.qianyeeew.dshremote.ui.common.pressScale
 import io.github.qianyeeew.dshremote.ui.input
@@ -233,7 +235,7 @@ fun ChatComposer(
     val showAddImage = attention == ComposerAttention.None
     val mode = sendKeyMode(state, (text.isNotBlank() || (state.images.isNotEmpty() && showAddImage)) && writable)
     val shape = RoundedCornerShape(if (expanded) 22.dp else 26.dp)
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().panelArea(LocalPanelDismiss.current)) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -361,7 +363,16 @@ fun ChatComposer(
                     else -> R.string.panel_permissions
                 },
             )
-        KeyboardPanel(open = panelOpen, title = title) {
+        // 点输入区外面：只收起面板，不回到键盘
+        KeyboardPanel(
+            open = panelOpen,
+            title = title,
+            onDismiss = {
+                if (pickerOpen) actions.onClosePicker()
+                usageOpen = false
+                backToKeyboard = false
+            },
+        ) {
             if (usageOpen) {
                 Box(Modifier.padding(horizontal = 12.dp)) { UsageDetails(state.usage) }
             } else {

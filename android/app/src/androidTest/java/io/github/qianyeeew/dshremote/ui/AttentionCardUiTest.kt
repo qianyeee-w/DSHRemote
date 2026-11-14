@@ -24,6 +24,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qianyeeew.dshremote.R
@@ -38,6 +40,7 @@ import io.github.qianyeeew.dshremote.data.attention.AnswerForm
 import io.github.qianyeeew.dshremote.data.attention.QuestionDraft
 import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
+import io.github.qianyeeew.dshremote.ui.attention.APPROVAL_TARGET_SCROLL_TAG
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCard
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
 import io.github.qianyeeew.dshremote.ui.attention.AttentionPageContent
@@ -47,13 +50,14 @@ import io.github.qianyeeew.dshremote.ui.attention.Resolution
 import io.github.qianyeeew.dshremote.ui.chat.ChatActions
 import io.github.qianyeeew.dshremote.ui.chat.ChatContent
 import io.github.qianyeeew.dshremote.ui.chat.Picker
+import java.io.File
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 
 /** 审批和提问的卡片（m2-android.md 3.5）。 */
 @RunWith(AndroidJUnit4::class)
@@ -232,6 +236,30 @@ class AttentionCardUiTest {
         assertEquals(emptyList<String>(), handlerAnswers)
         compose.onNodeWithTag("attention-answer").performClick()
         assertEquals(listOf("submit"), handlerAnswers)
+    }
+
+    /** 很长的命令在卡片里滚动，「拒绝」「允许」不被挤出屏幕（用户真机走查：要先往下翻才看得到按钮）。 */
+    @Test
+    fun longCommandScrollsAndKeepsTheButtonsInView() {
+        val command = (1..60).joinToString("\n") { "Write-Output \"第 $it 行\"" }
+        val attention =
+            Attention(
+                "a6",
+                "visual-test",
+                AttentionKind.APPROVAL,
+                approval = Approval("pwsh", "r", input = JsonObject(mapOf("command" to JsonPrimitive(command)))),
+                createdAt = 0,
+            )
+        val state = onlineChatState(SessionStatus.WAITING).copy(attention = listOf(attention))
+        compose.setContent { DshRemoteTheme { ChatContent(state, null, Picker.Closed, ChatActions()) } }
+        compose.onNodeWithText(text(R.string.attention_allow)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.attention_reject)).assertIsDisplayed()
+        // 命令这一块有上限，最后几行要在里面滑下去才看得到
+        val scroll = compose.onNodeWithTag(APPROVAL_TARGET_SCROLL_TAG).fetchSemanticsNode().boundsInRoot
+        val target = compose.onNodeWithTag("approval-target").fetchSemanticsNode().boundsInRoot
+        assertTrue(target.height > scroll.height)
+        compose.onNodeWithTag(APPROVAL_TARGET_SCROLL_TAG).performTouchInput { swipeUp() }
+        compose.onNodeWithText(text(R.string.attention_allow)).assertIsDisplayed()
     }
 
     /** 审批在等时输入框不能写，只留停止；在别处处理掉、面板收起后输入框恢复。 */

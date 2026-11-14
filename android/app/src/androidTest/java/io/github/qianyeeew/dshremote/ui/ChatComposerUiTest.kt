@@ -5,15 +5,22 @@ import android.graphics.Color
 import android.view.View
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -57,13 +64,16 @@ import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.Picker
 import io.github.qianyeeew.dshremote.ui.chat.USAGE_DETAILS_TAG
 import io.github.qianyeeew.dshremote.ui.common.KEYBOARD_PANEL_TAG
+import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
+import io.github.qianyeeew.dshremote.ui.common.dismissPanelOnOutsideTap
+import io.github.qianyeeew.dshremote.ui.common.rememberPanelDismiss
+import java.io.File
+import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
-import kotlin.math.abs
 
 /** 和背景的亮度差超过这么多算笔画。 */
 private const val INK_CONTRAST = 60f
@@ -215,6 +225,46 @@ class ChatComposerUiTest {
         compose.runOnIdle { back!!.onBackPressed() }
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("auto"), chosen) }
+    }
+
+    /**
+     * 选项少时面板只占选项自己的高度，不撑到键盘那么高（用户真机走查：两个模型占了半屏）；
+     * 点输入区外面收起面板，这一下不传给下面的控件；面板收起后再点，下面的控件照常响应。
+     */
+    @Test
+    fun panelFitsItsChoicesAndClosesOnOutsideTap() {
+        var picker by mutableStateOf<Picker>(Picker.Closed)
+        var behind = 0
+        val models = ModelList(models = listOf(ModelOption("test", "测试来源", "测试模型", "测试模型"), ModelOption("test", "测试来源", "m2", "第二个模型")))
+        compose.setContent {
+            DshRemoteTheme {
+                val dismiss = rememberPanelDismiss()
+                CompositionLocalProvider(LocalPanelDismiss provides dismiss) {
+                    Column(Modifier.fillMaxSize().dismissPanelOnOutsideTap(dismiss)) {
+                        Box(Modifier.fillMaxWidth().weight(1f).clickable { behind++ }.testTag("behind"))
+                        ChatComposer(
+                            onlineChatState(),
+                            ChatActions(
+                                onOpenModels = { picker = Picker.Models(models) },
+                                onClosePicker = { picker = Picker.Closed },
+                            ),
+                            picker = picker,
+                        )
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("chat-model").performClick()
+        val panel = compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val density = compose.density.density
+        assertTrue("面板高 ${panel.height / density}dp", panel.height / density < 220f)
+        compose.onNodeWithTag("chat-model:test/m2").assertIsDisplayed()
+        // 点外面：面板收起，下面的控件没有收到这一下
+        compose.onNodeWithTag("behind").performClick()
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, behind) }
+        compose.onNodeWithTag("behind").performClick()
+        compose.runOnIdle { assertEquals(1, behind) }
     }
 
     /**

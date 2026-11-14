@@ -71,10 +71,12 @@ import io.github.qianyeeew.dshremote.ui.common.ComposerOption
 import io.github.qianyeeew.dshremote.ui.common.ComposerOptionDot
 import io.github.qianyeeew.dshremote.ui.common.ComposerOptionsRow
 import io.github.qianyeeew.dshremote.ui.common.KeyboardPanel
+import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
+import io.github.qianyeeew.dshremote.ui.common.panelArea
 import io.github.qianyeeew.dshremote.ui.common.presetTint
 import io.github.qianyeeew.dshremote.ui.common.pressScale
 import io.github.qianyeeew.dshremote.ui.input
@@ -257,7 +259,7 @@ internal fun NewTaskComposer(
         rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(OutgoingMessage.MAX_IMAGES)) { uris ->
             if (uris.isNotEmpty()) actions.onAddImages(uris)
         }
-    Column(modifier.fillMaxWidth().testTag("new-task")) {
+    Column(modifier.fillMaxWidth().panelArea(LocalPanelDismiss.current).testTag("new-task")) {
         Column(
             Modifier
                 .padding(horizontal = 16.dp)
@@ -356,6 +358,11 @@ internal fun NewTaskComposer(
         KeyboardPanel(
             open = menu != null,
             title = stringResource(if (shown == NewTaskMenu.MODEL) R.string.panel_models else R.string.panel_permissions),
+            // 点输入区外面：只收起面板，输入框留着
+            onDismiss = {
+                menu = null
+                backToKeyboard = false
+            },
         ) {
             val rowPadding = PaddingValues(horizontal = 12.dp)
             if (shown == NewTaskMenu.MODEL) {

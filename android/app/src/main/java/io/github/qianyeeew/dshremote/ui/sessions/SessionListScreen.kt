@@ -1,6 +1,7 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -61,6 +62,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -340,33 +342,37 @@ fun SessionListContent(
                 item(key = "reconnect") { Covered(covered, uncover) { ReconnectNotice(line) } }
             }
             if (sections.recent.isNotEmpty()) {
-                item(key = "recent-heading") {
-                    Covered(covered, uncover) { RecentHeading(sections, onToggleUnread = onToggleUnread) }
-                }
                 val groups = recentGroups(sections.recent, state.grouping, state.workspaces, sections.unread, now)
-                groups.forEach { group ->
-                    val isFolded = group.key in folded
-                    item(key = "group:${group.key}") {
-                        Covered(covered, uncover) {
-                            GroupHeader(
-                                group,
-                                folded = isFolded,
-                                targeted = (target as? ProjectPick.Existing)?.workspace?.workspaceId == group.workspace?.workspaceId,
-                                onToggle = { folded = if (isFolded) folded - group.key else folded + group.key },
-                                onNewTask =
-                                    group.workspace?.takeIf { online }?.let { workspace ->
-                                        {
-                                            // 点加号：输入框提示「在 <项目> 工作区新建任务」，不弹键盘；点输入框再开始写
-                                            newTaskActions.onChooseProject(ProjectPick.Existing(workspace))
-                                            newTaskActions.onExpand()
-                                        }
-                                    },
-                            )
-                        }
+                val allFolded = groups.all { it.key in folded }
+                item(key = "recent-heading") {
+                    Covered(covered, uncover) {
+                        RecentHeading(
+                            sections,
+                            onToggleUnread = onToggleUnread,
+                            allFolded = allFolded,
+                            onToggleAll = { folded = if (allFolded) emptyList() else groups.map { it.key } },
+                        )
                     }
-                    if (!isFolded) {
-                        items(group.sessions, key = { "recent:${it.sessionId}" }) { session ->
-                            Covered(covered, uncover) {
+                }
+                // 每组一张卡片（和「进行中」卡片同一种样式），整组是列表里的一项
+                items(groups, key = { "group:${it.key}" }) { group ->
+                    val isFolded = group.key in folded
+                    Covered(covered, uncover, Modifier.padding(bottom = 12.dp)) {
+                        GroupCard(
+                            group,
+                            folded = isFolded,
+                            targeted = (target as? ProjectPick.Existing)?.workspace?.workspaceId == group.workspace?.workspaceId,
+                            onToggle = { folded = if (isFolded) folded - group.key else folded + group.key },
+                            onNewTask =
+                                group.workspace?.takeIf { online }?.let { workspace ->
+                                    {
+                                        // 点加号：输入框提示「在 <项目> 工作区新建任务」，不弹键盘；点输入框再开始写
+                                        newTaskActions.onChooseProject(ProjectPick.Existing(workspace))
+                                        newTaskActions.onExpand()
+                                    }
+                                },
+                        ) {
+                            group.sessions.forEach { session ->
                                 RecentRow(
                                     session,
                                     project = if (state.grouping == HomeGrouping.PROJECT) null else projectNameOf(session, workspaces),
@@ -375,6 +381,7 @@ fun SessionListContent(
                                     online = online,
                                     now = now,
                                     modifier = Modifier.alpha(if (online) 1f else STALE_ALPHA),
+                                    horizontalPadding = 16.dp,
                                 ) { navigation.onOpenSession(session.sessionId) }
                             }
                         }
@@ -615,76 +622,101 @@ private fun MenuRow(
 }
 
 /**
- * 最近列表一组的组名：按项目分组时左边是文件夹图标和项目名，点组名收起或展开这一组；右边的加号在这个项目里新建任务
- * （[onNewTask] 为 null 时没有加号）。[targeted]：刚点过这个项目的加号，加号垫一层浅填充。
+ * 最近列表的一组：一张卡片（面板底、描边、圆角 20）。第一行是组名（15 号 500）、会话数（浅灰小块），
+ * 按项目分组时左边有文件夹图标、右边有加号（在这个项目里新建任务，[onNewTask] 为 null 时没有）；最右边的小箭头收起时朝右。
+ * 点这一行收起或展开。收起时组名下面一行灰字是这组最新一条会话的标题；展开时下面是这组的会话（[rows]）。
+ * [targeted]：刚点过这个项目的加号，加号垫一层浅填充。
  */
 @Composable
-private fun GroupHeader(
+private fun GroupCard(
     group: RecentGroup,
     folded: Boolean,
     targeted: Boolean,
     onToggle: () -> Unit,
     onNewTask: (() -> Unit)?,
+    rows: @Composable () -> Unit,
 ) {
     val colors = DesignTheme.colors
     val name = group.name ?: stringResource(group.titleRes ?: R.string.home_group_no_project)
     val turn by animateFloatAsState(if (folded) -90f else 0f, tween(180), label = "group-chevron")
-    Row(
+    val shape = RoundedCornerShape(20.dp)
+    Column(
         Modifier
             .fillMaxWidth()
-            .padding(top = 10.dp)
-            .heightIn(min = 40.dp)
-            .testTag("group:${group.key}"),
-        verticalAlignment = Alignment.CenterVertically,
+            .designPanel(shape)
+            .clip(shape)
+            .animateContentSize(tween(180)),
     ) {
-        Box(Modifier.weight(1f)) {
-            Row(
-                Modifier
-                    .offset(x = (-8).dp)
-                    .heightIn(min = 36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(
-                        role = Role.Button,
-                        onClickLabel = stringResource(if (folded) R.string.home_group_expand else R.string.home_group_collapse, name),
-                        onClick = onToggle,
-                    ).padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                if (group.name != null) {
-                    Icon(painterResource(R.drawable.ic_dsh_folder), null, Modifier.size(16.dp), tint = colors.textSecondary)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = stringResource(if (folded) R.string.home_group_expand else R.string.home_group_collapse, name),
+                    onClick = onToggle,
+                ).padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
+                .testTag("group:${group.key}"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (group.name != null) {
+                Icon(painterResource(R.drawable.ic_dsh_folder), null, Modifier.size(18.dp), tint = colors.textSecondary)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(
+                        group.sessions.size.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textSecondary,
+                        modifier =
+                            Modifier
+                                .background(colors.fill, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 8.dp, vertical = 1.dp),
+                    )
                 }
-                Text(
-                    name,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Text(group.sessions.size.toString(), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
-                Icon(painterResource(R.drawable.ic_dsh_chevron_down), null, Modifier.size(10.dp).rotate(turn), tint = colors.textSecondary)
+                if (folded) {
+                    group.sessions.firstOrNull()?.let { latest ->
+                        Text(
+                            sessionTitleText(latest.title),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("group-latest:${group.key}"),
+                        )
+                    }
+                }
             }
-        }
-        if (onNewTask != null) {
-            Box(
-                Modifier
-                    .offset(x = 8.dp)
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(if (targeted) colors.fill else Color.Transparent)
-                    .clickable(role = Role.Button, onClick = onNewTask)
-                    .testTag("group-new-task:${group.key}"),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_dsh_plus),
-                    stringResource(R.string.new_task_in_project_action, name),
-                    Modifier.size(18.dp),
-                    tint = if (targeted) colors.text else colors.textSecondary,
-                )
+            if (onNewTask != null) {
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (targeted) colors.fill else Color.Transparent)
+                        .clickable(role = Role.Button, onClick = onNewTask)
+                        .testTag("group-new-task:${group.key}"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_dsh_plus),
+                        stringResource(R.string.new_task_in_project_action, name),
+                        Modifier.size(18.dp),
+                        tint = if (targeted) colors.text else colors.textSecondary,
+                    )
+                }
             }
+            Icon(painterResource(R.drawable.ic_dsh_chevron_down), null, Modifier.size(12.dp).rotate(turn), tint = colors.textSecondary)
         }
+        if (!folded) rows()
     }
 }
 
@@ -1008,11 +1040,13 @@ private fun TitleLine(
     }
 }
 
-/** 「最近」一行：左边「最近」，有未读时跟着「N 条未读」。 */
+/** 「最近」一行：左边「最近」，有未读时跟着「N 条未读」；右边「全部收起」（全部收起后是「全部展开」）。 */
 @Composable
 private fun RecentHeading(
     sections: HomeSections,
     onToggleUnread: () -> Unit,
+    allFolded: Boolean,
+    onToggleAll: () -> Unit,
 ) {
     val colors = DesignTheme.colors
     Row(
@@ -1022,6 +1056,20 @@ private fun RecentHeading(
     ) {
         Text(stringResource(R.string.design_recent), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
         if (sections.unreadCount > 0) UnreadToggle(sections.unreadCount, sections.unreadOnly, onToggleUnread)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            Text(
+                stringResource(if (allFolded) R.string.home_group_expand_all else R.string.home_group_collapse_all),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.text,
+                modifier =
+                    Modifier
+                        .offset(x = 8.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Button, onClick = onToggleAll)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .testTag("home-fold-all"),
+            )
+        }
     }
 }
 
@@ -1038,19 +1086,21 @@ private fun RecentRow(
     online: Boolean,
     now: Long,
     modifier: Modifier,
+    /** 在卡片里时左右的内边距：分隔线和文字都缩进，按下的底块占满整行。 */
+    horizontalPadding: Dp = 0.dp,
     onOpen: () -> Unit,
 ) {
     val colors = DesignTheme.colors
     val unreadLabel = stringResource(R.string.recent_unread)
     Column(modifier.fillMaxWidth().testTag("recent:${session.sessionId}")) {
-        DesignDivider()
+        DesignDivider(Modifier.padding(horizontal = horizontalPadding))
         Column(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .clickable(role = Role.Button, onClick = onOpen)
                 .semantics { if (unread) stateDescription = unreadLabel }
-                .padding(vertical = 11.dp),
+                .padding(horizontal = horizontalPadding, vertical = 11.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

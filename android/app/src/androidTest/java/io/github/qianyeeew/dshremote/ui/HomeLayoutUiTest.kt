@@ -211,6 +211,19 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
     }
 
+    /** 「最近」右边一键收起所有组；收起的卡片里写这组最新的会话；再点一次全部展开。 */
+    @Test fun allGroupsFoldAndUnfoldAtOnce() {
+        render()
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("home-fold-all"))
+        compose.onNodeWithTag("home-fold-all").assertTextEquals(text(R.string.home_group_collapse_all)).performClick()
+        compose.onNodeWithTag("recent:recent").assertDoesNotExist()
+        compose.onNodeWithTag("recent:tools").assertDoesNotExist()
+        compose.onNodeWithTag("group-latest:project:p2", useUnmergedTree = true).assertTextEquals("清理临时目录")
+        save("home-groups-folded")
+        compose.onNodeWithTag("home-fold-all").assertTextEquals(text(R.string.home_group_expand_all)).performClick()
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
+    }
+
     /** 按日期分组时，行里写项目名。 */
     @Test fun otherGroupingsShowTheProjectInTheRow() {
         render(grouping = HomeGrouping.DATE)

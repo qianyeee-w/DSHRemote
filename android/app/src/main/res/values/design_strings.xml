@@ -31,4 +31,6 @@
     <string name="home_group_seen">已看过</string>
     <string name="home_group_expand">展开 %1$s</string>
     <string name="home_group_collapse">收起 %1$s</string>
+    <string name="home_group_collapse_all">全部收起</string>
+    <string name="home_group_expand_all">全部展开</string>
 </resources>

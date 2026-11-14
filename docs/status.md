@@ -127,6 +127,7 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
 - **发消息不自动重发**（落地方案 B3）：请求写出后没收到回应是「不确定是否送达」，只能由用户点「查看」或「重发」。插件只在 10 分钟内按 requestId 去重，重启后记录清空，自动重发可能让 DSH 收到两条一样的消息。以后加新的发送路径也要遵守。
 - **程序往输入框里放文字时用 `TextFieldValue` 并把光标放在末尾**：纯字符串的 `BasicTextField` 被程序改了内容后光标在开头，接着写的字会插到最前面。
 - **选择一律原地展开**（设计规格 6.10）：用 `ui/common/InlineChoices.kt` 里的组件，不要用 `Popup`、`DropdownMenu` 或居中的选择对话框。弹出窗口会抢走输入框的焦点，键盘随之收起。
+- **输入框的字要用 `MaterialTheme.typography.input`**（`ui/Theme.kt`）：界面字体 IBM Plex Sans SC 的字身只有 1em（ascent 0.88、descent 0.12），行高多出的空白默认按 ascent:descent 分，近九成放在字的上面。普通 `Text` 会裁掉首行上方和末行下方，看不出来；输入框不裁，字偏下约 3.4sp（真机上 4.5dp），开始打字时还比占位文字低一截。`input` 把空白上下平分、不裁（`LineHeightStyle(Center, Trim.None)`），输入框和它的占位文字都要用它。`ChatComposerUiTest.typedTextAndPlaceholderSitInTheMiddle` 量像素检查；截图测试和 JVM 测试看不出这种几 dp 的偏差，要量。
 - **没有放在 `Surface` 或 `Scaffold` 里的 `Text` 默认是黑字**，深色模式下看不见。新页面都要有 `Scaffold` 或 `Surface` 提供内容颜色。
 - **真机上已有的测试包**：手机上的 `io.github.qianyeeew.dshremote.debug` 是这台开发机的调试密钥签的，可以直接用默认包名跑真机测试（覆盖安装，数据和配对保留）；`.projecttest.test` 是别的电脑签的，用 `.projecttest` 后缀会安装失败。
 - **Compose 聊天列表「停在底部时跟随新消息」**：新的一项插入后，LazyColumn 会把原来的那一项留在原位；消息连续到达时（用户消息和回复几乎同时），不能用那一刻的滚动位置判断「是否在底部」。现在只在用户自己滚动结束后更新「停在底部」，列表变化时据此滚动（`ui/chat/ChatScreen.kt`）。输入框上方的面板用 `weight(1f, fill = false)` 和列表分剩余空间，不要用窗口高度算上限（打开键盘时会把输入框挤扁）。

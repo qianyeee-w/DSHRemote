@@ -1,6 +1,7 @@
 package io.github.qianyeeew.dshremote.ui
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.view.View
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
@@ -33,6 +34,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.qianyeeew.dshremote.R
@@ -55,10 +58,15 @@ import io.github.qianyeeew.dshremote.ui.chat.Picker
 import io.github.qianyeeew.dshremote.ui.chat.USAGE_DETAILS_TAG
 import io.github.qianyeeew.dshremote.ui.common.KEYBOARD_PANEL_TAG
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import kotlin.math.abs
+
+/** 和背景的亮度差超过这么多算笔画。 */
+private const val INK_CONTRAST = 60f
 
 @RunWith(AndroidJUnit4::class)
 class ChatComposerUiTest {
@@ -208,6 +216,43 @@ class ChatComposerUiTest {
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("auto"), chosen) }
     }
+
+    /**
+     * 输入的字和占位文字都在输入框里上下居中，开始打字时字不跳。IBM Plex Sans SC 的字身只有 1em，
+     * 行高多出的空白默认近九成放在字的上面，输入框里的字曾经偏下约 4.5dp。量的是第二个字的像素，避开光标。
+     */
+    @Test
+    fun typedTextAndPlaceholderSitInTheMiddle() {
+        render()
+        compose.onNodeWithTag("chat-input").performClick()
+        val placeholder = glyphOffsetFromMiddle()
+        compose.onNodeWithTag("chat-input").performTextInput("继续验证")
+        val typed = glyphOffsetFromMiddle()
+        val tolerance = with(compose.density) { 1.dp.toPx() }
+        assertTrue("占位文字偏离中线 $placeholder px", abs(placeholder) <= tolerance)
+        assertTrue("输入的字偏离中线 $typed px", abs(typed) <= tolerance)
+    }
+
+    /** 输入框里第二个字的笔画中心离输入框中线多少像素，正数是偏下。 */
+    private fun glyphOffsetFromMiddle(): Float {
+        compose.waitForIdle()
+        val panel = compose.onNodeWithTag("chat-composer").fetchSemanticsNode().boundsInRoot
+        val input = compose.onNodeWithTag("chat-input").fetchSemanticsNode().boundsInRoot
+        val bitmap = compose.onNodeWithTag("chat-composer").captureToImage().asAndroidBitmap()
+        val (glyph, border) = with(compose.density) { 15.sp.toPx() to 2.dp.toPx().toInt() }
+        val x0 = (input.left - panel.left + glyph * 1.1f).toInt()
+        val x1 = (x0 + glyph * 0.8f).toInt()
+        val background = luminance(bitmap.getPixel((input.right - panel.left - glyph).toInt(), bitmap.height / 2))
+        // 上下各留 2dp，避开输入框的描边
+        val rows =
+            (border until bitmap.height - border).filter { y ->
+                (x0 until x1).any { x -> abs(luminance(bitmap.getPixel(x, y)) - background) > INK_CONTRAST }
+            }
+        check(rows.isNotEmpty()) { "输入框里没找到字" }
+        return (rows.first() + rows.last()) / 2f - (bitmap.height - 1) / 2f
+    }
+
+    private fun luminance(pixel: Int): Float = 0.299f * Color.red(pixel) + 0.587f * Color.green(pixel) + 0.114f * Color.blue(pixel)
 
     private fun text(id: Int) = context.getString(id)
 

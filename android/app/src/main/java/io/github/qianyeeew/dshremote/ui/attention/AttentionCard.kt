@@ -49,6 +49,7 @@ import io.github.qianyeeew.dshremote.ui.common.RowChevron
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
+import io.github.qianyeeew.dshremote.ui.input
 
 /** 处理一个事项时的操作，由 [AttentionHandler] 实现。 */
 class AttentionCardActions(
@@ -335,7 +336,7 @@ private fun CustomField(
         value = value,
         onValueChange = onChange,
         enabled = enabled,
-        textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+        textStyle = MaterialTheme.typography.input.copy(color = colors.text),
         cursorBrush = SolidColor(colors.text),
         maxLines = 4,
         modifier =
@@ -349,7 +350,7 @@ private fun CustomField(
                 .semantics { contentDescription = hint },
         decorationBox = { field ->
             Box {
-                if (value.isEmpty()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                if (value.isEmpty()) Text(hint, style = MaterialTheme.typography.input, color = colors.textSecondary)
                 field()
             }
         },

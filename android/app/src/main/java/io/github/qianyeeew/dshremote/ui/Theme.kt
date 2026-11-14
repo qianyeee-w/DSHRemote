@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -258,6 +259,14 @@ internal val InterfaceTypography: Typography =
             labelSmall = style(f, 12.sp, 16.sp),
         )
     }
+
+/**
+ * 输入框里的字和占位文字（bodyMedium 15/24）。IBM Plex Sans SC 的字身只有 1em（ascent 0.88、descent 0.12），
+ * 行高多出来的 9sp 默认按 ascent:descent 分，近九成放在字的上面；普通 Text 会把首行上方和末行下方裁掉，看不出来，
+ * 输入框不裁，字就偏下约 3.4sp。这里把空白上下平分、不裁，输入的字和占位文字都在行里居中，打字时也不跳。
+ */
+val Typography.input: TextStyle
+    get() = bodyMedium.copy(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None))
 
 /** 设计规格第 4 节里的等宽字号。代码的关键字用 [FontWeight.SemiBold]。 */
 object CodeTextStyles {

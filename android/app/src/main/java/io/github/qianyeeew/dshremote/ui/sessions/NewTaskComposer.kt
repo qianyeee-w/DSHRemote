@@ -77,6 +77,7 @@ import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
 import io.github.qianyeeew.dshremote.ui.common.presetTint
 import io.github.qianyeeew.dshremote.ui.common.pressScale
+import io.github.qianyeeew.dshremote.ui.input
 
 /** 新任务输入框上的操作。 */
 class NewTaskActions(
@@ -278,7 +279,7 @@ internal fun NewTaskComposer(
                     value = text,
                     onValueChange = onText,
                     enabled = !state.starting,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+                    textStyle = MaterialTheme.typography.input.copy(color = colors.text),
                     cursorBrush = SolidColor(colors.text),
                     minLines = 1,
                     maxLines = 8,
@@ -301,7 +302,7 @@ internal fun NewTaskComposer(
                             if (text.isEmpty() && !focused) {
                                 Text(
                                     hint,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.input,
                                     color = colors.textSecondary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,

@@ -79,6 +79,7 @@ import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
 import io.github.qianyeeew.dshremote.ui.common.presetTint
 import io.github.qianyeeew.dshremote.ui.common.pressScale
+import io.github.qianyeeew.dshremote.ui.input
 
 /** 发送键此刻的作用（设计规格 6.3）。 */
 enum class SendKeyMode {
@@ -265,7 +266,7 @@ fun ChatComposer(
                     value = field,
                     onValueChange = edit,
                     enabled = writable,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+                    textStyle = MaterialTheme.typography.input.copy(color = colors.text),
                     cursorBrush = SolidColor(colors.text),
                     maxLines = if (expanded) 6 else 1,
                     modifier =
@@ -288,7 +289,7 @@ fun ChatComposer(
                             if (text.isEmpty()) {
                                 Text(
                                     hint,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.input,
                                     color = colors.textSecondary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,

@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
+import io.github.qianyeeew.dshremote.data.api.OutputOmission
 import io.github.qianyeeew.dshremote.ui.CodeTextStyles
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.common.DesignDivider
@@ -218,7 +219,7 @@ private fun StepDetail(step: Step) {
             DiffBlock(lineDiff(old, new), clipped = isClipped(tool, old) || isClipped(tool, new))
         }
         step.action == StepAction.RUN && tool.output != null ->
-            OutputBlock(tool.output, clipped = isClipped(tool, tool.output))
+            OutputBlock(tool.output, tool.omitted, clipped = tool.omitted == null && isClipped(tool, tool.output))
         else ->
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (tool.input.isNotEmpty()) CodeSection(stringResource(R.string.chat_tool_input), prettyJson(tool.input))
@@ -302,17 +303,19 @@ private data class DiffStyle(
 
 /**
  * 命令输出：顶部一行写「输出的最后 N 行」，右边「全部 M 行」；默认只显示最后 4 行，因为结果通常在末尾。
- * 插件现在保留的是输出的开头（落地方案 B6 之前），被截断时注明「只拿到了前面一部分」。
+ * 插件去掉了中间时（落地方案 B6，[omitted]），M 是原来的总行数，展开后在开头和末尾之间写「中间省略了 K 行」。
+ * 旧插件只保留开头，被截断时（[clipped]）注明「只拿到了前面一部分」。
  */
 @Composable
 internal fun OutputBlock(
     output: String,
+    omitted: OutputOmission?,
     clipped: Boolean,
 ) {
     val colors = DesignTheme.colors
     var all by rememberSaveable(output) { mutableStateOf(false) }
-    val tail = outputTail(output)
-    val shown = if (all) lines(output.trimEnd()) else tail.lines
+    val parts = commandOutput(output, omitted)
+    val last = parts.tail.takeLast(OUTPUT_TAIL_LINES)
     Column(
         Modifier
             .fillMaxWidth()
@@ -322,16 +325,16 @@ internal fun OutputBlock(
             .testTag("output-block"),
     ) {
         Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
-            val partial = tail.total > tail.lines.size && !all
+            val partial = parts.total > last.size && !all
             Text(
-                if (partial) stringResource(R.string.chat_output_last, tail.lines.size) else stringResource(R.string.chat_output),
+                if (partial) stringResource(R.string.chat_output_last, last.size) else stringResource(R.string.chat_output),
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.textSecondary,
                 modifier = Modifier.weight(1f),
             )
             if (partial) {
                 Text(
-                    stringResource(R.string.chat_output_all, tail.total),
+                    stringResource(R.string.chat_output_all, parts.total),
                     style = MaterialTheme.typography.labelSmall.copy(textDecoration = TextDecoration.Underline),
                     color = colors.text,
                     modifier =
@@ -351,14 +354,27 @@ internal fun OutputBlock(
                 modifier = Modifier.padding(bottom = 4.dp),
             )
         }
+        // 横向滚动只在最外面一层：嵌套的横向滚动在 Compose 里会直接报错
+        val code = @Composable { text: List<String> ->
+            Text(text.joinToString("\n"), style = CodeTextStyles.diff, color = colors.textSecondary, softWrap = false)
+        }
         SelectionContainer {
-            Text(
-                shown.joinToString("\n"),
-                style = CodeTextStyles.diff,
-                color = colors.textSecondary,
-                softWrap = false,
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-            )
+            Column(Modifier.horizontalScroll(rememberScrollState())) {
+                if (!all) {
+                    code(last)
+                    return@Column
+                }
+                if (parts.head.isNotEmpty()) code(parts.head)
+                parts.omittedLines?.let { count ->
+                    Text(
+                        stringResource(R.string.chat_output_omitted, count),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.waitingText,
+                        modifier = Modifier.padding(vertical = 6.dp).testTag("output-omitted"),
+                    )
+                }
+                code(parts.tail)
+            }
         }
     }
 }

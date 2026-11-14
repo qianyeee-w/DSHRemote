@@ -1,6 +1,7 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
 import io.github.qianyeeew.dshremote.data.api.MessageRole
+import io.github.qianyeeew.dshremote.data.api.OutputOmission
 import io.github.qianyeeew.dshremote.data.api.TextPart
 import io.github.qianyeeew.dshremote.data.api.ThinkingPart
 import io.github.qianyeeew.dshremote.data.api.ToolPart
@@ -291,20 +292,34 @@ fun lineDiff(
     return out
 }
 
-/** 命令输出的末尾几行（6.6）。[total] 是拿到的全部行数。 */
-data class OutputTail(
-    val lines: List<String>,
-    val total: Int,
-)
-
-fun outputTail(
-    output: String,
-    count: Int = OUTPUT_TAIL_LINES,
-): OutputTail {
-    val all = lines(output.trimEnd())
-    return OutputTail(all.takeLast(count), all.size)
+/**
+ * 命令输出拆成开头、中间去掉的行数、末尾（落地方案 B6）。插件没有去掉中间时（输出不长，或者旧插件）只有 [tail]。
+ * [total] 是原来的总行数（去掉的部分按插件给的换行数算）。
+ */
+data class CommandOutput(
+    val head: List<String>,
+    val omittedLines: Int?,
+    val tail: List<String>,
+) {
+    val total: Int get() = head.size + (omittedLines ?: 0) + tail.size
 }
 
+fun commandOutput(
+    output: String,
+    omitted: OutputOmission?,
+): CommandOutput {
+    val cut = omitted?.takeIf { it.offset in 0..output.length && it.lines >= 0 }
+    if (cut == null) return CommandOutput(emptyList(), null, lines(output.trimEnd()))
+    val head = output.substring(0, cut.offset)
+    val tail = output.substring(cut.offset).trimEnd()
+    return CommandOutput(
+        head = if (head.isEmpty()) emptyList() else lines(head),
+        omittedLines = cut.lines,
+        tail = if (tail.isEmpty()) emptyList() else lines(tail),
+    )
+}
+
+/** 命令输出默认显示的末尾行数（6.6）。 */
 const val OUTPUT_TAIL_LINES = 4
 
 /**

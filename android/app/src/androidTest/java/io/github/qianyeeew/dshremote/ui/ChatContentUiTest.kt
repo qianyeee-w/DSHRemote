@@ -22,6 +22,7 @@ import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
+import io.github.qianyeeew.dshremote.data.api.OutputOmission
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.SessionStatus
 import io.github.qianyeeew.dshremote.data.api.TextPart
@@ -135,6 +136,43 @@ class ChatContentUiTest {
         compose.onNodeWithText(context.getString(R.string.chat_step_edit)).performClick()
         compose.onNodeWithTag("diff-block").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("if (!seen.add(key)) return").assertIsDisplayed()
+    }
+
+    /** 落地方案 B6：插件去掉了中间的命令输出：默认是真正的最后 4 行，全部行数按原来的算；展开后写中间省略了几行。 */
+    @Test
+    fun longCommandOutputShowsTheRealTailAndWhereTheMiddleWasCut() {
+        val output = "line 1\nline 2\nline 4997\nline 4998\nline 4999\nline 5000\n"
+        val part =
+            ToolPart(
+                "c9",
+                "bash",
+                status = ToolStatus.DONE,
+                input = JsonObject(mapOf("command" to JsonPrimitive("npm test"))),
+                output = output,
+                truncated = true,
+                omitted = OutputOmission(offset = 14, chars = 40_000, lines = 4_994),
+            )
+        val items =
+            listOf(
+                ChatItem.Entry("u9", Message("u9", MessageRole.USER, listOf(TextPart("跑一下")), 0)),
+                ChatItem.Entry("a9", Message("a9", MessageRole.ASSISTANT, listOf(part, TextPart("跑完了")), 1)),
+            )
+        render(onlineChatState().copy(items = items))
+        compose.onNodeWithTag("steps-summary").performClick()
+        compose.onNodeWithText("npm test").performClick()
+        compose.onNodeWithTag("output-block").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.chat_output_last, 4)).assertIsDisplayed()
+        compose.onNodeWithText("line 4997\nline 4998\nline 4999\nline 5000").assertIsDisplayed()
+        // 不再说「只拿到了前面一部分」
+        compose.onNodeWithText(context.getString(R.string.chat_output_partial)).assertDoesNotExist()
+        compose.onNodeWithTag("output-all").assertTextEquals(context.getString(R.string.chat_output_all, 5_000)).performClick()
+        compose.onNodeWithText("line 1\nline 2").assertIsDisplayed()
+        compose
+            .onNodeWithTag(
+                "output-omitted",
+                useUnmergedTree = true,
+            ).assertTextEquals(context.getString(R.string.chat_output_omitted, 4_994))
+        save("chat-output-omitted")
     }
 
     /** 给人看的样张：过程展开、改动对比和命令输出都打开，浅色和深色各一张。 */

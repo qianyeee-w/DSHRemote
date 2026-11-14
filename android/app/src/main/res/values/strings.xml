@@ -266,6 +266,7 @@
     <string name="chat_output_last">输出的最后 %1$d 行</string>
     <string name="chat_output_all">全部 %1$d 行</string>
     <string name="chat_output_partial">只拿到了前面一部分</string>
+    <string name="chat_output_omitted">⋯ 中间省略了 %1$d 行 ⋯</string>
     <string name="chat_code_copy">复制代码</string>
     <string name="chat_copied">已复制</string>
     <string name="chat_loading">正在读取消息……</string>

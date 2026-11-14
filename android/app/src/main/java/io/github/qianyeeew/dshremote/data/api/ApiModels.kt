@@ -305,7 +305,17 @@ data class ToolPart(
     val output: String? = null,
     /** `input` 或 `output` 被插件截断了。 */
     val truncated: Boolean = false,
+    /** 命令输出去掉了中间（protocol.md 5.2，落地方案 B6）：[output] 是开头加末尾。旧插件没有。 */
+    val omitted: OutputOmission? = null,
 ) : MessagePart
+
+/** 命令输出去掉中间的位置：[output] 的前 [offset] 个字符是开头，之后是末尾；中间去掉了 [chars] 个字符、[lines] 个换行。 */
+@Serializable
+data class OutputOmission(
+    val offset: Int,
+    val chars: Int,
+    val lines: Int,
+)
 
 /** 这个版本的 App 不认识的 part 类型，界面上忽略。 */
 @Serializable

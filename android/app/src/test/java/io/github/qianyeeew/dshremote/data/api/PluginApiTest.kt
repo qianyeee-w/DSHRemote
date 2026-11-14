@@ -237,7 +237,7 @@ class PluginApiTest {
                   {"id":"m2","role":"assistant","createdAt":2,"turn":3,"parts":[
                     {"type":"thinking","text":"想一想"},
                     {"type":"tool","callId":"c1","name":"bash","summary":"运行命令：npm test","status":"done",
-                     "input":{"command":"npm test"},"output":"ok…","truncated":true},
+                     "input":{"command":"npm test"},"output":"a\nz\n","truncated":true,"omitted":{"offset":2,"chars":40,"lines":20}},
                     {"type":"image","url":"x"},
                     {"type":"text","text":"完成"}
                   ]}
@@ -254,6 +254,8 @@ class PluginApiTest {
             assertEquals(ToolStatus.DONE, tool.status)
             assertEquals("npm test", tool.input["command"]!!.jsonPrimitive.content)
             assertTrue(tool.truncated)
+            // 落地方案 B6：命令输出去掉了中间
+            assertEquals(OutputOmission(offset = 2, chars = 40, lines = 20), tool.omitted)
             assertEquals(UnknownPart, parts[2])
             assertEquals(TextPart("完成"), parts[3])
             assertEquals(MessageRole.USER, page.messages[0].role)

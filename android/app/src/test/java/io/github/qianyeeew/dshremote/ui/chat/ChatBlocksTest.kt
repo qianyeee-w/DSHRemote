@@ -5,6 +5,7 @@ import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePart
 import io.github.qianyeeew.dshremote.data.api.MessageRole
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
+import io.github.qianyeeew.dshremote.data.api.OutputOmission
 import io.github.qianyeeew.dshremote.data.api.PromptMode
 import io.github.qianyeeew.dshremote.data.api.TextPart
 import io.github.qianyeeew.dshremote.data.api.ThinkingPart
@@ -189,11 +190,24 @@ class ChatBlocksTest {
     }
 
     @Test
-    fun outputTailKeepsTheLastLines() {
-        val tail = outputTail("1\n2\n3\n4\n5\n6\n\n")
-        assertEquals(listOf("3", "4", "5", "6"), tail.lines)
-        assertEquals(6, tail.total)
-        assertEquals(OutputTail(listOf("only"), 1), outputTail("only"))
+    fun commandOutputWithoutOmissionIsAllTail() {
+        val all = commandOutput("1\n2\n3\n4\n5\n6\n\n", null)
+        assertEquals(listOf("1", "2", "3", "4", "5", "6"), all.tail)
+        assertEquals(6, all.total)
+        assertEquals(CommandOutput(emptyList(), null, listOf("only")), commandOutput("only", null))
+    }
+
+    /** 落地方案 B6：插件去掉了中间，总行数按插件给的换行数算；位置不合理时当作没有去掉。 */
+    @Test
+    fun commandOutputSplitsHeadAndTailAtTheOmission() {
+        // 原文 10 行，去掉了第 3 到 8 行
+        val output = "line 1\nline 2\nline 9\nline 10\n"
+        val parts = commandOutput(output, OutputOmission(offset = 14, chars = 42, lines = 6))
+        assertEquals(listOf("line 1", "line 2"), parts.head)
+        assertEquals(listOf("line 9", "line 10"), parts.tail)
+        assertEquals(6, parts.omittedLines)
+        assertEquals(10, parts.total)
+        assertEquals(CommandOutput(emptyList(), null, lines(output.trimEnd())), commandOutput(output, OutputOmission(999, 1, 1)))
     }
 
     @Test

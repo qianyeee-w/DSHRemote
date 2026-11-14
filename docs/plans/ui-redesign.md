@@ -353,3 +353,10 @@ A2 开工前用户另外确认的两点（2026-11-13）：
   - 验证：插件 `npm run check`（286 项，新增 `plan.test.js` 2 项、外观层 1 项、实时流推送 1 项、路由 1 项）、契约测试（新增：清单、目标、受阻原因、新一轮清空清单）、e2e（经实时流收到 `plan.updated`，和 `GET /plan` 一致；撤销后 401）、dev-server-check、load-check 通过。App `test`（349 项，连续 2 次；新增 `PlanTest`、`VisibleSessionsTest`、`plan.updated` 的解析、视图模型重连时读计划和推送替换、可见按次数）、`lint ktlintCheck`、`assembleDebug` 通过；`devServerTest` 24 项通过（新增：模型写清单后会话页通过推送拿到，和 `GET /plan` 一致）；小米 Android 17 上 `connectedDebugAndroidTest` 116 项通过（新增 `PlanUiTest` 3 项）。截图对照稿子 12 看过。
   - 没做的：最近进展；首页运行中一行的步骤（用户确认以后再做）。
   - 没验证的：真实模型自己决定写清单、创建目标的样子（假模型按关键词调用）；用户在 Desktop 上用 `/goal` 设置的目标（同一个投影，应当一样显示）；手机连的电脑装的还是旧插件，真机上实际看计划要等新版插件装到电脑上。
+
+- **B6 命令输出保留末尾（2026-11-14）**
+  - 做法按方案的「开头和末尾各留一段」：`bash`、`pwsh` 的输出超过 8,000 个字符时，插件保留开头约 1,000 个字符和末尾约 7,000 个字符，尽量切在换行处、不切开代理对，末尾不加「…」，并给出 `omitted: { offset, chars, lines }`（protocol.md 5.2）。其他工具仍然保留开头。实测 DSH 本身不截断命令输出（调研文档 9.3c）。
+  - App：`commandOutput` 把输出拆成开头、去掉的行数、末尾；命令输出块默认是真正的最后 4 行，「全部 M 行」的 M 是原来的总行数，展开后在开头和末尾之间写琥珀色的「⋯ 中间省略了 K 行 ⋯」；不再提示「只拿到了前面一部分」（旧插件时仍然提示）。
+  - 顺手修的：B5 推送后 Windows 上的契约测试失败，原因是假模型的 `TODO`、`GOAL` 用会话第一轮的 `lastText` 判断，Windows 上 DSH 注入的上下文不同；另外生成标题的请求也被回了工具调用。改为用整条用户内容判断，并且只在请求提供了对应工具时才调用（单独的提交）。真机测试还发现展开后的输出块嵌套了横向滚动，会让 Compose 直接报错，改成只在外层滚动。
+  - 验证：插件 `npm run check`（288 项，新增命令输出的开头和末尾、代理对两项，原来的截断测试改用非命令工具）、契约测试（新增 `LONGOUT`：真实 DSH 上 5,000 行的输出保留了开头和「line 5000」）、e2e、dev-server-check、load-check 通过。App `test`（350 项，连续 2 次；`commandOutput` 2 项、`omitted` 的解析）、`lint ktlintCheck`、`assembleDebug` 通过；`devServerTest` 24 项通过；小米 Android 17 上 `connectedDebugAndroidTest` 117 项通过（新增：去掉中间的命令输出默认显示真正的最后 4 行，全部行数正确，展开后写中间省略了几行）。截图看过。
+  - 第二批 B1–B6 到这里全部完成。

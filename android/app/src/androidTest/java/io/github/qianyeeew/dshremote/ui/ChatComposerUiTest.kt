@@ -1,6 +1,7 @@
 package io.github.qianyeeew.dshremote.ui
 
 import android.graphics.Bitmap
+import android.view.View
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -153,10 +155,12 @@ class ChatComposerUiTest {
         var picker by mutableStateOf<Picker>(Picker.Closed)
         val chosen = mutableListOf<String>()
         var back: OnBackPressedDispatcher? = null
+        var view: View? = null
         val models = ModelList(models = listOf(ModelOption("test", "测试来源", "测试模型", "测试模型"), ModelOption("test", "测试来源", "m2", "第二个模型")))
         val presets = PermissionPresetList(presets = listOf(PermissionPreset("read-only", "Read only"), PermissionPreset("auto", "Auto")))
         compose.setContent {
             back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            view = LocalView.current
             DshRemoteTheme {
                 ChatComposer(
                     state = onlineChatState(),
@@ -196,7 +200,8 @@ class ChatComposerUiTest {
         compose.onNodeWithTag("chat-model").performClick()
         compose.onNodeWithTag("chat-input").performClick()
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
-        // 返回键先收起面板
+        // 返回键先收起面板。顶栏打开面板前会先收起键盘，这里也一样
+        compose.hideKeyboard(view!!)
         compose.runOnIdle { picker = Picker.Models(models) }
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed()
         compose.runOnIdle { back!!.onBackPressed() }

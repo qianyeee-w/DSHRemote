@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
@@ -41,6 +42,7 @@ import io.github.qianyeeew.dshremote.ui.chat.ChatContent
 import io.github.qianyeeew.dshremote.ui.chat.ChatItem
 import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.Picker
+import io.github.qianyeeew.dshremote.ui.common.TOP_BAR_SUBTITLE_ACTION_TAG
 import io.github.qianyeeew.dshremote.ui.common.TOP_BAR_SUBTITLE_TAG
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -99,9 +101,12 @@ class ChatContentUiTest {
     fun topBarShowsComputerProjectAndApprovalMode() {
         val base = onlineChatState()
         render(base.copy(session = base.session?.copy(permissionPreset = "workspace-write"), hostName = "工作电脑", projectName = "DSHRemote"))
+        // 审批方式是单独可点的一段（点了打开审批方式的面板）
+        compose.onNodeWithTag(TOP_BAR_SUBTITLE_TAG).assertTextEquals("工作电脑 · DSHRemote · ")
         compose
-            .onNodeWithTag(TOP_BAR_SUBTITLE_TAG)
-            .assertTextEquals("工作电脑 · DSHRemote · ${context.getString(R.string.design_permission_workspace)}")
+            .onNodeWithTag(TOP_BAR_SUBTITLE_ACTION_TAG)
+            .assertTextEquals(context.getString(R.string.design_permission_workspace))
+            .assertHasClickAction()
     }
 
     @Test

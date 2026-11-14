@@ -62,7 +62,7 @@ export function sendError(res, status, code, message, headers = {}) {
 
 /**
  * 路由用到的外观层操作。第一个参数都是调用方的 deviceId。
- * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages' | 'usage' | 'plan'
+ * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages' | 'usage' | 'plan' | 'image'
  *   | 'directories' | 'createDirectory' | 'registerWorkspace'
  *   | 'createSession' | 'prompt' | 'fork' | 'cancel' | 'selectModel' | 'setPermissionPreset' | 'answerAttention'>} FacadeApi
  */
@@ -83,8 +83,11 @@ export function sendError(res, status, code, message, headers = {}) {
  */
 
 const PAIR_BODY_LIMIT = 4 * 1024
-/** 发消息的请求体上限：100,000 个字符的文本按 UTF-8 最多约 400 KB */
-const PROMPT_BODY_LIMIT = 512 * 1024
+/**
+ * 发消息的请求体上限：100,000 个字符的文本按 UTF-8 最多约 400 KB，
+ * 加上 4 张图片（单张最多 8 MB，base64 后约 10.7 MB），一共约 43 MB（protocol.md 第 4 节「图片」）
+ */
+const PROMPT_BODY_LIMIT = 45 * 1024 * 1024
 
 /** @param {import('node:http').ServerResponse} res @param {import('../pairing/devices.js').DeviceInfo} device */
 const sendDevice = (res, device) => sendJson(res, 200, {
@@ -293,6 +296,22 @@ export const ROUTES = Object.freeze([
       }
       const limit = limitText === null ? undefined : Number(limitText)
       sendJson(res, 200, await ctx.facade.messages(deviceIdOf(auth), auth.params.id ?? '', { before, limit }))
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/sessions/{id}/images/{imageId}',
+    auth: true,
+    async handle(_req, res, ctx, auth) {
+      const image = await ctx.facade.image(deviceIdOf(auth), auth.params.id ?? '', auth.params.imageId ?? '')
+      // 同一个 id 的内容永远不变（id 就是内容的 sha256），手机可以一直缓存
+      res.writeHead(200, {
+        'content-type': image.mediaType,
+        'content-length': image.data.length,
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      })
+      res.end(image.data)
     },
   },
   {

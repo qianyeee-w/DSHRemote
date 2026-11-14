@@ -19,7 +19,8 @@ import { CERT_FILE } from '../../src/tls/identity.js'
 import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { startDshWeb, DSH_VERSION, log, freePort } from '../helpers/dsh-runtime.mjs'
 import { pinnedRequest, pinnedWebSocket, collectMessages } from '../helpers/pinned-client.js'
-import { FAIL_MESSAGE, startFakeLlm, STREAM_REPLY, TOOL_DONE_REPLY, TODO_ITEMS } from '../contract/fake-llm.mjs'
+import { FAIL_MESSAGE, startFakeLlm, STREAM_REPLY, TOOL_DONE_REPLY, TODO_ITEMS, imageReply } from '../contract/fake-llm.mjs'
+import { solidPng } from '../helpers/png.js'
 
 // 用临时找到的空闲端口：开发机上 3190 / 3191 可能已被占用（例如用户自己的 dsh web 服务）
 const LAN_PORT = await freePort()
@@ -95,7 +96,7 @@ async function api(method, path, body) {
     headers: { ...(phone.token ? { authorization: `Bearer ${phone.token}` } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
-  return { status: res.status, json: () => res.json() }
+  return { status: res.status, json: () => res.json(), raw: res.raw, headers: res.headers }
 }
 
 async function openStream() {
@@ -248,6 +249,28 @@ async function main() {
       const bad = await api('POST', `/v1/sessions/${sid}/fork`, { requestId: randomUUID(), beforeTurn: 99 })
       if (bad.status !== 400) throw new Error(`不存在的轮次应当 400：${bad.status}`)
       return `新会话 ${added.session.title}`
+    })
+
+    await step('图片（落地方案 C2）：插件拿到 DSH 的模型服务，模型列表标出能否看图；带图发消息，实时流里是图片引用，按引用读回原图', async () => {
+      const models = (await api('GET', '/v1/models')).json()
+      const images = Object.fromEntries(models.models.map((/** @type {any} */ m) => [m.model, m.images]))
+      // deepseek-flash 能看图、deepseek-v4-pro 只能读文字（DSH 0.2.2-rc.1 的官方目录），说明插件在真实 dsh web 里注入到了 ctx.llm
+      if (models.imageInput !== true || images['deepseek-flash'] !== true || images['deepseek-v4-pro'] !== false) throw new Error(`模型列表不对：${JSON.stringify(models)}`)
+      const png = solidPng(64, 40)
+      const res = await api('POST', `/v1/sessions/${sid}/prompt`, { requestId: randomUUID(), text: '这张图', images: [{ mediaType: 'image/png', data: png.toString('base64') }] })
+      if (res.status !== 200) throw new Error(`发消息失败：${res.status} ${JSON.stringify(res.json())}`)
+      const upsert = await s.inbox.waitFor((m) => m.type === 'message.upsert' && m.message.role === 'user' && m.message.parts.some((/** @type {any} */ p) => p.type === 'image'))
+      const part = upsert.message.parts.find((/** @type {any} */ p) => p.type === 'image')
+      if (part.width !== 64 || part.height !== 40) throw new Error(`图片信息不对：${JSON.stringify(part)}`)
+      // 手机只从实时流拿到图片，插件还没读过这段历史：要从记录里找到引用
+      const read = await api('GET', `/v1/sessions/${sid}/images/${part.id}`)
+      if (read.status !== 200 || read.headers['content-type'] !== 'image/png' || !read.raw.equals(png)) throw new Error(`读回的图片不对：${read.status} ${read.headers['content-type']} ${read.raw.length} 字节`)
+      await s.inbox.waitFor((m) => m.type === 'message.upsert' && m.message.role === 'assistant' && !m.message.draft && JSON.stringify(m.message.parts).includes(imageReply(1)), 20_000)
+      await s.inbox.waitFor((m) => m.type === 'session.idle' && m.sessionId === sid, 20_000)
+      const other = (await api('POST', '/v1/sessions', {})).json().sessionId
+      const denied = await api('GET', `/v1/sessions/${other}/images/${part.id}`)
+      if (denied.status !== 404) throw new Error(`别的会话读到了这张图片：${denied.status}`)
+      return `images=${JSON.stringify(images)}；读回 ${read.raw.length} 字节；别的会话 404`
     })
 
     await step('提问：手机收到 attention.requested，回答后收到 attention.resolved（this-device）', async () => {

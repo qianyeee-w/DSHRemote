@@ -3,7 +3,7 @@
  * DSHRemote 电脑端插件入口。
  *
  * 只负责组装各模块和管理生命周期；具体逻辑在 src/ 下。
- * 使用的 DSH 服务只有 webServer 和 connection（见 plugin/AGENTS.md）。
+ * 必需的 DSH 服务只有 webServer 和 connection；模型服务 llm 是可选的，只用来读模型能否看图（见 plugin/AGENTS.md、ADR 0014）。
  */
 import { parseConfig } from './src/config.js'
 import { openStorage } from './src/storage.js'
@@ -66,6 +66,17 @@ export async function apply(ctx, rawConfig) {
  * @param {(level: 'info' | 'warn' | 'error', message: string) => void} log
  */
 async function start(ctx, config, log) {
+  /** @type {import('./src/dsh/facade.js').LlmService | undefined} 可选的模型服务：出现时记下，卸载时清掉（ADR 0014） */
+  let llm
+  // 和 DSH 自己的插件（dsh-session-query）声明可选依赖的写法一致；不写进 inject，拿不到时插件照常加载
+  if (typeof ctx.inject === 'function') {
+    const fiber = ctx.inject(['llm'], (/** @type {any} */ child) => {
+      const service = child.llm
+      llm = service
+      child.effect(() => () => { if (llm === service) llm = undefined }, 'dshremote llm binding')
+    })
+    ctx.effect(() => () => fiber?.dispose?.(), 'dshremote optional llm')
+  }
   await ctx.effect(async () => {
     const storage = await openStorage()
     const identity = await loadOrCreateIdentity(storage)
@@ -83,7 +94,7 @@ async function start(ctx, config, log) {
     })
     // 跟踪审批和提问；它订阅 DSH 的应用事件，也让插件和 DSH 一直保持连接
     const attention = new AttentionTracker(dsh)
-    const facade = new Facade(dsh, { attention })
+    const facade = new Facade(dsh, { attention, llm: () => llm })
     const hub = new LiveHub(dsh, facade, attention)
 
     const codes = new PairingCodes()

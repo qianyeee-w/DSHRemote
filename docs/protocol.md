@@ -97,10 +97,11 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | GET | `/v1/sessions/{id}/messages?before=<cursor>&limit=<n>` | 需要 | 历史消息分页，从最新的消息向前翻，返回 `{ messages, hasMore, cursor, turns }`，消息结构见 5.2，轮次见 5.4。见下方「历史分页」 |
 | GET | `/v1/sessions/{id}/usage` | 需要 | 用量与上下文：`{ context, total }`，见下方「用量」 |
 | GET | `/v1/sessions/{id}/plan` | 需要 | 计划：`{ goal, steps }`，见下方「计划」 |
-| POST | `/v1/sessions/{id}/prompt` | 需要 | 发消息 `{ requestId, text, mode?: "queue" \| "steer" }`，返回 `{ accepted: true }`。见下方「发消息」 |
+| POST | `/v1/sessions/{id}/prompt` | 需要 | 发消息 `{ requestId, text, images?, mode?: "queue" \| "steer" }`，返回 `{ accepted: true }`。见下方「发消息」「图片」 |
+| GET | `/v1/sessions/{id}/images/{imageId}` | 需要 | 这个会话的消息里的一张图片，返回图片本身。见下方「图片」 |
 | POST | `/v1/sessions/{id}/fork` | 需要 | 从某一轮之前另开一个对话：`{ requestId, beforeTurn }` → `{ sessionId, workspaceAttached }`，见下方「另开对话」 |
 | POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务，不需要请求体，返回 `{ accepted: true }`。会话空闲时也返回成功 |
-| GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description? }] }` |
+| GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description?, images? }], imageInput? }`。`images`、`imageInput` 见下方「图片」 |
 | POST | `/v1/sessions/{id}/model` | 需要 | 切换模型 `{ provider, model }`（取值来自 `/v1/models`），返回 `{ model: { provider, model } }`。模型不可用时 `400` |
 | GET | `/v1/permission-presets` | 需要 | 权限模式列表：`{ default: string \| null, presets: [{ id, name }] }`，例如 `read-only`、`workspace-write`、`danger-full-access` |
 | POST | `/v1/sessions/{id}/permission-preset` | 需要 | 切换权限模式 `{ preset }`（取值来自 `/v1/permission-presets`），返回 `{ permissionPreset }`。不在列表中的值 `400` |
@@ -175,9 +176,20 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 **发消息**
 
 - `requestId`：App 为每条消息生成一个新的 id（建议 UUID，只能由字母、数字、`_`、`-` 组成，最长 128 个字符）。因为网络问题重试同一条消息时，**必须沿用原来的 `requestId`**：插件在 10 分钟内只会把它发出一次，重复的请求直接返回成功。插件重启后这个记录会清空。
-- `text`：不能为空，最多 100,000 个字符。
+- `text`：最多 100,000 个字符。没有图片时不能为空（只有空白也算空）；带了图片时可以为空字符串。
+- `images`：可选，见下方「图片」。
 - `mode`：`queue`（默认）在当前任务结束后再处理；`steer` 插话，在当前任务的下一步就让模型看到。
 - 会话不存在时返回 `404`。
+
+**图片**（落地方案 C2，ADR 0014，协议 v1 的兼容扩展）
+
+- **插件能不能发图片**：`/v1/models` 顶层的 `imageInput: true` 表示插件支持下面的 `images` 字段。旧插件没有这个字段，而且会忽略 `images`、只把文字发出去，所以**没有 `imageInput` 时 App 不让加图片**。
+- **模型能不能看图**：`/v1/models` 每一项的 `images` 为 `true` 能看图、`false` 只能读文字；**没有这个字段表示不知道**（DSH 没给出，或者插件拿不到 DSH 的模型服务；旧插件也没有）。App 在当前模型 `images: false` 时不让加图片；不知道时照常可以加，发送被拒绝时再说明。
+- **发送**：`images` 是数组，每项 `{ mediaType, data }`：`mediaType` 为 `image/jpeg` 或 `image/png`，`data` 是图片文件的 base64（标准字母表，带填充，不带 `data:` 前缀）。每条最多 4 张，单张解码后最多 8 MB，图片放在文字前面发给 DSH。App 先把图片缩到长边不超过 2048 像素：不透明的编成 JPEG，带透明的编成 PNG。这个接口的请求体最多 45 MB，其他接口不变。
+- 格式不对、超过张数或大小时 `400 BAD_REQUEST`。DSH 认为图片已损坏时 `400 IMAGE_INVALID`；当前模型看不了图时 `400 IMAGES_NOT_SUPPORTED`，这两种情况消息都没有发出，可以修改后用新的 `requestId` 再发。
+- **消息里的图片**：用户消息的 `parts` 里，图片是 `{ "type": "image", "id": "<64 位十六进制>", "mediaType": "image/png", "width": 1280, "height": 720 }`（5.2），和文字按原来的顺序排列。工具结果里的图片仍然是占位文字。
+- **读图片**：`GET /v1/sessions/{id}/images/{imageId}` 返回 `200`，响应体就是图片文件，`Content-Type` 为它的 `mediaType`，带 `Cache-Control: private, max-age=31536000, immutable`（同一个 `id` 的内容永远不变）。插件只读**这个会话的消息里出现过的**图片，其他一律 `404 NOT_FOUND`，不区分「图片不存在」和「不属于这个会话」。`imageId` 不是 64 位小写十六进制时也是 `404`。
+- 旧插件：`/v1/models` 没有 `images` 和 `imageInput`，消息里的图片是占位文字 `[图片]`，读图片接口返回 `404`。
 
 插件内部通过 DSH 官方的 Remote API 实现以上接口，转换逻辑都在 `plugin/src/dsh/` 中。具体对应关系见 [调研文档](research/dsh-session-api.md) 第 4 节。**App 永远拿不到 DSH 的 cookie 或启动 token。**
 
@@ -225,7 +237,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 ```
 
 - 只包含用户亲自输入的消息和模型的回复。DSH 自动注入的消息（运行时上下文、时间上下文、系统提示等）不显示。
-- 用户消息中的图片和文件，v1 用占位文字表示（`[图片]`、`[文件：a.txt]`）。
+- 用户消息中的图片是 `{ type: "image", id, mediaType, width, height }`，见第 4 节「图片」；文件用占位文字表示（`[文件：a.txt]`）。旧插件的图片是占位文字 `[图片]`。
 - `thinking` 和 `tool` 在 App 中默认折叠显示。
 - 工具的 `status`：`running` 还在执行；`done` 成功；`error` 失败，或者没执行完这一轮就结束了（例如被停止）；`rejected` 审批被拒绝。
 - `turn`：这条消息属于第几轮（DSH 的轮次编号，从 1 开始，见 5.4）。一页开头的消息所属的轮次在更早的一页、无法确定时没有这个字段。
@@ -392,6 +404,8 @@ DSH 重启（端口会变）时插件也会重启，连接会断开；DSH 启动
 | `DIRECTORY_CREATE_FAILED` | 422 | 无法创建目录，例如父目录不可写 |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | `Content-Type` 不是 `application/json` |
 | `PAYLOAD_TOO_LARGE` | 413 | 请求体过大 |
+| `IMAGE_INVALID` | 400 | DSH 认为消息里的图片已损坏或不是支持的格式，消息没有发出 |
+| `IMAGES_NOT_SUPPORTED` | 400 | 当前模型看不了图片，消息没有发出 |
 | `INTERNAL` | 500 | 插件内部错误（不附带细节） |
 
 `message` 里不得包含 token、配对码或任何路径之类的敏感信息。

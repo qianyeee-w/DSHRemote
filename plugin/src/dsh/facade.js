@@ -10,12 +10,19 @@ import { convertUsage } from './usage.js'
 import { DshUnavailableError } from './connection.js'
 import { convertPage, turnBefore, turnDigest } from './transcript.js'
 import { canonicalDirectory, createDirectory, DirectoryError, listDirectories } from '../directories.js'
+import { IMAGE_ID, ImageInputError, ImageRefCache, imageRefs, imagesFromModalities, parseOutgoingImages } from './images.js'
 
 /** 历史消息分页：默认条数和上限 */
 export const MESSAGES_DEFAULT_LIMIT = 50
 export const MESSAGES_MAX_LIMIT = 200
 /** 计算最近一轮的结果时读取的消息数：一轮通常不会超过这么多条 */
 const DIGEST_PAGE_SIZE = 40
+
+/** 找图片引用时，每次往回读多少条消息、最多读多少页 */
+const IMAGE_SCAN_PAGE_SIZE = 200
+const IMAGE_SCAN_MAX_PAGES = 100
+/** 向 DSH 模型服务查询一个服务商的模型列表时最多等多久 */
+const LIST_MODELS_TIMEOUT_MS = 3_000
 
 /** 读取工作区列表时，等待 workspace/follow 首帧的时间 */
 const WORKSPACE_TIMEOUT_MS = 10_000
@@ -144,6 +151,13 @@ export function convertSessionList(list, workspaces, attentionOf, digestOf = () 
   return sessions.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.updatedAt - a.updatedAt)
 }
 
+/** @typedef {{ provider: string, providerName: string, model: string, name: string, description?: string, images?: boolean }} ModelEntry */
+
+/**
+ * DSH 模型服务里会用到的部分（dsh-llm README 公开的只读方法，ADR 0014）。
+ * @typedef {{ listModels(provider: string): Promise<readonly { id?: unknown, inputModalities?: unknown }[]> }} LlmService
+ */
+
 /**
  * session/modelCatalog → 模型列表。
  * @param {unknown} catalog
@@ -153,13 +167,13 @@ export function convertModelCatalog(catalog) {
   const fallback = isObject(value.default) && typeof value.default.provider === 'string' && typeof value.default.model === 'string'
     ? { provider: value.default.provider, model: value.default.model }
     : null
-  /** @type {{ provider: string, providerName: string, model: string, name: string, description?: string }[]} */
+  /** @type {ModelEntry[]} */
   const models = []
   for (const group of Array.isArray(value.groups) ? value.groups : []) {
     if (!isObject(group) || typeof group.id !== 'string') continue
     for (const model of Array.isArray(group.models) ? group.models : []) {
       if (!isObject(model) || typeof model.id !== 'string') continue
-      /** @type {{ provider: string, providerName: string, model: string, name: string, description?: string }} */
+      /** @type {ModelEntry} */
       const entry = {
         provider: group.id,
         providerName: typeof group.name === 'string' ? group.name : group.id,
@@ -198,11 +212,22 @@ const DSH_ERRORS = {
 }
 
 /**
+ * session/attachment-invalid 的 reason → 外观层错误（protocol.md 第 4 节「图片」）。
+ * @type {Record<string, [number, string, string]>}
+ */
+const ATTACHMENT_ERRORS = {
+  MODEL_DOES_NOT_SUPPORT_IMAGES: [400, 'IMAGES_NOT_SUPPORTED', '当前模型看不了图片'],
+  INVALID_IMAGE: [400, 'IMAGE_INVALID', '图片已损坏或格式不支持'],
+}
+
+/**
  * @param {import('./connection.js').RemoteResult} result
  */
 function unwrap(result) {
   if (result.ok) return result.value
-  const mapped = DSH_ERRORS[result.error.code]
+  const details = result.error.details
+  const reason = result.error.code === 'session/attachment-invalid' && isObject(details) && typeof details.reason === 'string' ? details.reason : ''
+  const mapped = ATTACHMENT_ERRORS[reason] ?? DSH_ERRORS[result.error.code]
   if (mapped) throw new FacadeError(mapped[0], mapped[1], mapped[2])
   // DSH 的原始错误信息可能包含路径等细节，不转发给 App
   throw new FacadeError(502, 'DSH_ERROR', `DSH 无法完成这个操作（${result.error.code}）`)
@@ -233,6 +258,27 @@ async function directoryOperation(action) {
   }
 }
 
+/** 图片不存在和不属于这个会话不区分 */
+const imageNotFound = () => new FacadeError(404, 'NOT_FOUND', '图片不存在')
+
+/**
+ * 查询一个服务商的模型列表；失败或超时都当作不知道（返回 undefined），不影响模型列表本身。
+ * @param {LlmService} llm @param {string} provider
+ */
+async function listModelsQuietly(llm, provider) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer
+  try {
+    const timeout = new Promise((resolve) => { timer = setTimeout(resolve, LIST_MODELS_TIMEOUT_MS) })
+    const models = await Promise.race([llm.listModels(provider), timeout])
+    return Array.isArray(models) ? models.filter(isObject) : undefined
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export class Facade {
   #dsh
   #attentionOf
@@ -245,13 +291,19 @@ export class Facade {
   #recentForks = new Map()
   /** @type {Map<string, TurnDigest>} sessionId → 最近一轮的结果（只在内存里，插件重启后重新读取） */
   #digests = new Map()
+  /** 每个会话里见过的图片引用（只在内存里） */
+  #imageRefs = new ImageRefCache()
+  /** @type {() => LlmService | undefined} DSH 的模型服务，可选（ADR 0014） */
+  #llm
 
   /**
    * @param {import('./connection.js').DshConnection} dsh
-   * @param {{ attention?: import('./attention.js').AttentionTracker, now?: () => number }} [options] attention：待处理事项的跟踪器
+   * @param {{ attention?: import('./attention.js').AttentionTracker, now?: () => number, llm?: () => LlmService | undefined }} [options]
+   *   attention：待处理事项的跟踪器；llm：DSH 的模型服务，拿不到时返回 undefined
    */
   constructor(dsh, options = {}) {
     this.#dsh = dsh
+    this.#llm = options.llm ?? (() => undefined)
     this.#now = options.now ?? Date.now
     this.#attention = options.attention
     const tracker = options.attention
@@ -376,9 +428,30 @@ export class Facade {
     return convertPlan(unwrap(result))
   }
 
-  /** @param {string} actor */
+  /**
+   * 模型列表（protocol.md 第 4 节）。能拿到 DSH 的模型服务时，每一项带上能否看图（images），拿不到或查询失败时不带。
+   * @param {string} actor
+   */
   async models(actor) {
-    return convertModelCatalog(unwrap(await this.#dsh.call('session/modelCatalog', {}, { actor })))
+    const catalog = convertModelCatalog(unwrap(await this.#dsh.call('session/modelCatalog', {}, { actor })))
+    const llm = this.#llm()
+    if (llm) {
+      const providers = [...new Set(catalog.models.map((m) => m.provider))]
+      const lists = await Promise.all(providers.map((provider) => listModelsQuietly(llm, provider)))
+      /** @type {Map<string, boolean>} */
+      const images = new Map()
+      providers.forEach((provider, i) => {
+        for (const model of lists[i] ?? []) {
+          const value = imagesFromModalities(model.inputModalities)
+          if (typeof model.id === 'string' && value !== undefined) images.set(`${provider}\n${model.id}`, value)
+        }
+      })
+      for (const entry of catalog.models) {
+        const value = images.get(`${entry.provider}\n${entry.model}`)
+        if (value !== undefined) entry.images = value
+      }
+    }
+    return { ...catalog, imageInput: true }
   }
 
   /** @param {string} actor */
@@ -405,6 +478,7 @@ export class Facade {
       request.beforeSeq = Number(options.before)
     }
     const page = unwrap(await this.#dsh.call('session/page', { request }, { actor }))
+    if (isObject(page) && Array.isArray(page.records)) this.#imageRefs.add(sessionId, imageRefs(page.records))
     const converted = convertPage(isObject(page) ? page : {})
     if (converted.cursor === null || converted.messages.every((m) => m.turn !== undefined)) return converted
     // 这一页开头的消息推断不出轮次（同一轮前面的事件都在更早的一页）：往前多读一小段，找到最近一个带 turn 的事件
@@ -438,14 +512,23 @@ export class Facade {
    * 发送消息。requestId 由 App 生成，插件按它去重：App 因为网络问题重试时，同一条消息只发出一次。
    * DSH 0.2.2-rc.1 实测并不按 requestId 去重（docs/research/dsh-session-api.md 5.7），所以由插件来做。
    * 去重记录只在内存中，保留 10 分钟；DSH 返回错误时删掉记录，允许重试。
-   * @param {string} actor @param {string} sessionId @param {unknown} body `{ requestId, text, mode }`
+   * @param {string} actor @param {string} sessionId @param {unknown} body `{ requestId, text, images?, mode }`
    */
   async prompt(actor, sessionId, body) {
     assertSessionId(sessionId)
     const b = isObject(body) ? body : {}
     if (typeof b.requestId !== 'string' || !OPAQUE_ID.test(b.requestId)) throw badRequest('requestId 格式不对')
-    if (typeof b.text !== 'string' || b.text.trim() === '') throw badRequest('text 不能为空')
+    if (typeof b.text !== 'string') throw badRequest('text 必须是字符串')
     if (b.text.length > PROMPT_TEXT_LIMIT) throw badRequest(`text 不能超过 ${PROMPT_TEXT_LIMIT} 个字符`)
+    /** @type {Record<string, unknown>[]} */
+    let images
+    try { images = parseOutgoingImages(b.images) } catch (error) {
+      if (error instanceof ImageInputError) throw badRequest(error.message)
+      throw error
+    }
+    if (b.text.trim() === '' && images.length === 0) throw badRequest('text 不能为空')
+    // 图片在前、文字在后（和 Desktop 一样）；只有图片时不放空的文字块
+    const content = b.text.trim() === '' ? images : [...images, { type: 'text', text: b.text }]
     const mode = b.mode ?? 'queue'
     if (mode !== 'queue' && mode !== 'steer') throw badRequest('mode 必须是 queue 或 steer')
     const key = `${sessionId}\n${b.requestId}`
@@ -460,7 +543,7 @@ export class Facade {
       return { accepted: true }
     }
     const done = this.#dsh.call('session/prompt', {
-      request: { requestId: b.requestId, sessionId, mode, content: [{ type: 'text', text: b.text }] },
+      request: { requestId: b.requestId, sessionId, mode, content },
     }, { actor }).then(unwrap)
     const entry = { at: now, done }
     this.#recentPrompts.set(key, entry)
@@ -471,6 +554,50 @@ export class Facade {
       throw error
     }
     return { accepted: true }
+  }
+
+  /**
+   * 读这个会话里的一张图片（protocol.md 第 4 节「图片」）。
+   * DSH 的 session/attachment 不检查归属，所以只用这个会话记录里找到的完整引用去读；找不到一律 404。
+   * @param {string} actor @param {string} sessionId @param {string} imageId
+   * @returns {Promise<{ mediaType: string, data: Buffer }>}
+   */
+  async image(actor, sessionId, imageId) {
+    assertSessionId(sessionId)
+    if (!IMAGE_ID.test(imageId)) throw imageNotFound()
+    const ref = this.#imageRefs.get(sessionId, imageId) ?? await this.#findImageRef(actor, sessionId, imageId)
+    if (!ref) throw imageNotFound()
+    const result = unwrap(await this.#dsh.call('session/attachment', { request: { sessionId, attachment: ref } }, { actor }))
+    const value = isObject(result) ? result : {}
+    const attachment = isObject(value.attachment) ? value.attachment : undefined
+    if (!attachment || attachment.attachmentId !== ref.attachmentId || typeof value.data !== 'string' || typeof ref.mediaType !== 'string') {
+      throw new FacadeError(502, 'DSH_ERROR', 'DSH 没有返回这张图片')
+    }
+    return { mediaType: ref.mediaType, data: Buffer.from(value.data, 'base64') }
+  }
+
+  /**
+   * 从最新的消息往回翻这个会话的记录，找图片引用（缓存里没有时，例如插件重启后）。读过的引用都记下来。
+   * @param {string} actor @param {string} sessionId @param {string} imageId
+   */
+  async #findImageRef(actor, sessionId, imageId) {
+    /** @type {number | undefined} */
+    let beforeSeq
+    for (let i = 0; i < IMAGE_SCAN_MAX_PAGES; i += 1) {
+      /** @type {Record<string, unknown>} */
+      const request = { address: { kind: 'session', sessionId }, maxMessages: IMAGE_SCAN_PAGE_SIZE }
+      if (beforeSeq !== undefined) request.beforeSeq = beforeSeq
+      const page = unwrap(await this.#dsh.call('session/page', { request }, { actor }))
+      const records = isObject(page) && Array.isArray(page.records) ? page.records : []
+      this.#imageRefs.add(sessionId, imageRefs(records))
+      const found = this.#imageRefs.get(sessionId, imageId)
+      if (found) return found
+      const first = records[0]
+      const seq = isObject(first) && isObject(first.event) ? first.event.seq : undefined
+      if (!isObject(page) || page.hasMore !== true || typeof seq !== 'number' || seq <= 0) return undefined
+      beforeSeq = seq
+    }
+    return undefined
   }
 
   /**

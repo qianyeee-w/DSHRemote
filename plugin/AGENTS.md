@@ -119,7 +119,7 @@ plugin/
 
 - 每个 JS 文件第一行写 `// @ts-check`，用 JSDoc 标注类型。类型检查不通过，不能提交。
 - 运行时依赖只允许 `ws`。其他库要么放进 `src/vendor/` 并保留原许可证声明，要么先写 ADR。开发依赖不受此限制。
-- 使用的 DSH 服务只有 `webServer` 和 `connection`，写在 `inject` 里（单元测试会检查）。不允许访问其他私有字段。
+- 必需的 DSH 服务只有 `webServer` 和 `connection`，写在 `inject` 里（单元测试会检查）。另外**可选地**用 `ctx.inject(['llm'], …)` 等模型服务，只调用 `ctx.llm.listModels` 读能否看图（ADR 0014），拿不到时插件照常工作。不允许访问其他服务或私有字段。
 - **所有对 DSH 的调用都必须放在 `src/dsh/` 适配层里**，其他模块只能调用适配层，不能直接访问 DSH。支持的 DSH 版本范围只在 `src/dsh/versions.js` 中定义，`package.json` 的 `engines.dsh` 必须和它一致（单元测试会检查）。这是为以后的「DSH 新版本自动适配」预留的设计，见 `docs/roadmap.md`。
 - 测试代码（`test/` 下）可以直接调用 DSH 的接口，用来做验证；插件代码不可以。
 - DSH 的端口每次启动都可能变化，**每个请求都要实时读取** `ctx.webServer.port`，不要缓存（`DshConnection` 已经这样做）。DSH 自己开启 TLS（`ctx.webServer.protocol` 为 `https:`）时，v1 视为 DSH 不可用。

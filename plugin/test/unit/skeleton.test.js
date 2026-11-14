@@ -24,6 +24,12 @@ test('apply 是 async 函数：cordis 会把带 prototype 的普通函数当构�
   assert.equal(plugin.apply.constructor.name, 'AsyncFunction')
 })
 
+test('index.js 只把模型服务 llm 作为可选依赖，不写进 inject（ADR 0014）', async () => {
+  const source = await readFile(new URL('../../index.js', import.meta.url), 'utf8')
+  assert.match(source, /ctx\.inject\(\['llm'\]/)
+  assert.ok(!plugin.inject.includes('llm'))
+})
+
 test('只注入允许的 DSH 服务（plugin/AGENTS.md）', () => {
   for (const service of plugin.inject) {
     assert.ok(['webServer', 'connection'].includes(service), `不允许注入 ${service}`)

@@ -286,3 +286,12 @@ PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.m
 补充：基线 `directoryPicker/list` 和 `directoryPicker/createDirectory` 已有公开入口，但要求 browse 后端；native 后端返回 `directory-picker/unavailable`。因此本项目采用 ADR 0013，由插件提供有限的本机目录操作，登记仍走 `workspace/create`。接口来源：[目录选择控制器](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/workspace-controller/src/directory-picker.ts)。现有契约测试曾间接调用 `workspace/create` 验证会话归属，本次进一步覆盖外观层登记、重复路径和创建后恢复；最终运行结果见创建／导入项目计划。
 
 基线已有公开 `workspace/create`，用于把**已有目录**注册为工作区，重复路径可幂等解析。它不等于创建磁盘目录，也不能直接把电脑原生目录选择窗口作为手机上的目录选择器。手机目录选择和路径边界已在 ADR 0013、protocol.md 中补充约定。来源：[Workspace Remote 控制器](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/workspace-controller/src/index.ts)。
+
+### 9.7 图片附件（2026-11-14，落地方案 C2）
+
+用 `dsh web` 和假模型实测，结论写进了 ADR 0014：
+
+- **发送**：`session/prompt` 的 `content` 里可以和文字并列放 `{ type: 'image', mediaType, data, name? }`，`data` 是 base64。DSH 解码并严格校验，不是合法图片时返回 `session/attachment-invalid`（`reason: 'INVALID_IMAGE'`）。`imageLimits` 投影给出的上限：单张 50 MB、每条 20 张、`image/png`、`image/jpeg`、`image/webp`、`image/gif`。
+- **模型能否看图**：只能读文字的模型（实测 `deepseek-v4-pro`）直接拒绝带图的消息，`session/attachment-invalid`（`reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES'`）；`deepseek-flash` 能看图。`session/modelCatalog` 的投影里**没有**能否看图的信息。这个信息在 `dsh-llm` 的 `LlmModelInfo.inputModalities`（`'text' | 'image'`；**没有这项表示不知道，有这项但不含 `image` 表示不能**），经 README 公开的 `ctx.llm.listModels(provider)` 读取；`resolveModelInfo(provider, model)` 也带这一项。Remote API 里和模型有关的只有 `llm/listProviders`、`llm/listConfigurableProviders`、`llm/discoverModels`，最后一个是给设置页探测模型端点用的（可能真的去请求端点），不适合拿来查。DSH 自己的插件用 `ctx.inject([...], callback)` 声明可选依赖（例如 `dsh-session-query` 对 `sessionPersistence`）。
+- **会话记录**：用户消息里只存引用 `{ type: 'image', attachment: { attachmentId: 'sha256:<64 位十六进制>', mediaType, width, height, bytes, name? } }`，不存图片数据。
+- **读回**：`session/attachment { request: { sessionId, attachment } }` 返回 `{ attachment, data }`（base64）。`attachment` 要传完整的引用，DSH 会核对 id、格式、字节数和尺寸。类型注释写明 `sessionId` **只用于权限范围，不检查会话存不存在、图片是不是这个会话的**，所以插件必须自己确认图片出现在这个会话的记录里（ADR 0014）。

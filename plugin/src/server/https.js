@@ -32,7 +32,8 @@ export async function startLanServer({ identity, host, port, handler }) {
     cert: identity.certPem,
     minVersion: 'TLSv1.2',
     maxHeaderSize: MAX_HEADER_SIZE,
-    requestTimeout: 30_000,
+    // 整个请求（含请求体）的时限。带 4 张图片的消息最多约 43 MB，慢的 Wi-Fi 上要几十秒（protocol.md 第 4 节「图片」）
+    requestTimeout: 120_000,
     headersTimeout: 15_000,
   }, handler)
   // 握手失败（包括明文 HTTP、错误的协议版本）只关闭这条连接，不影响服务

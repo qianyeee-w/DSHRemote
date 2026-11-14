@@ -61,7 +61,7 @@ export function connectPinned({ host, port, fingerprint, minVersion, maxVersion 
 /**
  * 通过指纹固定的连接发出一个 HTTP 请求。
  * @param {{ host: string, port: number, fingerprint: string, method?: string, path: string, headers?: Record<string, string>, body?: string }} options
- * @returns {Promise<{ status: number, headers: import('node:http').IncomingHttpHeaders, body: string, json: () => any }>}
+ * @returns {Promise<{ status: number, headers: import('node:http').IncomingHttpHeaders, body: string, raw: Buffer, json: () => any }>}
  */
 export async function pinnedRequest(options) {
   const socket = await connectPinned(options)
@@ -72,12 +72,14 @@ export async function pinnedRequest(options) {
       headers: { host: `${options.host}:${options.port}`, ...options.headers },
       createConnection: () => socket,
     }, (res) => {
-      let body = ''
-      res.setEncoding('utf8')
-      res.on('data', (chunk) => { body += chunk })
+      /** @type {Buffer[]} */
+      const chunks = []
+      res.on('data', (chunk) => { chunks.push(chunk) })
       res.on('end', () => {
         socket.destroy()
-        resolve({ status: res.statusCode ?? 0, headers: res.headers, body, json: () => JSON.parse(body) })
+        const raw = Buffer.concat(chunks)
+        const body = raw.toString('utf8')
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, body, raw, json: () => JSON.parse(body) })
       })
     })
     req.on('error', (error) => { socket.destroy(); reject(error) })

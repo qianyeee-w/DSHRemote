@@ -76,6 +76,8 @@ function isInjectedContext(text) {
 
 /** FAIL 关键词让假模型返回的错误说明 */
 export const FAIL_MESSAGE = 'fake failure for DSHRemote tests'
+/** 落地方案 C2：最后一条用户消息里有图片时，回复「看到了 N 张图片」 */
+export const imageReply = (/** @type {number} */ count) => `看到了 ${count} 张图片`
 
 /** @param {http.ServerResponse} res @param {[string, unknown][]} events @param {number} [delayMs] */
 async function sse(res, events, delayMs = 0) {
@@ -136,7 +138,7 @@ function toolReply(res, name, input) {
 }
 
 /**
- * @returns {Promise<{ url: string, requests: () => number, diagnostics: () => { tools: string[], lastToolResult: string, lastUserText: string }, close: () => Promise<void> }>}
+ * @returns {Promise<{ url: string, requests: () => number, diagnostics: () => { tools: string[], lastToolResult: string, lastUserText: string, lastUserImages: number }, close: () => Promise<void> }>}
  */
 export async function startFakeLlm() {
   let requests = 0
@@ -144,6 +146,8 @@ export async function startFakeLlm() {
   let lastTools = []
   let lastToolResult = ''
   let lastUserText = ''
+  /** 最近一次请求里，最后一条用户消息带了几张图片 */
+  let lastUserImages = 0
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (d) => { body += d })
@@ -175,6 +179,8 @@ export async function startFakeLlm() {
       // 只看用户自己的最后一段文字：上一轮没有完整回复（被停止、失败）时，DSH 会把两条用户消息合在一起发过来；
       // 每轮还会在后面追加运行时上下文、时间上下文（会话的第一轮两段都有）
       const userBlocks = messages.findLast((m) => m.role === 'user')?.content
+      const images = Array.isArray(userBlocks) ? userBlocks.filter((/** @type {any} */ b) => b?.type === 'image').length : 0
+      lastUserImages = images
       const lastText = Array.isArray(userBlocks)
         ? String(userBlocks.findLast((/** @type {any} */ b) => b?.type === 'text' && !isInjectedContext(String(b.text ?? '')))?.text ?? '')
         : String(userBlocks ?? '')
@@ -216,6 +222,8 @@ export async function startFakeLlm() {
         void thinkingReply(res, '用户想让我想一想。', '想好了。')
       } else if (text.includes('SLOW')) {
         void textReply(res, '慢'.repeat(600), 100)
+      } else if (images > 0) {
+        void textReply(res, imageReply(images))
       } else {
         void textReply(res, FAKE_REPLY)
       }
@@ -227,7 +235,7 @@ export async function startFakeLlm() {
     url: `http://127.0.0.1:${address.port}`,
     requests: () => requests,
     // 检查失败时用来定位原因：DSH 提供了哪些工具、最近一次工具结果是什么
-    diagnostics: () => ({ tools: lastTools, lastToolResult, lastUserText }),
+    diagnostics: () => ({ tools: lastTools, lastToolResult, lastUserText, lastUserImages }),
     close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()) }),
   }
 }

@@ -19,6 +19,9 @@ import { FacadeError } from '../../src/dsh/facade.js'
 import { pinnedRequest } from '../helpers/pinned-client.js'
 
 const keyPem = generatePrivateKeyPem()
+/** 图片接口的桩返回的字节：PNG 文件头加上几个非 UTF-8 的字节，检查响应体原样传输 */
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00, 0xfe])
+const IMAGE_ID = 'a'.repeat(64)
 const certPem = issueSelfSignedCertificate(keyPem)
 const fingerprint = spkiFingerprint(certPem)
 
@@ -38,11 +41,12 @@ beforeEach(async () => {
     calls.push({ op, args })
     if (behavior.error) throw behavior.error
     if (op === 'fork') return { sessionId: 'session-child', workspaceAttached: true }
+    if (op === 'image') return { mediaType: 'image/png', data: PNG_BYTES }
     return op === 'answerAttention' ? { attentionId: args[1] } : { op }
   }
   const facade = /** @type {import('../../src/server/routes.js').FacadeApi} */ (/** @type {unknown} */ ({
     directories: op('directories'), createDirectory: op('createDirectory'), registerWorkspace: op('registerWorkspace'),
-    workspaces: op('workspaces'), sessions: op('sessions'), models: op('models'), permissionPresets: op('permissionPresets'), messages: op('messages'), usage: op('usage'), plan: op('plan'),
+    workspaces: op('workspaces'), sessions: op('sessions'), models: op('models'), permissionPresets: op('permissionPresets'), messages: op('messages'), usage: op('usage'), plan: op('plan'), image: op('image'),
     createSession: op('createSession'), prompt: op('prompt'), fork: op('fork'), cancel: op('cancel'), selectModel: op('selectModel'),
     setPermissionPreset: op('setPermissionPreset'), answerAttention: op('answerAttention'),
   }))
@@ -199,9 +203,35 @@ test('【反向】写接口：没有 token 时 401，且不访问 DSH', async ()
 test('【反向】写接口：请求体不是 JSON、Content-Type 不对、请求体过大时不访问 DSH', async () => {
   assert.equal((await post('/v1/sessions/s1/prompt', '{not json')).status, 400)
   assert.equal((await post('/v1/sessions/s1/prompt', '{}', { contentType: 'text/plain' })).status, 415)
-  assert.equal((await post('/v1/sessions/s1/prompt', { requestId: 'r', text: 'x'.repeat(600 * 1024) })).status, 413)
+  assert.equal((await post('/v1/sessions/s1/prompt', { requestId: 'r', text: 'x'.repeat(46 * 1024 * 1024) })).status, 413)
+  assert.equal((await post('/v1/sessions/s1/fork', { pad: 'x'.repeat(20 * 1024) })).status, 413)
   assert.equal((await post('/v1/attention/a1/answer', { pad: 'x'.repeat(20 * 1024) })).status, 413)
   assert.equal(env.calls.length, 0)
+})
+
+test('图片：返回图片本身，Content-Type 为它的格式，可以一直缓存', async () => {
+  const res = await get(`/v1/sessions/session-abc/images/${IMAGE_ID}`)
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.raw, PNG_BYTES)
+  assert.equal(res.headers['content-type'], 'image/png')
+  assert.equal(res.headers['cache-control'], 'private, max-age=31536000, immutable')
+  assert.equal(res.headers['x-content-type-options'], 'nosniff')
+  assert.deepEqual(env.calls.at(-1), { op: 'image', args: [env.deviceId, 'session-abc', IMAGE_ID] })
+})
+
+test('【反向】图片：没有 token 时 401；路径不对时 404；都不访问 DSH', async () => {
+  assert.equal((await get(`/v1/sessions/s1/images/${IMAGE_ID}`, { token: null })).status, 401)
+  assert.equal((await get(`/v1/sessions/s1/images/${IMAGE_ID}`, { token: 'A'.repeat(43) })).status, 401)
+  assert.equal((await get('/v1/sessions/s1/images/..%2f..%2fetc')).status, 404)
+  assert.equal((await get(`/v1/sessions/s1/images/sha256:${IMAGE_ID}`)).status, 404)
+  assert.equal((await get(`/v1/sessions/s1/images/${IMAGE_ID}/x`)).status, 404)
+  assert.equal(env.calls.length, 0)
+})
+
+test('发消息的请求体可以带几 MB 的图片（上限 45 MB，其他接口不变）', async () => {
+  const res = await post('/v1/sessions/s1/prompt', { requestId: 'r', text: '', images: [{ mediaType: 'image/png', data: 'A'.repeat(6 * 1024 * 1024) }] })
+  assert.equal(res.status, 200)
+  assert.equal(env.calls.at(-1)?.op, 'prompt')
 })
 
 test('外观层的 409 原样返回', async () => {

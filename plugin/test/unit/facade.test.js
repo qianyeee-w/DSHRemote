@@ -396,3 +396,144 @@ test('发消息按 requestId 去重：重试和并发的重复提交只发出一
   await new Promise((r) => setImmediate(r)); release?.(); await late
   assert.equal(calls.length, 4)
 })
+
+// ---------------------------------------------------------------- 图片附件（C2，ADR 0014）
+
+const IMG = 'ab'.repeat(32)
+const PNG_DATA = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]).toString('base64')
+/** @param {string} [hex] */
+const imageRef = (hex = IMG) => ({ attachmentId: `sha256:${hex}`, mediaType: 'image/png', width: 640, height: 480, bytes: 10, name: 'shot.png' })
+/** @param {unknown[]} content @param {number} seq */
+const userRecord = (content, seq) => ({
+  type: 'event', event: { type: 'user/message', seq, time: seq, data: { content, source: { kind: 'user' }, role: 'user', id: `m${seq}` }, surfaceOp: 'append' },
+})
+
+test('发消息带图片：图片在前、文字在后；只有图片时不放文字块', async () => {
+  const fake = fakeConnection({ 'session/prompt': { ok: true, value: { accepted: true } } })
+  const facade = new Facade(fake.connection)
+  const images = [{ mediaType: 'image/png', data: PNG_DATA }]
+  await facade.prompt(ACTOR, 's1', { requestId: 'r1', text: '看看这个', images })
+  await facade.prompt(ACTOR, 's1', { requestId: 'r2', text: '  ', images })
+  assert.deepEqual(fake.calls.map((c) => c.args.request), [
+    { requestId: 'r1', sessionId: 's1', mode: 'queue', content: [{ type: 'image', mediaType: 'image/png', data: PNG_DATA }, { type: 'text', text: '看看这个' }] },
+    { requestId: 'r2', sessionId: 's1', mode: 'queue', content: [{ type: 'image', mediaType: 'image/png', data: PNG_DATA }] },
+  ])
+})
+
+test('【反向】发消息：图片不对时 400，不发给 DSH；没有文字也没有图片时 400', async () => {
+  const fake = fakeConnection({})
+  const facade = new Facade(fake.connection)
+  for (const body of [
+    { requestId: 'r', text: 'hi', images: [{ mediaType: 'image/png', data: 'not base64!' }] },
+    { requestId: 'r', text: 'hi', images: Array.from({ length: 5 }, () => ({ mediaType: 'image/png', data: PNG_DATA })) },
+    { requestId: 'r', text: '', images: [] },
+    { requestId: 'r', text: 1, images: [{ mediaType: 'image/png', data: PNG_DATA }] },
+  ]) await assert.rejects(facade.prompt(ACTOR, 's1', body), (e) => e instanceof FacadeError && e.status === 400 && e.code === 'BAD_REQUEST')
+  assert.equal(fake.calls.length, 0)
+})
+
+test('发消息：DSH 说模型看不了图、图片坏了时，分别映射成 IMAGES_NOT_SUPPORTED、IMAGE_INVALID，并允许重试', async () => {
+  let reason = 'MODEL_DOES_NOT_SUPPORT_IMAGES'
+  const facade = new Facade(fakeConnection({
+    'session/prompt': () => ({ ok: false, error: { code: 'session/attachment-invalid', message: 'Model "x" does not support image input.', details: { reason } } }),
+  }).connection)
+  const body = { requestId: 'r', text: 'hi', images: [{ mediaType: 'image/png', data: PNG_DATA }] }
+  await assert.rejects(facade.prompt(ACTOR, 's1', body), (e) => e instanceof FacadeError && e.status === 400 && e.code === 'IMAGES_NOT_SUPPORTED' && !e.message.includes('Model'))
+  reason = 'INVALID_IMAGE'
+  await assert.rejects(facade.prompt(ACTOR, 's1', body), (e) => e instanceof FacadeError && e.status === 400 && e.code === 'IMAGE_INVALID')
+  reason = 'SOMETHING_NEW'
+  await assert.rejects(facade.prompt(ACTOR, 's1', body), (e) => e instanceof FacadeError && e.status === 502 && e.code === 'DSH_ERROR')
+})
+
+test('模型列表：能拿到模型服务时带上 images；查询失败、超时、没有这项时不带；一直带 imageInput', async () => {
+  const catalog = /** @type {const} */ ({ ok: true, value: fixture('model-catalog.json') })
+  const plain = await new Facade(fakeConnection({ 'session/modelCatalog': catalog }).connection).models(ACTOR)
+  assert.equal(plain.imageInput, true)
+  assert.ok(plain.models.every((m) => !('images' in m)), '拿不到模型服务时不带 images')
+
+  /** @type {string[]} */
+  const asked = []
+  const llm = {
+    /** @param {string} provider */
+    async listModels(provider) {
+      asked.push(provider)
+      return [{ id: 'deepseek-flash', inputModalities: ['text', 'image'] }, { id: 'deepseek-v4-pro', inputModalities: ['text'] }]
+    },
+  }
+  const withLlm = await new Facade(fakeConnection({ 'session/modelCatalog': catalog }).connection, { llm: () => llm }).models(ACTOR)
+  assert.deepEqual(withLlm.models.map((m) => [m.model, m.images]), [['deepseek-flash', true], ['deepseek-v4-pro', false]])
+  assert.deepEqual(asked, ['deepseek-official'], '每个服务商只问一次')
+
+  const unknown = await new Facade(fakeConnection({ 'session/modelCatalog': catalog }).connection, {
+    llm: () => ({ async listModels() { return [{ id: 'deepseek-flash' }] } }),
+  }).models(ACTOR)
+  assert.ok(unknown.models.every((m) => !('images' in m)), '没有 inputModalities 表示不知道')
+
+  const failing = await new Facade(fakeConnection({ 'session/modelCatalog': catalog }).connection, {
+    llm: () => ({ async listModels() { throw new Error('boom') } }),
+  }).models(ACTOR)
+  assert.equal(failing.models.length, 2)
+  assert.ok(failing.models.every((m) => !('images' in m)))
+})
+
+test('读图片：用历史消息里见过的完整引用调用 session/attachment，返回图片字节', async () => {
+  const fake = fakeConnection({
+    'session/page': { ok: true, value: { records: [userRecord([{ type: 'image', attachment: imageRef() }, { type: 'text', text: '看图' }], 5)], hasMore: false } },
+    'session/attachment': (args) => ({ ok: true, value: { attachment: /** @type {any} */ (args.request).attachment, data: PNG_DATA } }),
+  })
+  const facade = new Facade(fake.connection)
+  const page = await facade.messages(ACTOR, 's1')
+  assert.deepEqual(page.messages[0]?.parts, [{ type: 'image', id: IMG, mediaType: 'image/png', width: 640, height: 480 }, { type: 'text', text: '看图' }])
+  const image = await facade.image(ACTOR, 's1', IMG)
+  assert.equal(image.mediaType, 'image/png')
+  assert.deepEqual(image.data, Buffer.from(PNG_DATA, 'base64'))
+  assert.deepEqual(fake.calls.map((c) => c.endpoint), ['session/page', 'session/attachment'], '缓存命中时不再翻记录')
+  assert.deepEqual(fake.calls[1]?.args, { request: { sessionId: 's1', attachment: imageRef() } })
+})
+
+test('读图片：缓存里没有时（插件重启后）从最新的消息往回翻记录找', async () => {
+  const fake = fakeConnection({
+    'session/page': (args) => {
+      const request = /** @type {any} */ (args.request)
+      return request.beforeSeq === undefined
+        ? { ok: true, value: { records: [userRecord([{ type: 'text', text: '新消息' }], 50)], hasMore: true } }
+        : { ok: true, value: { records: [userRecord([{ type: 'image', attachment: imageRef() }], 3)], hasMore: false } }
+    },
+    'session/attachment': { ok: true, value: { attachment: imageRef(), data: PNG_DATA } },
+  })
+  const image = await new Facade(fake.connection).image(ACTOR, 's1', IMG)
+  assert.deepEqual(image.data, Buffer.from(PNG_DATA, 'base64'))
+  assert.deepEqual(fake.calls.map((c) => [c.endpoint, /** @type {any} */ (c.args.request).beforeSeq]), [['session/page', undefined], ['session/page', 50], ['session/attachment', undefined]])
+})
+
+test('【反向】读图片：别的会话的图片、记录里没有的图片、格式不对的 id 一律 404，不调用 session/attachment', async () => {
+  const fake = fakeConnection({
+    'session/page': (args) => {
+      const sessionId = /** @type {any} */ (args.request).address.sessionId
+      // 只有 s1 里有这张图片；s2 里有一张 DSH 自己注入（不是用户发的）的
+      const records = sessionId === 's1'
+        ? [userRecord([{ type: 'image', attachment: imageRef() }], 2)]
+        : [{ type: 'event', event: { type: 'user/message', seq: 2, time: 2, data: { content: [{ type: 'image', attachment: imageRef('cd'.repeat(32)) }], source: { kind: 'runtime-context' }, id: 'x' } } }]
+      return { ok: true, value: { records, hasMore: false } }
+    },
+    'session/attachment': { ok: true, value: { attachment: imageRef(), data: PNG_DATA } },
+  })
+  const facade = new Facade(fake.connection)
+  await facade.messages(ACTOR, 's1')
+  /** @param {Promise<unknown>} p */
+  const notFound = (p) => assert.rejects(p, (e) => e instanceof FacadeError && e.status === 404 && e.code === 'NOT_FOUND')
+  await notFound(facade.image(ACTOR, 's2', IMG)) // s1 的图片不能经 s2 读
+  await notFound(facade.image(ACTOR, 's2', 'cd'.repeat(32)))
+  await notFound(facade.image(ACTOR, 's1', 'ef'.repeat(32)))
+  for (const id of ['AB'.repeat(32), 'ab', `sha256:${IMG}`, '../x', '']) await notFound(facade.image(ACTOR, 's1', id))
+  await notFound(facade.image(ACTOR, 'bad/id', IMG))
+  assert.equal(fake.calls.filter((c) => c.endpoint === 'session/attachment').length, 0)
+})
+
+test('【反向】读图片：DSH 返回的不是这张图片时 502，不把它发给手机', async () => {
+  const facade = new Facade(fakeConnection({
+    'session/page': { ok: true, value: { records: [userRecord([{ type: 'image', attachment: imageRef() }], 2)], hasMore: false } },
+    'session/attachment': { ok: true, value: { attachment: imageRef('cd'.repeat(32)), data: PNG_DATA } },
+  }).connection)
+  await assert.rejects(facade.image(ACTOR, 's1', IMG), (e) => e instanceof FacadeError && e.status === 502)
+})

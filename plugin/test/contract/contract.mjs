@@ -19,7 +19,8 @@ import { DshConnection, PLUGIN_ACTOR } from '../../src/dsh/connection.js'
 import { Facade, FacadeError } from '../../src/dsh/facade.js'
 import { AttentionTracker } from '../../src/dsh/attention.js'
 import { startDshWeb, DSH_VERSION, log } from '../helpers/dsh-runtime.mjs'
-import { FAIL_MESSAGE, startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE, TODO_ITEMS, GOAL_OBJECTIVE, LONG_OUTPUT_LINES } from './fake-llm.mjs'
+import { FAIL_MESSAGE, startFakeLlm, FAKE_REPLY, TOOL_DONE_REPLY, SHELL_MARKER_FILE, TODO_ITEMS, GOAL_OBJECTIVE, LONG_OUTPUT_LINES, imageReply } from './fake-llm.mjs'
+import { solidPng } from '../helpers/png.js'
 
 /** 测试里模拟的设备身份：适配层要求每次调用都说明替谁发起 */
 const ACTOR = 'd_contracttest'
@@ -433,6 +434,57 @@ async function main() {
       const digest = await facade.refreshDigest(ACTOR, sid)
       if (digest.lastTurn?.result !== 'failed') throw new Error(`摘要的最近一轮不对：${short(digest)}`)
       return short(last, 160)
+    })
+    await step('外观层：图片附件（protocol.md「图片」，落地方案 C2）——带图发出去模型收到，历史里是图片引用，按引用读回', async () => {
+      const png = solidPng(48, 32)
+      const imageSession = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      await facade.prompt(ACTOR, imageSession, { requestId: randomUUID(), text: '看看这两张图', images: [png, solidPng(20, 10, [0, 0, 255, 128])].map((b) => ({ mediaType: 'image/png', data: b.toString('base64') })) })
+      const reply = await untilAsync(async () => {
+        const page = await facade.messages(ACTOR, imageSession, { limit: 50 })
+        return page.messages.some((m) => m.role === 'assistant' && JSON.stringify(m.parts).includes(imageReply(2))) ? page : undefined
+      }, '模型回复「看到了 2 张图片」', 60_000)
+      const user = reply.messages.find((m) => m.role === 'user')
+      const images = (user?.parts ?? []).filter((p) => p.type === 'image')
+      const text = (user?.parts ?? []).filter((p) => p.type === 'text').map((p) => p.type === 'text' ? p.text : '').join('')
+      if (images.length !== 2 || text !== '看看这两张图') throw new Error(`用户消息不对：${short(user?.parts, 300)}`)
+      const first = /** @type {import('../../src/dsh/images.js').ImagePart} */ (images[0])
+      if (first.width !== 48 || first.height !== 32 || first.mediaType !== 'image/png') throw new Error(`图片信息不对：${short(first)}`)
+      // 换一个外观层（模拟插件重启，缓存是空的）：要从记录里找到引用
+      const read = await new Facade(conn).image(ACTOR, imageSession, first.id)
+      const identical = read.data.equals(png)
+      if (read.mediaType !== 'image/png' || read.data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error(`读回的不是 PNG：${read.mediaType}`)
+      // DSH 按内容的 sha256 存原始字节，不重新编码（0.2.2-rc.1 实测）
+      if (!identical) throw new Error(`读回的图片和发出的不同：${read.data.length} 字节，发出 ${png.length} 字节`)
+      return `id=${first.id.slice(0, 8)}… 读回 ${read.data.length} 字节，和发出的逐字节相同`
+    })
+    await step('【反向】外观层：图片——别的会话读不到这张图片；只读文字的模型拒绝带图的消息；坏图被拒绝', async () => {
+      const expect = async (/** @type {Promise<unknown>} */ p, /** @type {number} */ status, /** @type {string} */ code) => {
+        try { await p } catch (error) { if (error instanceof FacadeError && error.status === status && error.code === code) return; throw error }
+        throw new Error(`应当返回 ${status} ${code}`)
+      }
+      const png = solidPng(16, 16)
+      const owner = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      await facade.prompt(ACTOR, owner, { requestId: randomUUID(), text: '', images: [{ mediaType: 'image/png', data: png.toString('base64') }] })
+      const id = await untilAsync(async () => {
+        const page = await facade.messages(ACTOR, owner, { limit: 50 })
+        for (const m of page.messages) for (const p of m.parts) if (p.type === 'image') return p.id
+        return undefined
+      }, '图片出现在历史里')
+      const other = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      // DSH 的 session/attachment 不检查归属（调研文档 9.7），插件必须拦住
+      await expect(new Facade(conn).image(ACTOR, other, id), 404, 'NOT_FOUND')
+      await expect(facade.image(ACTOR, other, id), 404, 'NOT_FOUND')
+      await expect(facade.image(ACTOR, owner, 'f'.repeat(64)), 404, 'NOT_FOUND')
+
+      const textOnly = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      await facade.selectModel(ACTOR, textOnly, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+      await expect(facade.prompt(ACTOR, textOnly, { requestId: randomUUID(), text: '看图', images: [{ mediaType: 'image/png', data: png.toString('base64') }] }), 400, 'IMAGES_NOT_SUPPORTED')
+
+      const broken = Buffer.concat([png.subarray(0, 16), Buffer.from('not really a png')])
+      await expect(facade.prompt(ACTOR, other, { requestId: randomUUID(), text: '坏图', images: [{ mediaType: 'image/png', data: broken.toString('base64') }] }), 400, 'IMAGE_INVALID')
+      const history = await facade.messages(ACTOR, textOnly, { limit: 50 })
+      if (history.messages.length !== 0) throw new Error(`被拒绝的消息不应当出现在历史里：${short(history.messages)}`)
+      return '别的会话 404；deepseek-v4-pro → IMAGES_NOT_SUPPORTED；坏图 → IMAGE_INVALID'
     })
     await step('【反向】外观层：不存在的会话返回 404', async () => {
       try {

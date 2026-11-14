@@ -14,6 +14,7 @@
  */
 
 import { deriveTurnTokenUsage } from '../vendor/dsh-turn-usage.mjs'
+import { imagePart } from './images.js'
 
 /** 工具输入中单个字符串字段的上限（字符） */
 export const TOOL_INPUT_STRING_LIMIT = 2_000
@@ -34,7 +35,8 @@ export const LAST_REPLY_LIMIT = 120
 /**
  * @typedef {{ type: 'text', text: string }
  *   | { type: 'thinking', text: string }
- *   | ToolPart} MessagePart
+ *   | ToolPart
+ *   | import('./images.js').ImagePart} MessagePart
  */
 
 /**
@@ -242,7 +244,7 @@ function toolResultText(content) {
 }
 
 /**
- * 用户消息的内容块：文本原样保留，图片和文件用占位文字表示（v1 不传输附件）。
+ * 用户消息的内容块：文本原样保留，图片变成引用（protocol.md 第 4 节「图片」，引用不完整时用占位文字），文件用占位文字表示。
  * @param {unknown} content @returns {MessagePart[]}
  */
 function userParts(content) {
@@ -252,7 +254,7 @@ function userParts(content) {
   for (const block of content) {
     if (!isObject(block)) continue
     if (block.type === 'text' && typeof block.text === 'string' && block.text !== '') parts.push({ type: 'text', text: block.text })
-    else if (block.type === 'image') parts.push({ type: 'text', text: '[图片]' })
+    else if (block.type === 'image') parts.push(imagePart(block.attachment) ?? { type: 'text', text: '[图片]' })
     else if (block.type === 'file') {
       const name = isObject(block.attachment) && typeof block.attachment.name === 'string' ? block.attachment.name : ''
       parts.push({ type: 'text', text: name ? `[文件：${name}]` : '[文件]' })

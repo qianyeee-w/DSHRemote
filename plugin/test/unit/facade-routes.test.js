@@ -203,7 +203,13 @@ test('【反向】写接口：没有 token 时 401，且不访问 DSH', async ()
 test('【反向】写接口：请求体不是 JSON、Content-Type 不对、请求体过大时不访问 DSH', async () => {
   assert.equal((await post('/v1/sessions/s1/prompt', '{not json')).status, 400)
   assert.equal((await post('/v1/sessions/s1/prompt', '{}', { contentType: 'text/plain' })).status, 415)
-  assert.equal((await post('/v1/sessions/s1/prompt', { requestId: 'r', text: 'x'.repeat(46 * 1024 * 1024) })).status, 413)
+  // 超过 45 MB：插件看到 Content-Length 就回 413，客户端这时还在写。Windows 上连接会被直接重置、读不到 413，
+  // 两种都是拒绝了（下面检查没有访问 DSH）
+  const huge = await post('/v1/sessions/s1/prompt', { requestId: 'r', text: 'x'.repeat(46 * 1024 * 1024) }).then(
+    (res) => res.status,
+    (error) => (['ECONNRESET', 'EPIPE'].includes(error?.code) ? error.code : Promise.reject(error)),
+  )
+  assert.ok([413, 'ECONNRESET', 'EPIPE'].includes(huge), `超大请求体应当被拒绝：${huge}`)
   assert.equal((await post('/v1/sessions/s1/fork', { pad: 'x'.repeat(20 * 1024) })).status, 413)
   assert.equal((await post('/v1/attention/a1/answer', { pad: 'x'.repeat(20 * 1024) })).status, 413)
   assert.equal(env.calls.length, 0)

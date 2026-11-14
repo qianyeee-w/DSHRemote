@@ -112,6 +112,7 @@ DSH 接口的细节都记录在 `docs/research/dsh-session-api.md` 第 5 节（5
 - **会话页和计划页共用一个视图模型**：`ChatViewModel.onVisible`/`onHidden` 按次数算，`AppContainer.holdVisible` 按次数持有「正在看的会话」。以后再加从会话页进入、需要实时数据的页面，也照这个做，不要另建一份订阅。
 - **假模型的工具关键词要用整条用户内容判断，并且只在请求提供了对应工具时才回工具调用**：会话第一轮 DSH 注入的上下文在 Windows 和 Linux 上不一样，按「最后一段文字」判断会在 Windows 上失效；生成标题的请求也会引用用户的话，但它没有工具（B5 推送后 Windows CI 因此失败）。只有 `FAIL` 必须看最后一段，因为它要避开被合并的上一条消息。
 - **不要嵌套横向滚动**：外层带 `horizontalScroll` 的 Column 里再放带 `horizontalScroll` 的 Text，Compose 会在测量时直接抛异常。截图和 JVM 测试都发现不了，真机界面测试才会报。
+- **DSH 会自己截断很长的工具结果，还附带电脑上的路径**（调研文档 9.3c）：bash、pwsh 只保留末尾并加「[output truncated; full output: …]」，`dsh-spill-policy` 对所有工具保留首尾并在最后加「(Omitted … Full formatted result stored at: …)」。插件转发工具输出时要去掉这两种提示。只在一个平台上、用刚好不触发的数据量测过的结论不可靠：B6 一开始就因此误判。
 - **DSH 把会话标题截到 80 个 UTF-8 字节**（`maxTitleBytes`，约 26 个汉字）：插件给标题加东西（例如另开对话的「(1)」）时，要看 `session/rename` 返回的实际标题，被截掉了就缩短原标题再改。
 - **发消息不自动重发**（落地方案 B3）：请求写出后没收到回应是「不确定是否送达」，只能由用户点「查看」或「重发」。插件只在 10 分钟内按 requestId 去重，重启后记录清空，自动重发可能让 DSH 收到两条一样的消息。以后加新的发送路径也要遵守。
 - **程序往输入框里放文字时用 `TextFieldValue` 并把光标放在末尾**：纯字符串的 `BasicTextField` 被程序改了内容后光标在开头，接着写的字会插到最前面。

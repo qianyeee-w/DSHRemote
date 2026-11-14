@@ -219,11 +219,18 @@ private fun StepDetail(step: Step) {
             DiffBlock(lineDiff(old, new), clipped = isClipped(tool, old) || isClipped(tool, new))
         }
         step.action == StepAction.RUN && tool.output != null ->
-            OutputBlock(tool.output, tool.omitted, clipped = tool.omitted == null && isClipped(tool, tool.output))
+            OutputBlock(tool.output, tool.omitted, clipped = tool.omitted == null && isClipped(tool, tool.output), saved = tool.outputSaved)
         else ->
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (tool.input.isNotEmpty()) CodeSection(stringResource(R.string.chat_tool_input), prettyJson(tool.input))
                 tool.output?.takeIf { it.isNotEmpty() }?.let { CodeSection(stringResource(R.string.chat_tool_output), it) }
+                if (tool.outputSaved) {
+                    Text(
+                        stringResource(R.string.chat_output_saved),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textSecondary,
+                    )
+                }
                 if (tool.truncated) {
                     Text(
                         stringResource(R.string.chat_tool_truncated),
@@ -311,6 +318,8 @@ internal fun OutputBlock(
     output: String,
     omitted: OutputOmission?,
     clipped: Boolean,
+    /** DSH 自己截断过（完整输出存在电脑上）：原来有多少行不知道，只说拿到了多少行。 */
+    saved: Boolean = false,
 ) {
     val colors = DesignTheme.colors
     var all by rememberSaveable(output) { mutableStateOf(false) }
@@ -334,7 +343,14 @@ internal fun OutputBlock(
             )
             if (partial) {
                 Text(
-                    stringResource(R.string.chat_output_all, parts.total),
+                    if (saved) {
+                        stringResource(
+                            R.string.chat_output_got,
+                            parts.total,
+                        )
+                    } else {
+                        stringResource(R.string.chat_output_all, parts.total)
+                    },
                     style = MaterialTheme.typography.labelSmall.copy(textDecoration = TextDecoration.Underline),
                     color = colors.text,
                     modifier =
@@ -345,6 +361,14 @@ internal fun OutputBlock(
                             .testTag("output-all"),
                 )
             }
+        }
+        if (saved) {
+            Text(
+                stringResource(R.string.chat_output_saved),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(bottom = 4.dp).testTag("output-saved"),
+            )
         }
         if (clipped) {
             Text(

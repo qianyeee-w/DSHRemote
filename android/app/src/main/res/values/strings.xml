@@ -278,6 +278,8 @@
     <string name="chat_output_all">全部 %1$d 行</string>
     <string name="chat_output_partial">只拿到了前面一部分</string>
     <string name="chat_output_omitted">⋯ 中间省略了 %1$d 行 ⋯</string>
+    <string name="chat_output_saved">输出太长，DSH 只留下了一部分，完整的存在电脑上。</string>
+    <string name="chat_output_got">拿到的 %1$d 行</string>
     <string name="chat_code_copy">复制代码</string>
     <string name="chat_copied">已复制</string>
     <string name="chat_loading">正在读取消息……</string>

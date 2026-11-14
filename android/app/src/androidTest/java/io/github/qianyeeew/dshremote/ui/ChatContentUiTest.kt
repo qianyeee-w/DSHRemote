@@ -175,6 +175,31 @@ class ChatContentUiTest {
         save("chat-output-omitted")
     }
 
+    /** DSH 自己截断过的输出：说明完整的存在电脑上；原来有多少行不知道，只说拿到了多少行。 */
+    @Test
+    fun outputTruncatedByDshSaysWhatWeGot() {
+        val part =
+            ToolPart(
+                "c8",
+                "bash",
+                status = ToolStatus.DONE,
+                input = JsonObject(mapOf("command" to JsonPrimitive("npm test"))),
+                output = "line 1\nline 2\nline 3\nline 4\nline 5\n",
+                truncated = true,
+                outputSaved = true,
+            )
+        val items =
+            listOf(
+                ChatItem.Entry("u8", Message("u8", MessageRole.USER, listOf(TextPart("跑一下")), 0)),
+                ChatItem.Entry("a8", Message("a8", MessageRole.ASSISTANT, listOf(part, TextPart("跑完了")), 1)),
+            )
+        render(onlineChatState().copy(items = items))
+        compose.onNodeWithTag("steps-summary").performClick()
+        compose.onNodeWithText("npm test").performClick()
+        compose.onNodeWithTag("output-saved").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("output-all").assertTextEquals(context.getString(R.string.chat_output_got, 5))
+    }
+
     /** 给人看的样张：过程展开、改动对比和命令输出都打开，浅色和深色各一张。 */
     @Test
     fun saveStepsScreenshots() {

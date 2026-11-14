@@ -360,6 +360,7 @@ A2 开工前用户另外确认的两点（2026-11-13）：
   - App：`commandOutput` 把输出拆成开头、去掉的行数、末尾；命令输出块默认是真正的最后 4 行，「全部 M 行」的 M 是原来的总行数，展开后在开头和末尾之间写琥珀色的「⋯ 中间省略了 K 行 ⋯」；不再提示「只拿到了前面一部分」（旧插件时仍然提示）。
   - 顺手修的：B5 推送后 Windows 上的契约测试失败，原因是假模型的 `TODO`、`GOAL` 用会话第一轮的 `lastText` 判断，Windows 上 DSH 注入的上下文不同；另外生成标题的请求也被回了工具调用。改为用整条用户内容判断，并且只在请求提供了对应工具时才调用（单独的提交）。真机测试还发现展开后的输出块嵌套了横向滚动，会让 Compose 直接报错，改成只在外层滚动。
   - 验证：插件 `npm run check`（288 项，新增命令输出的开头和末尾、代理对两项，原来的截断测试改用非命令工具）、契约测试（新增 `LONGOUT`：真实 DSH 上 5,000 行的输出保留了开头和「line 5000」）、e2e、dev-server-check、load-check 通过。App `test`（350 项，连续 2 次；`commandOutput` 2 项、`omitted` 的解析）、`lint ktlintCheck`、`assembleDebug` 通过；`devServerTest` 24 项通过；小米 Android 17 上 `connectedDebugAndroidTest` 117 项通过（新增：去掉中间的命令输出默认显示真正的最后 4 行，全部行数正确，展开后写中间省略了几行）。截图看过。
+  - **补充修正（2026-11-14）**：推送后 Windows CI 上 `LONGOUT` 失败，查下来 DSH 自己有两层截断（调研文档 9.3c 的更正）：bash、pwsh 只保留末尾并加「[output truncated; full output: <路径>]」，`dsh-spill-policy` 再保留开头和末尾并在最后加「(Omitted … Full formatted result stored at: <路径> …)」。原来的实现会把这两段带路径的英文提示当成「最后 4 行」显示。现在插件去掉两种提示（路径不发给手机），标记 `outputSaved: true`；App 写「输出太长，DSH 只留下了一部分，完整的存在电脑上」，原来的总行数不知道时标签改为「拿到的 M 行」。`LONGOUT` 加大到 20,000 行，Linux 上也一定触发。验证：插件 check 295 项、contract（LONGOUT 在真实 DSH 上：两种提示都去掉、末尾是 line 20000、`outputSaved`）、e2e、dev-server-check、load-check；App test 354 项、lint、真机 122 项。
   - 第二批 B1–B6 到这里全部完成。
 
 - **C1 对话分支（2026-11-14）**

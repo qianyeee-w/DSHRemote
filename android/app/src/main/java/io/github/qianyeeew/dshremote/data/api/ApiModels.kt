@@ -307,6 +307,8 @@ data class ToolPart(
     val truncated: Boolean = false,
     /** 命令输出去掉了中间（protocol.md 5.2，落地方案 B6）：[output] 是开头加末尾。旧插件没有。 */
     val omitted: OutputOmission? = null,
+    /** DSH 自己截断过结果，完整输出存在电脑上（protocol.md 5.2）。原来有多少行不知道。 */
+    val outputSaved: Boolean = false,
 ) : MessagePart
 
 /** 命令输出去掉中间的位置：[output] 的前 [offset] 个字符是开头，之后是末尾；中间去掉了 [chars] 个字符、[lines] 个换行。 */

@@ -20,6 +20,7 @@ import io.github.qianyeeew.dshremote.ui.attention.AttentionScreen
 import io.github.qianyeeew.dshremote.ui.attention.AttentionViewModel
 import io.github.qianyeeew.dshremote.ui.attention.LiveAttentionResponder
 import io.github.qianyeeew.dshremote.ui.attention.attentionSession
+import io.github.qianyeeew.dshremote.ui.chat.ChatHandoff
 import io.github.qianyeeew.dshremote.ui.chat.ChatScreen
 import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
 import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
@@ -148,6 +149,11 @@ fun AppNavigation(
                 viewModel = viewModel { chatViewModel(container, route.hostId, route.sessionId) },
                 onBack = { nav.popBackStack() },
                 onOpenPlan = { nav.navigate(PlanRoute(route.hostId, route.sessionId)) },
+                // 另开的对话：叠在原会话上面（返回回到原会话，用户确认），那条消息的文字放进它的输入框
+                onForked = { done ->
+                    container.handoffs.put(route.hostId, done.sessionId, ChatHandoff.Forked(done.text, done.workspaceAttached))
+                    nav.navigate(SessionRoute(route.hostId, done.sessionId))
+                },
             )
         }
         composable<PlanRoute> { entry ->

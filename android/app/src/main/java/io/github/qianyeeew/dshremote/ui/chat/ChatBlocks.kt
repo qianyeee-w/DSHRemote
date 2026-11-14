@@ -23,6 +23,8 @@ sealed interface ChatBlock {
         override val key: String,
         val text: String,
         val local: LocalMessage? = null,
+        /** 这条消息属于第几轮（protocol.md 5.2）；本地还没进会话的消息、推断不出轮次时为 null。另开对话要用它。 */
+        val turn: Int? = null,
     ) : ChatBlock
 
     /** 一段回复正文（Markdown）。 */
@@ -137,7 +139,12 @@ fun chatBlocks(
                 enter(message.turn)
                 if (message.role == MessageRole.USER) {
                     flush()
-                    blocks += ChatBlock.User(item.key, message.parts.filterIsInstance<TextPart>().joinToString("") { it.text })
+                    blocks +=
+                        ChatBlock.User(
+                            item.key,
+                            message.parts.filterIsInstance<TextPart>().joinToString("") { it.text },
+                            turn = message.turn,
+                        )
                     continue
                 }
                 message.parts.forEachIndexed { index, part ->

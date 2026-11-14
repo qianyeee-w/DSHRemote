@@ -84,6 +84,12 @@ class ChatBlocksTest {
         assertTrue(blocks[0] is ChatBlock.Steps && blocks[2] is ChatBlock.Steps)
     }
 
+    /** 落地方案 C1：另开对话要知道这条消息是第几轮；推断不出轮次时没有。 */
+    @Test
+    fun userBlocksCarryTheirTurn() {
+        assertEquals(listOf(3, null), chatBlocks(listOf(user("u1", "你好", turn = 3), user("u2", "再问"))).map { (it as ChatBlock.User).turn })
+    }
+
     @Test
     fun localMessagesAreUserBlocksWithTheirStatus() {
         val local = LocalMessage(OutgoingMessage("你好", PromptMode.STEER), OutgoingStatus.SENT)

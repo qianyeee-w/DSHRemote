@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.Attention
+import io.github.qianyeeew.dshremote.data.api.ForkResult
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
 import io.github.qianyeeew.dshremote.data.api.ModelList
@@ -46,6 +47,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 /** 会话详情用到的接口（ViewModel 测试中替换成假的实现）。不在线时抛出 [OfflineException]。 */
 interface ChatBackend {
@@ -74,6 +76,12 @@ interface ChatBackend {
 
     /** 计划（落地方案 B5）。旧插件没有这个接口。 */
     suspend fun plan(): SessionPlan = SessionPlan()
+
+    /** 从第 [beforeTurn] 轮之前另开一个对话（落地方案 C1）。重试时传同一个 [requestId]。 */
+    suspend fun fork(
+        beforeTurn: Int,
+        requestId: String,
+    ): ForkResult = throw OfflineException()
 }
 
 /** 通过实时连接订阅，通过 [ConnectionManager.api] 调用接口。 */
@@ -107,6 +115,11 @@ class LiveChatBackend(
     override suspend fun usage(): SessionUsage = api().usage(sessionId)
 
     override suspend fun plan(): SessionPlan = api().plan(sessionId)
+
+    override suspend fun fork(
+        beforeTurn: Int,
+        requestId: String,
+    ): ForkResult = api().fork(sessionId, requestId, beforeTurn)
 
     private fun api() = connections.api(hostId) ?: throw OfflineException()
 
@@ -193,6 +206,33 @@ enum class ChatNotice {
 
     /** 「查看」之后会话里还没有这条消息。 */
     NOT_IN_SESSION,
+
+    /** 另开的对话建好了，但没有归到原来的项目（落地方案 C1）。 */
+    FORK_NOT_IN_PROJECT,
+}
+
+/** 另开对话的进度（落地方案 C1）。 */
+sealed interface ForkState {
+    data object Idle : ForkState
+
+    data class Running(
+        val turn: Int,
+    ) : ForkState
+
+    /** 没成功，可以重试：重试沿用同一个 requestId，插件去重，不会分出两个。 */
+    data class Failed(
+        val turn: Int,
+    ) : ForkState
+
+    /** 新会话建好了：界面进入它（[text] 放进它的输入框），然后调 [ChatViewModel.consumeFork]。 */
+    data class Done(
+        val sessionId: String,
+        val text: String,
+        val workspaceAttached: Boolean,
+    ) : ForkState {
+        /** 不输出消息内容。 */
+        override fun toString(): String = "Done($sessionId, ${text.length} 个字符, $workspaceAttached)"
+    }
 }
 
 /** 输入框里原地展开的模型或审批方式的选项（设计规格 6.10）。 */
@@ -246,7 +286,12 @@ class ChatViewModel(
     private val saveDraft: (String) -> Unit = {},
 ) : ViewModel() {
     /** 模型或审批方式没设置成功、消息还没发时，放回输入框的文字。 */
-    val initialDraft: String? = (handoff as? ChatHandoff.NotSent)?.text
+    val initialDraft: String? =
+        when (handoff) {
+            is ChatHandoff.NotSent -> handoff.text
+            is ChatHandoff.Forked -> handoff.text.takeIf { it.isNotBlank() }
+            else -> null
+        }
 
     private val _restoredDraft = MutableStateFlow<String?>(null)
 
@@ -326,7 +371,22 @@ class ChatViewModel(
         viewModelScope.launch { state.collect { s -> attention.shown(s.attention.map { it.attentionId }) } }
     }
 
-    private val _notice = MutableStateFlow(if (handoff is ChatHandoff.NotSent) ChatNotice.SETUP_FAILED else null)
+    private val _notice =
+        MutableStateFlow(
+            when (handoff) {
+                is ChatHandoff.NotSent -> ChatNotice.SETUP_FAILED
+                is ChatHandoff.Forked -> if (handoff.workspaceAttached) null else ChatNotice.FORK_NOT_IN_PROJECT
+                else -> null
+            },
+        )
+
+    private val _fork = MutableStateFlow<ForkState>(ForkState.Idle)
+
+    /** 另开对话的进度。 */
+    val fork: StateFlow<ForkState> = _fork.asStateFlow()
+
+    /** 每一轮另开对话用的 requestId：失败后重试沿用同一个。 */
+    private val forkRequests = HashMap<Int, String>()
     val notice: StateFlow<ChatNotice?> = _notice.asStateFlow()
 
     private val _picker = MutableStateFlow<Picker>(Picker.Closed)
@@ -457,6 +517,36 @@ class ChatViewModel(
             } catch (_: OfflineException) {
             }
         }
+    }
+
+    /**
+     * 从第 [turn] 轮之前另开一个对话，新对话带着这条消息之前的内容（设计规格 7.13）。[text] 是这条消息的文字，
+     * 成功后放进新对话的输入框（用户确认）。只发一次；失败后由用户点重试。
+     */
+    fun startFork(
+        turn: Int,
+        text: String,
+    ) {
+        if (_fork.value is ForkState.Running || turn < 1) return
+        val requestId = forkRequests.getOrPut(turn) { UUID.randomUUID().toString() }
+        _fork.value = ForkState.Running(turn)
+        viewModelScope.launch {
+            _fork.value =
+                try {
+                    val result = backend.fork(turn, requestId)
+                    forkRequests.remove(turn)
+                    ForkState.Done(result.sessionId, text, result.workspaceAttached)
+                } catch (_: ApiException) {
+                    ForkState.Failed(turn)
+                } catch (_: OfflineException) {
+                    ForkState.Failed(turn)
+                }
+        }
+    }
+
+    /** 收起确认面板，或者界面已经进入了新会话。进行中时不收起。 */
+    fun consumeFork() {
+        if (_fork.value !is ForkState.Running) _fork.value = ForkState.Idle
     }
 
     /** 输入框里的字变了：停顿一下再存（落地方案 B3）。空白等于删掉草稿。 */

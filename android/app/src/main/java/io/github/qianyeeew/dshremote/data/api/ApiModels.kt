@@ -497,3 +497,10 @@ internal data class ErrorBody(
     val code: String,
     val message: String? = null,
 )
+
+/** 另开对话的结果。[workspaceAttached] 为 false：新会话建好了，但没有归到原来的项目（DSH 的部分成功），不要重试。 */
+@Serializable
+data class ForkResult(
+    val sessionId: String,
+    val workspaceAttached: Boolean = true,
+)

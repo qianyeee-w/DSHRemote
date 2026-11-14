@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import io.github.qianyeeew.dshremote.data.api.ApiException
 import io.github.qianyeeew.dshremote.data.api.ContextUsage
+import io.github.qianyeeew.dshremote.data.api.ForkResult
 import io.github.qianyeeew.dshremote.data.api.GoalStatus
 import io.github.qianyeeew.dshremote.data.api.Message
 import io.github.qianyeeew.dshremote.data.api.MessagePage
@@ -51,6 +52,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -469,6 +471,73 @@ class ChatViewModelTest {
             assertEquals(listOf("任务"), notSent)
         }
 
+    /**
+     * 落地方案 C1：另开对话成功后给出新会话和那条消息的文字；失败后可以重试，重试沿用同一个 requestId
+     * （插件据此去重，不会分出两个）；进行中再点不会再发。
+     */
+    @Test
+    fun forkRetriesWithTheSameRequestIdAndNeverTwiceAtOnce() {
+        val vm = visible()
+        backend.forkError = ApiException.Network(IOException("x"))
+        vm.startFork(3, "用第一种")
+        assertEquals(ForkState.Failed(3), vm.fork.value)
+        backend.forkError = null
+        backend.forkGate = CompletableDeferred()
+        vm.startFork(3, "用第一种")
+        assertEquals(ForkState.Running(3), vm.fork.value)
+        vm.startFork(3, "用第一种")
+        vm.consumeFork()
+        assertEquals(ForkState.Running(3), vm.fork.value)
+        backend.forkGate!!.complete(Unit)
+        assertEquals(ForkState.Done("session-child2", "用第一种", true), vm.fork.value)
+        assertEquals(2, backend.forks.size)
+        assertEquals(backend.forks[0], backend.forks[1])
+        vm.consumeFork()
+        assertEquals(ForkState.Idle, vm.fork.value)
+        // 成功之后再从同一轮另开是新的一次
+        vm.startFork(3, "用第一种")
+        assertNotEquals(backend.forks[0].second, backend.forks[2].second)
+    }
+
+    /** 新会话：那条消息的文字放进输入框（存成草稿）；没归到原来的项目时提示一句。 */
+    @Test
+    fun forkedSessionStartsWithTheTextAndWarnsWhenNotInTheProject() {
+        val saved = mutableListOf<String>()
+        val vm =
+            ChatViewModel(
+                "h1",
+                SESSION,
+                states,
+                backend,
+                { _, _ -> },
+                resolved,
+                handoff =
+                    ChatHandoff.Forked(
+                        "用第一种",
+                        workspaceAttached = false,
+                    ),
+                saveDraft = {
+                    saved +=
+                        it
+                },
+            )
+        assertEquals("用第一种", vm.initialDraft)
+        assertEquals(listOf("用第一种"), saved)
+        assertEquals(ChatNotice.FORK_NOT_IN_PROJECT, vm.notice.value)
+        assertTrue(backend.prompts.isEmpty())
+        val attached =
+            ChatViewModel(
+                "h1",
+                SESSION,
+                states,
+                backend,
+                { _, _ -> },
+                resolved,
+                handoff = ChatHandoff.Forked("x", workspaceAttached = true),
+            )
+        assertNull(attached.notice.value)
+    }
+
     /** 落地方案 B5：订阅生效（Resync）时读计划，之后按推送整条替换；读不到时保留上一次的。 */
     @Test
     fun planIsReadOnResyncAndReplacedByPushes() {
@@ -675,6 +744,21 @@ class ChatViewModelTest {
                 throw ApiException.Network(IOException("x"))
             }
             return pages.getValue(before)
+        }
+
+        val forks = mutableListOf<Pair<Int, String>>()
+        var forkError: Exception? = null
+        var forkGate: CompletableDeferred<Unit>? = null
+
+        override suspend fun fork(
+            beforeTurn: Int,
+            requestId: String,
+        ): ForkResult {
+            check()
+            forks += beforeTurn to requestId
+            forkGate?.await()
+            forkError?.let { throw it }
+            return ForkResult("session-child${forks.size}", workspaceAttached = true)
         }
 
         var plan: SessionPlan? = null

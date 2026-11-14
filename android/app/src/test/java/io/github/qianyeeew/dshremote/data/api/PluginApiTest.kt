@@ -459,6 +459,20 @@ class PluginApiTest {
             assertApiError<ApiException.Network> { PluginApi(client, HostAddress("127.0.0.1", closedPort), token).info() }
         }
 
+    /** 落地方案 C1：另开对话的请求和结果。 */
+    @Test
+    fun forkSendsRequestIdAndBeforeTurn() =
+        runBlocking<Unit> {
+            respond("""{"sessionId":"session-child","workspaceAttached":false}""")
+            assertEquals(ForkResult("session-child", workspaceAttached = false), api.fork("s1", "req-1", beforeTurn = 3))
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("/v1/sessions/s1/fork", request.url.encodedPath)
+            val body = Json.parseToJsonElement(request.body!!.utf8()).jsonObject
+            assertEquals("req-1", body["requestId"]!!.jsonPrimitive.content)
+            assertEquals("3", body["beforeTurn"]!!.jsonPrimitive.content)
+        }
+
     /** 落地方案 B5：计划；旧插件 404。 */
     @Test
     fun planParsesGoalAndSteps() =

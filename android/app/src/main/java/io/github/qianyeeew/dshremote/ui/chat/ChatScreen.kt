@@ -3,6 +3,8 @@ package io.github.qianyeeew.dshremote.ui.chat
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -43,14 +45,17 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -88,6 +93,10 @@ class ChatActions(
     val onRefreshUsage: () -> Unit = {},
     /** 点了计划条：打开计划页。 */
     val onOpenPlan: () -> Unit = {},
+    /** 确认另开对话：从第 turn 轮之前，text 是那条消息的文字（落地方案 C1）。 */
+    val onFork: (turn: Int, text: String) -> Unit = { _, _ -> },
+    /** 收起另开对话的确认面板。 */
+    val onCloseFork: () -> Unit = {},
     val onCancelRun: () -> Unit = {},
     val onLoadOlder: () -> Unit = {},
     val onRetryLoad: () -> Unit = {},
@@ -104,12 +113,21 @@ fun ChatScreen(
     viewModel: ChatViewModel,
     onBack: () -> Unit,
     onOpenPlan: () -> Unit = {},
+    /** 另开的对话建好了：进入它（text 放进它的输入框）。 */
+    onForked: (ForkState.Done) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val picker by viewModel.picker.collectAsStateWithLifecycle()
     val attentionNotice by viewModel.attention.notice.collectAsStateWithLifecycle()
     val restoredDraft by viewModel.restoredDraft.collectAsStateWithLifecycle()
+    val fork by viewModel.fork.collectAsStateWithLifecycle()
+    LaunchedEffect(fork) {
+        (fork as? ForkState.Done)?.let {
+            onForked(it)
+            viewModel.consumeFork()
+        }
+    }
     // 只在页面可见时订阅这个会话（插件按引用计数订阅，m2-android.md 3.3「订阅」）
     LifecycleStartEffect(viewModel) {
         viewModel.onVisible()
@@ -128,6 +146,8 @@ fun ChatScreen(
                 onDraftChange = viewModel::draftChanged,
                 onRefreshUsage = viewModel::refreshUsage,
                 onOpenPlan = onOpenPlan,
+                onFork = viewModel::startFork,
+                onCloseFork = viewModel::consumeFork,
                 onCancelRun = viewModel::cancelRun,
                 onLoadOlder = viewModel::loadOlder,
                 onRetryLoad = viewModel::retryLoad,
@@ -143,6 +163,7 @@ fun ChatScreen(
         onDismissAttentionNotice = viewModel.attention::dismissNotice,
         initialDraft = viewModel.initialDraft,
         restoredDraft = restoredDraft,
+        fork = fork,
     )
 }
 
@@ -157,6 +178,7 @@ fun ChatContent(
     onDismissAttentionNotice: () -> Unit = {},
     initialDraft: String? = null,
     restoredDraft: String? = null,
+    fork: ForkState = ForkState.Idle,
 ) {
     val snackbar = remember { SnackbarHostState() }
     val elsewhere = stringResource(R.string.attention_elsewhere)
@@ -178,6 +200,21 @@ fun ChatContent(
     }
     // 点链接先确认（m2-android.md 3.4），Markdown 库通过 LocalUriHandler 打开链接
     val confirmingHandler = remember { ConfirmingUriHandler { pendingLink = it } }
+    // 长按一条自己的消息（设计规格 7.13）：先是「复制」「另开对话」，选了另开就是确认面板
+    var actionsFor by remember { mutableStateOf<ChatBlock.User?>(null) }
+    var forking by remember { mutableStateOf<ChatBlock.User?>(null) }
+    val target = forking ?: actionsFor
+    val closeActions = {
+        actionsFor = null
+        if (forking != null) {
+            forking = null
+            actions.onCloseFork()
+        }
+    }
+    BackHandler(enabled = target != null) { closeActions() }
+    // 新会话建好了（ChatScreen 会进入它）：收起确认面板，返回时不再看到它
+    LaunchedEffect(fork) { if (fork is ForkState.Done) forking = null }
+    val clipboard = LocalClipboardManager.current
 
     Scaffold(topBar = { ChatTopBar(state, actions) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         // 输入区这一栏的实际高度（已经扣掉键盘），面板最多占一半，其余都给消息列表。
@@ -201,19 +238,53 @@ fun ChatContent(
                     val onCopied = {
                         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
                     }
-                    MessageList(state, actions, onCopied = { onCopied() }, modifier = Modifier.weight(1f))
+                    MessageList(
+                        state,
+                        actions,
+                        onCopied = { onCopied() },
+                        modifier = Modifier.weight(1f),
+                        highlightKey = target?.key,
+                        onLongPress = { actionsFor = it },
+                        onDismissTarget = closeActions,
+                    )
                 }
-                // 不能和列表各用一个权重：面板用不完自己那一半时，剩下的空间会空着，输入框就不贴底了
-                AttentionPanel(state, attentionActions, Modifier.heightIn(max = panelMax))
-                ChatComposer(
-                    state,
-                    actions,
-                    picker = picker,
-                    initialText = initialDraft.orEmpty(),
-                    restoredDraft = restoredDraft,
-                    attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
-                    onAnswer = attentionActions.onAnswerWithCustom,
-                )
+                val choosing = actionsFor
+                val confirming = forking
+                when {
+                    confirming != null ->
+                        ForkConfirmPanel(
+                            fork,
+                            onCancel = closeActions,
+                            onConfirm = { confirming.turn?.let { actions.onFork(it, confirming.text) } },
+                        )
+                    choosing != null ->
+                        MessageActionsPanel(
+                            canFork = choosing.turn != null && choosing.local == null,
+                            online = state.online,
+                            onCopy = {
+                                clipboard.setText(AnnotatedString(choosing.text))
+                                actionsFor = null
+                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch { snackbar.showSnackbar(copied) }
+                            },
+                            onFork = {
+                                forking = choosing
+                                actionsFor = null
+                            },
+                        )
+                    else -> {
+                        // 不能和列表各用一个权重：面板用不完自己那一半时，剩下的空间会空着，输入框就不贴底了
+                        AttentionPanel(state, attentionActions, Modifier.heightIn(max = panelMax))
+                        ChatComposer(
+                            state,
+                            actions,
+                            picker = picker,
+                            initialText = initialDraft.orEmpty(),
+                            restoredDraft = restoredDraft,
+                            attention = if (state.online) composerAttention(state.attention) else ComposerAttention.None,
+                            onAnswer = attentionActions.onAnswerWithCustom,
+                        )
+                    }
+                }
             }
         }
     }
@@ -243,6 +314,10 @@ private fun MessageList(
     actions: ChatActions,
     onCopied: () -> Unit,
     modifier: Modifier,
+    /** 正在对它操作的那条消息：加描边，其余内容变淡，点列表任何地方收起（设计规格 7.13）。 */
+    highlightKey: String? = null,
+    onLongPress: (ChatBlock.User) -> Unit = {},
+    onDismissTarget: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
@@ -302,16 +377,29 @@ private fun MessageList(
             }
         }
         items(reversed, key = { it.key }, contentType = { it::class }) { block ->
-            when (block) {
-                is ChatBlock.User ->
-                    UserBubble(
-                        block.text,
-                        block.local,
-                        onCheck = { block.local?.let { actions.onCheckSend(it.outgoing.requestId) } },
-                    ) { block.local?.let { actions.onRetrySend(it.outgoing.requestId) } }
-                is ChatBlock.Reply -> MarkdownText(block.text, onCopied)
-                is ChatBlock.Steps -> StepsView(block)
-                is ChatBlock.TurnEnd -> TurnEndLine(block.turn)
+            val faded = highlightKey != null && block.key != highlightKey
+            Box(Modifier.alpha(if (faded) FADED_ALPHA else 1f)) {
+                when (block) {
+                    is ChatBlock.User ->
+                        UserBubble(
+                            block.text,
+                            block.local,
+                            onCheck = { block.local?.let { actions.onCheckSend(it.outgoing.requestId) } },
+                            onLongPress = { onLongPress(block) },
+                            highlighted = block.key == highlightKey,
+                        ) { block.local?.let { actions.onRetrySend(it.outgoing.requestId) } }
+                    is ChatBlock.Reply -> MarkdownText(block.text, onCopied)
+                    is ChatBlock.Steps -> StepsView(block)
+                    is ChatBlock.TurnEnd -> TurnEndLine(block.turn)
+                }
+                // 变淡的内容点了只是收起，不触发它自己的操作
+                if (faded) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .clickable(interactionSource = null, indication = null, onClick = onDismissTarget),
+                    )
+                }
             }
         }
         item(key = "history-header") { HistoryHeader(state, actions) }
@@ -455,7 +543,11 @@ private fun noticeText(notice: ChatNotice): Int =
         ChatNotice.CHANGE_FAILED -> R.string.chat_notice_change_failed
         ChatNotice.SETUP_FAILED -> R.string.chat_notice_setup_failed
         ChatNotice.NOT_IN_SESSION -> R.string.chat_notice_not_in_session
+        ChatNotice.FORK_NOT_IN_PROJECT -> R.string.chat_notice_fork_not_in_project
     }
+
+/** 对一条消息操作时，其余内容的透明度（设计规格 7.13「其余内容变淡」）。 */
+private const val FADED_ALPHA = 0.35f
 
 /** 离底部不到这么多像素也算停在底部。 */
 private const val STICK_TOLERANCE_PX = 48

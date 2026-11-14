@@ -18,6 +18,18 @@ sealed interface ChatHandoff {
         val status: OutgoingStatus = OutgoingStatus.FAILED,
     ) : ChatHandoff
 
+    /**
+     * 另开的对话（落地方案 C1）：[text] 是那条消息的文字，放进新会话的输入框（存成草稿，不发送）；
+     * [workspaceAttached] 为 false 时 DSH 没能把它归到原来的项目，进入时提示一句。
+     */
+    data class Forked(
+        val text: String,
+        val workspaceAttached: Boolean,
+    ) : ChatHandoff {
+        /** 不输出消息内容。 */
+        override fun toString(): String = "Forked(${text.length} 个字符, $workspaceAttached)"
+    }
+
     /** 模型或审批方式没有设置成功，消息还没发：文字放回输入框，并提示原因。 */
     data class NotSent(
         val text: String,

@@ -159,6 +159,20 @@ class PluginApi(
         }
     }
 
+    /**
+     * 从第 [beforeTurn] 轮之前另开一个对话（protocol.md 第 4 节「另开对话」，落地方案 C1）。
+     * 回执丢失后重试时传同一个 [requestId]：插件 10 分钟内按它去重，不会分出两个会话。
+     */
+    suspend fun fork(
+        sessionId: String,
+        requestId: String,
+        beforeTurn: Int,
+    ): ForkResult {
+        requireId(sessionId)
+        val body = encode(ForkRequest.serializer(), ForkRequest(requestId, beforeTurn))
+        return send("POST", listOf("sessions", sessionId, "fork"), body = body) { decode(ForkResult.serializer(), it) }
+    }
+
     /** 停止当前任务。会话空闲时也成功。 */
     suspend fun cancel(sessionId: String) {
         requireId(sessionId)
@@ -434,3 +448,9 @@ private suspend fun Call.await(): Response =
             },
         )
     }
+
+@Serializable
+private class ForkRequest(
+    val requestId: String,
+    val beforeTurn: Int,
+)

@@ -1,7 +1,9 @@
 package io.github.qianyeeew.dshremote.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -56,23 +60,42 @@ fun UserBubble(
     text: String,
     local: LocalMessage?,
     onCheck: () -> Unit = {},
+    /** 长按：底部出现「复制」「另开对话」（设计规格 7.13）。取代原来长按选字。 */
+    onLongPress: (() -> Unit)? = null,
+    /** 正在对它操作：加一圈主文字色描边。 */
+    highlighted: Boolean = false,
     onRetry: () -> Unit,
 ) {
     val colors = DesignTheme.colors
+    val haptic = LocalHapticFeedback.current
+    val shape = RoundedCornerShape(18.dp)
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-        SelectionContainer {
-            Text(
-                text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.text,
-                modifier =
-                    Modifier
-                        .widthIn(max = 280.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(colors.fill)
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-            )
-        }
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.text,
+            modifier =
+                Modifier
+                    .widthIn(max = 280.dp)
+                    .clip(shape)
+                    .background(colors.fill)
+                    .let { if (highlighted) it.border(1.5.dp, colors.text, shape) else it }
+                    .let { m ->
+                        if (onLongPress == null) {
+                            m
+                        } else {
+                            m.combinedClickable(
+                                onLongClickLabel = stringResource(R.string.chat_message_actions),
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onLongPress()
+                                },
+                                onClick = {},
+                            )
+                        }
+                    }.padding(horizontal = 14.dp, vertical = 9.dp)
+                    .testTag("user-bubble"),
+        )
         if (local != null) SendStatus(local, onRetry, onCheck)
     }
 }

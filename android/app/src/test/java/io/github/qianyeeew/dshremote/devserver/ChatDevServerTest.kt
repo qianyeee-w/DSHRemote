@@ -18,6 +18,7 @@ import io.github.qianyeeew.dshremote.ui.chat.ChatBlock
 import io.github.qianyeeew.dshremote.ui.chat.ChatItem
 import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.ChatViewModel
+import io.github.qianyeeew.dshremote.ui.chat.ForkState
 import io.github.qianyeeew.dshremote.ui.chat.LiveChatBackend
 import io.github.qianyeeew.dshremote.ui.chat.Picker
 import io.github.qianyeeew.dshremote.ui.chat.chatBlocks
@@ -124,6 +125,39 @@ class ChatDevServerTest {
             assertTrue(chatBlocks(ended.items, ended.turns).last() is ChatBlock.TurnEnd)
             val summary = await("摘要里的最近一轮") { it.session?.lastTurn?.result == TurnResult.COMPLETED }.session!!
             assertTrue("最后一句回复：${summary.lastReply}", summary.lastReply.orEmpty().isNotBlank())
+        }
+
+    /** 落地方案 C1：从第 2 轮之前另开对话，新会话只带着第 1 轮，标题加编号，出现在会话列表里。 */
+    @Test
+    fun forkKeepsOnlyTheTurnsBeforeTheMessage() =
+        runBlocking<Unit> {
+            for ((index, text) in listOf("第一个问题", "第二个问题").withIndex()) {
+                assertTrue(withContext(main) { vm.send(text) })
+                await("第 ${index + 1} 轮结束", timeoutMillis = 60_000) { s -> s.turns.values.count { it.result != null } > index }
+            }
+            withContext(main) { vm.startFork(2, "第二个问题") }
+            val done = withTimeout(30_000) { vm.fork.first { it is ForkState.Done } } as ForkState.Done
+            assertTrue(done.workspaceAttached)
+            assertEquals("第二个问题", done.text)
+            val child = api.messages(done.sessionId)
+            assertEquals(
+                listOf("第一个问题"),
+                child.messages.filter { it.role == MessageRole.USER }.map { m ->
+                    m.parts.filterIsInstance<TextPart>().joinToString("") { it.text }
+                },
+            )
+            val listed =
+                withTimeout(20_000) {
+                    manager.states.first {
+                        it[HOST_ID]
+                            ?.sessions
+                            ?.get(done.sessionId)
+                            ?.title
+                            ?.endsWith(" (1)") ==
+                            true
+                    }
+                }
+            assertTrue(listed[HOST_ID]!!.sessions[done.sessionId]!!.title!!.isNotBlank())
         }
 
     /** 落地方案 B5：模型写了任务清单，会话页通过推送（plan.updated）拿到，和 GET /plan 一致。 */

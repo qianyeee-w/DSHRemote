@@ -11,6 +11,7 @@
  *   "STREAM"→ 用约 1 秒分块输出一段文本（STREAM_REPLY），用来观察流式输出
  *   "MARKDOWN" → 分块慢慢输出一段包含标题、列表、引用、长代码块、宽表格和链接的 Markdown（MARKDOWN_REPLY），
  *               用来在手机上检查 Markdown 渲染和流式输出时是否闪烁
+ *   "LONGOUT" → 运行一条输出 LONG_OUTPUT_LINES 行的命令（落地方案 B6）
  *   "TODO"  → 调用 todo_write，写一份三步的任务清单（TODO_ITEMS，落地方案 B5）
  *   "GOAL"  → 调用 create_goal，创建目标（GOAL_OBJECTIVE），轮数上限 1
  *   其他     → 直接回复一段文本（包含 FAKE_REPLY）
@@ -21,6 +22,8 @@ import http from 'node:http'
 export const FAKE_REPLY = '你好，这是假模型的回复。'
 export const STREAM_REPLY = '这是一段分块慢慢输出的回复，用来验证手机上能实时看到模型正在输出的内容。'
 export const TOOL_DONE_REPLY = '已完成，结果收到了。'
+/** LONGOUT 关键词时命令输出的行数（「line 1」到「line N」） */
+export const LONG_OUTPUT_LINES = 5_000
 /** TODO 关键词时模型写的任务清单 */
 export const TODO_ITEMS = [
   { content: '读连接状态的代码', status: 'completed' },
@@ -179,10 +182,19 @@ export async function startFakeLlm() {
         // 不可重试的错误（DSH 归为 INVALID_REQUEST）：这一轮以 error 结束（protocol.md 5.4 的 failed）
         res.writeHead(400, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: FAIL_MESSAGE } }))
-      } else if (lastText.includes('TODO')) {
+      } else if (text.includes('LONGOUT') && tools.some((n) => /^(bash|pwsh)$/.test(n))) {
+        // 落地方案 B6：输出很长的命令，检查插件保留开头和末尾。不提权，不需要审批
+        const shell = tools.find((n) => /^(bash|pwsh)$/.test(n)) ?? 'bash'
+        void toolReply(res, shell, {
+          command: shell === 'pwsh' ? `1..${LONG_OUTPUT_LINES} | ForEach-Object { "line $_" }` : `seq -f 'line %g' 1 ${LONG_OUTPUT_LINES}`,
+          description: 'long output',
+        })
+      // 工具关键词用整条用户内容判断（会话第一轮 DSH 注入的上下文在各平台不一样，Windows 上 lastText 可能取到注入段），
+      // 并且只在这次请求提供了对应的工具时才调用：生成标题的请求也会引用用户的话，但它没有工具
+      } else if (text.includes('TODO') && tools.includes('todo_write')) {
         // 落地方案 B5：模型写任务清单（DSH 的 todos 投影）
         void toolReply(res, 'todo_write', { todos: TODO_ITEMS })
-      } else if (lastText.includes('GOAL')) {
+      } else if (text.includes('GOAL') && tools.includes('create_goal')) {
         // 落地方案 B5：模型创建一个长期目标（DSH 的 goal 投影）。轮数上限 1，DSH 不会一直自动续跑
         void toolReply(res, 'create_goal', { objective: GOAL_OBJECTIVE, max_goal_rounds: 1 })
       } else if (text.includes('ASK')) {

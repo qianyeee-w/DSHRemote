@@ -64,7 +64,7 @@ export function sendError(res, status, code, message, headers = {}) {
  * 路由用到的外观层操作。第一个参数都是调用方的 deviceId。
  * @typedef {Pick<import('../dsh/facade.js').Facade, 'workspaces' | 'sessions' | 'models' | 'permissionPresets' | 'messages' | 'usage' | 'plan'
  *   | 'directories' | 'createDirectory' | 'registerWorkspace'
- *   | 'createSession' | 'prompt' | 'cancel' | 'selectModel' | 'setPermissionPreset' | 'answerAttention'>} FacadeApi
+ *   | 'createSession' | 'prompt' | 'fork' | 'cancel' | 'selectModel' | 'setPermissionPreset' | 'answerAttention'>} FacadeApi
  */
 
 /**
@@ -223,6 +223,18 @@ export const ROUTES = Object.freeze([
     async handle(req, res, ctx, auth) {
       const body = await readJsonBody(req, { limit: PROMPT_BODY_LIMIT })
       sendJson(res, 200, await ctx.facade.prompt(deviceIdOf(auth), auth.params.id ?? '', body))
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/{id}/fork',
+    auth: true,
+    async handle(req, res, ctx, auth) {
+      const body = await readJsonBody(req)
+      const result = await ctx.facade.fork(deviceIdOf(auth), auth.params.id ?? '', body)
+      // 新会话改过名：让实时流马上重读会话列表
+      ctx.sessionChanged?.(result.sessionId)
+      sendJson(res, 200, result)
     },
   },
   {

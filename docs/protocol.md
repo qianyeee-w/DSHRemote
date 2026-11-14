@@ -98,6 +98,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 | GET | `/v1/sessions/{id}/usage` | 需要 | 用量与上下文：`{ context, total }`，见下方「用量」 |
 | GET | `/v1/sessions/{id}/plan` | 需要 | 计划：`{ goal, steps }`，见下方「计划」 |
 | POST | `/v1/sessions/{id}/prompt` | 需要 | 发消息 `{ requestId, text, mode?: "queue" \| "steer" }`，返回 `{ accepted: true }`。见下方「发消息」 |
+| POST | `/v1/sessions/{id}/fork` | 需要 | 从某一轮之前另开一个对话：`{ requestId, beforeTurn }` → `{ sessionId, workspaceAttached }`，见下方「另开对话」 |
 | POST | `/v1/sessions/{id}/cancel` | 需要 | 停止当前任务，不需要请求体，返回 `{ accepted: true }`。会话空闲时也返回成功 |
 | GET | `/v1/models` | 需要 | 可选的模型列表：`{ default: { provider, model } \| null, models: [{ provider, providerName, model, name, description? }] }` |
 | POST | `/v1/sessions/{id}/model` | 需要 | 切换模型 `{ provider, model }`（取值来自 `/v1/models`），返回 `{ model: { provider, model } }`。模型不可用时 `400` |
@@ -161,6 +162,15 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - `steps`：模型当前这一轮的任务清单（DSH 的 `todos`，模型用 `todo_write` 整表替换）。**DSH 在每一轮开始时清空它**，所以新一轮开始、模型还没写之前为 `null`。`text` 最多 500 个字符，最多 100 项；`status` 是 `pending` 待做、`in_progress` 进行中、`completed` 已完成。
 - 插件只提取上面这几项，不转发 DSH 的其他字段（目标的 id、修订号、轮数等）。拿不到时为 `null`。
 - 旧插件返回 `404`，App 不显示计划。
+
+**另开对话**（落地方案 C1，协议 v1 的兼容扩展）
+
+- 新会话带着原会话**第 1 到 `beforeTurn − 1` 轮**的内容，也就是 App 上「这条消息之前的内容」（这条消息属于第 `beforeTurn` 轮）。`beforeTurn` 为 1 时，得到同一工作目录下的一个空会话。插件切在第 `beforeTurn − 1` 轮的 `turn/end` 处（DSH `session/fork` 的 `atSeq`），和官方界面一样；新会话不会自动开始运行。
+- 原会话有标题时，新会话的标题和 Desktop 一样在后面加编号：「修复重复通知 (1)」，已经有编号的加一。改名失败不影响分支。
+- `requestId`：规则和「发消息」相同。插件 10 分钟内按它去重，重复的请求返回同一个 `sessionId`，**回执丢失后用同一个 `requestId` 重试不会分出两个会话**。
+- `workspaceAttached`：新会话已经建好，但 DSH 没能把它归到原来的项目时为 `false`（DSH 的部分成功）。新会话照常可以使用，App 提示一句即可，**不要重试**（重试会再分出一个）。
+- 第 `beforeTurn` 轮不存在时 `400`；会话不存在时 `404`；DSH 拒绝分支时 `502 DSH_ERROR`。
+- 只分出对话历史：电脑上的文件不变，也不会新建 Git 分支。
 
 **发消息**
 

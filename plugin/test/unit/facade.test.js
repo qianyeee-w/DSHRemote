@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   Facade, FacadeError, convertSessionList, convertModelCatalog, convertPermissionPresets, parseWorkspaceBaseline,
-  MESSAGES_DEFAULT_LIMIT, MESSAGES_MAX_LIMIT,
+  MESSAGES_DEFAULT_LIMIT, MESSAGES_MAX_LIMIT, forkTitle, truncateUtf8,
 } from '../../src/dsh/facade.js'
 import { DshUnavailableError } from '../../src/dsh/connection.js'
 
@@ -62,7 +62,7 @@ test('模型列表与权限模式', () => {
 
 /**
  * 模拟 DshConnection：记录调用，按 endpoint 返回预设结果。
- * @param {Record<string, import('../../src/dsh/connection.js').RemoteResult | (() => never)>} results
+ * @param {Record<string, import('../../src/dsh/connection.js').RemoteResult | ((args: any) => import('../../src/dsh/connection.js').RemoteResult)>} results
  * @param {{ workspaceFrame?: unknown, streamError?: { code: string, message: string } }} [stream]
  */
 function fakeConnection(results, stream = {}) {
@@ -74,7 +74,7 @@ function fakeConnection(results, stream = {}) {
     async call(endpoint, args, context) {
       calls.push({ endpoint, args, actor: context.actor })
       const result = results[endpoint]
-      if (typeof result === 'function') return result()
+      if (typeof result === 'function') return result(args)
       if (!result) throw new Error(`没有预设 ${endpoint}`)
       return result
     },
@@ -165,6 +165,105 @@ test('Facade：计划只读 session/projections；投影暂时不可用时两项
   const unavailable = fakeConnection({ 'session/projections': { ok: false, error: { code: 'session/projections-unavailable', message: '' } } })
   assert.deepEqual(await new Facade(unavailable.connection).plan(ACTOR, 'session-a'), { goal: null, steps: null })
   await rejectsWith(new Facade(unavailable.connection).plan(ACTOR, '../x'), 404, 'NOT_FOUND')
+})
+
+test('另开对话的标题：和 Desktop 一样加编号', () => {
+  assert.equal(forkTitle('修复重复通知'), '修复重复通知 (1)')
+  assert.equal(forkTitle('修复重复通知 (1)'), '修复重复通知 (2)')
+  assert.equal(forkTitle('修复（9）'), '修复（10）')
+})
+
+/**
+ * 有 3 轮的会话：真实 DSH 的事件序号（契约测试里实测的）。
+ * @param {{ forkError?: { code: string, message: string, details?: unknown }, title?: string }} [options]
+ */
+function forkingDsh(options = {}) {
+  /** @type {any[]} */
+  const forks = []
+  /** @type {any[]} */
+  const renames = []
+  const event = (/** @type {number} */ seq, /** @type {string} */ type, /** @type {number} */ turn) => ({ type: 'event', event: { type, seq, time: seq, data: { turn } } })
+  const fake = fakeConnection({
+    'session/projections': {
+      ok: true,
+      value: { kind: 'sequenced', asOfSeq: 38, values: { title: options.title ?? '修复重复通知', turnOutline: [{ turn: 1, seq: 4 }, { turn: 2, seq: 22 }, { turn: 3, seq: 31 }] } },
+    },
+    'session/page': (args) => {
+      assert.equal(args.request.beforeSeq, 31)
+      return { ok: true, value: { records: [event(27, 'assistant/message', 2), event(28, 'step/end', 2), event(29, 'turn/end', 2), event(30, 'agent/inbox/spliced', 0)] } }
+    },
+    'session/fork': (args) => {
+      forks.push(args.request)
+      if (options.forkError) return { ok: false, error: options.forkError }
+      return { ok: true, value: { sessionId: `session-child${forks.length}` } }
+    },
+    'session/rename': (args) => {
+      renames.push(args.request)
+      // 和 DSH 一样把标题截到 80 个 UTF-8 字节以内
+      return { ok: true, value: { title: truncateUtf8(args.request.title, 80).trimEnd(), seq: 1 } }
+    },
+  })
+  return { ...fake, forks, renames }
+}
+
+test('Facade：另开对话切在上一轮的 turn/end；第 1 轮切在开始之前；新会话改名加编号', async () => {
+  const dsh = forkingDsh()
+  const facade = new Facade(dsh.connection)
+  assert.deepEqual(await facade.fork(ACTOR, 'session-a', { requestId: 'r1', beforeTurn: 3 }), { sessionId: 'session-child1', workspaceAttached: true })
+  assert.deepEqual(dsh.forks[0], { sessionId: 'session-a', atSeq: 29 })
+  assert.deepEqual(dsh.renames[0], { sessionId: 'session-child1', title: '修复重复通知 (1)' })
+  await facade.fork(ACTOR, 'session-a', { requestId: 'r2', beforeTurn: 1 })
+  assert.deepEqual(dsh.forks[1], { sessionId: 'session-a', atSeq: 3 })
+  assert.ok(dsh.calls.every((c) => c.actor === ACTOR))
+})
+
+test('Facade：原标题很长、编号会被 DSH 截掉时，缩短原标题加「…」再改一次，编号看得见', async () => {
+  const long = '这是一段分块慢慢输出的回复，用来验证手机上能实时看到'
+  const dsh = forkingDsh({ title: long })
+  await new Facade(dsh.connection).fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 3 })
+  assert.equal(dsh.renames.length, 2)
+  const final = dsh.renames[1].title
+  assert.ok(final.endsWith('… (1)'), final)
+  assert.ok(Buffer.byteLength(final, 'utf8') <= 80)
+  assert.ok(long.startsWith(final.slice(0, -'… (1)'.length)))
+  // 不长时只改一次
+  const short = forkingDsh()
+  await new Facade(short.connection).fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 3 })
+  assert.equal(short.renames.length, 1)
+})
+
+test('Facade：另开对话按 requestId 去重，回执丢失后重试不会分出两个会话', async () => {
+  const dsh = forkingDsh()
+  const facade = new Facade(dsh.connection)
+  const first = await facade.fork(ACTOR, 'session-a', { requestId: 'same', beforeTurn: 3 })
+  const again = await facade.fork(ACTOR, 'session-a', { requestId: 'same', beforeTurn: 3 })
+  assert.deepEqual(again, first)
+  assert.equal(dsh.forks.length, 1)
+  // 同时到达的两次也只分一次
+  const both = await Promise.all([facade.fork(ACTOR, 'session-a', { requestId: 'x', beforeTurn: 3 }), facade.fork(ACTOR, 'session-a', { requestId: 'x', beforeTurn: 3 })])
+  assert.deepEqual(both[0], both[1])
+  assert.equal(dsh.forks.length, 2)
+})
+
+test('Facade：子会话建好但没归到项目时照样返回，标明 workspaceAttached: false；其他错误不留去重记录', async () => {
+  const partial = forkingDsh({ forkError: { code: 'session/workspace-attach-failed', message: 'x /home/me', details: { sessionId: 'session-orphan', workspaceId: 'w' } } })
+  assert.deepEqual(await new Facade(partial.connection).fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 3 }), { sessionId: 'session-orphan', workspaceAttached: false })
+  const refused = forkingDsh({ forkError: { code: 'session/fork-unavailable', message: '/home/me/secret' } })
+  const facade = new Facade(refused.connection)
+  await assert.rejects(facade.fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 3 }), (e) => e instanceof FacadeError && e.status === 502 && !e.message.includes('/home'))
+  await assert.rejects(facade.fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 3 }), FacadeError)
+  assert.equal(refused.forks.length, 2, '失败后可以重试')
+})
+
+test('【反向】Facade：另开对话的参数不对、这一轮不存在时不调用 session/fork', async () => {
+  const dsh = forkingDsh()
+  const facade = new Facade(dsh.connection)
+  await rejectsWith(facade.fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 0 }), 400, 'BAD_REQUEST')
+  await rejectsWith(facade.fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 1.5 }), 400, 'BAD_REQUEST')
+  await rejectsWith(facade.fork(ACTOR, 'session-a', { requestId: 'bad id', beforeTurn: 2 }), 400, 'BAD_REQUEST')
+  await rejectsWith(facade.fork(ACTOR, 'session-a', { requestId: 'r', beforeTurn: 9 }), 400, 'BAD_REQUEST')
+  await rejectsWith(facade.fork(ACTOR, '../x', { requestId: 'r', beforeTurn: 2 }), 404, 'NOT_FOUND')
+  assert.equal(dsh.forks.length, 0)
 })
 
 test('Facade：工作区流出错时，断线视为 DSH 不可用，其他错误视为 DSH 错误', async () => {

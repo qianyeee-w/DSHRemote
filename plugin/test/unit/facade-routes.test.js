@@ -37,12 +37,13 @@ beforeEach(async () => {
   const op = (op) => async (/** @type {unknown[]} */ ...args) => {
     calls.push({ op, args })
     if (behavior.error) throw behavior.error
+    if (op === 'fork') return { sessionId: 'session-child', workspaceAttached: true }
     return op === 'answerAttention' ? { attentionId: args[1] } : { op }
   }
   const facade = /** @type {import('../../src/server/routes.js').FacadeApi} */ (/** @type {unknown} */ ({
     directories: op('directories'), createDirectory: op('createDirectory'), registerWorkspace: op('registerWorkspace'),
     workspaces: op('workspaces'), sessions: op('sessions'), models: op('models'), permissionPresets: op('permissionPresets'), messages: op('messages'), usage: op('usage'), plan: op('plan'),
-    createSession: op('createSession'), prompt: op('prompt'), cancel: op('cancel'), selectModel: op('selectModel'),
+    createSession: op('createSession'), prompt: op('prompt'), fork: op('fork'), cancel: op('cancel'), selectModel: op('selectModel'),
     setPermissionPreset: op('setPermissionPreset'), answerAttention: op('answerAttention'),
   }))
   /** @type {{ event: string, detail?: Record<string, string> }[]} */
@@ -155,6 +156,7 @@ const WRITE_ROUTES = /** @type {const} */ ([
   ['/v1/workspaces', 'registerWorkspace', { path: '/tmp/项目' }, []],
   ['/v1/sessions', 'createSession', { workspaceId: 'w1' }, []],
   ['/v1/sessions/s1/prompt', 'prompt', { requestId: 'r1', text: '你好', mode: 'queue' }, ['s1']],
+  ['/v1/sessions/s1/fork', 'fork', { requestId: 'r2', beforeTurn: 2 }, ['s1']],
   ['/v1/sessions/s1/model', 'selectModel', { provider: 'p', model: 'm' }, ['s1']],
   ['/v1/sessions/s1/permission-preset', 'setPermissionPreset', { preset: 'read-only' }, ['s1']],
   ['/v1/attention/a1/answer', 'answerAttention', { decision: 'allow' }, ['a1']],
@@ -172,9 +174,10 @@ test('写接口：调用对应的外观层操作，参数为 deviceId、路径�
   assert.deepEqual(env.calls.at(-1), { op: 'cancel', args: [env.deviceId, 's1'] })
 })
 
-test('切换模型和权限模式成功后通知实时流刷新会话摘要；其他接口和失败时不通知', async () => {
+test('切换模型和权限模式、另开对话成功后通知实时流刷新会话摘要；其他接口和失败时不通知', async () => {
   for (const [path, , body] of WRITE_ROUTES) await post(path, body)
-  assert.deepEqual(env.changed, ['s1', 's1'])
+  // 另开对话通知的是新会话（它改过名）
+  assert.deepEqual(env.changed, ['session-child', 's1', 's1'])
 
   env.changed.length = 0
   env.behavior.error = new FacadeError(400, 'BAD_REQUEST', '这个模型当前不可用')

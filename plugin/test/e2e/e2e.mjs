@@ -232,6 +232,24 @@ async function main() {
       return JSON.stringify(plan).slice(0, 160)
     })
 
+    await step('另开对话（落地方案 C1）：经 HTTPS 分支，同一个 requestId 不会分出两个；实时流收到新会话', async () => {
+      const requestId = randomUUID()
+      const res = await api('POST', `/v1/sessions/${sid}/fork`, { requestId, beforeTurn: 2 })
+      if (res.status !== 200) throw new Error(`另开对话失败：${res.status} ${JSON.stringify(res.json())}`)
+      const forked = res.json()
+      if (typeof forked.sessionId !== 'string' || forked.workspaceAttached !== true) throw new Error(`返回不对：${JSON.stringify(forked)}`)
+      const again = (await api('POST', `/v1/sessions/${sid}/fork`, { requestId, beforeTurn: 2 })).json()
+      if (again.sessionId !== forked.sessionId) throw new Error('同一个 requestId 分出了两个会话')
+      const added = await s.inbox.waitFor((m) => m.type === 'session.updated' && m.session.sessionId === forked.sessionId && typeof m.session.title === 'string' && m.session.title.endsWith(' (1)'), 20_000).catch((error) => {
+        const seen = s.inbox.messages.filter((m) => m.type === 'session.updated' && m.session.sessionId === forked.sessionId).map((m) => m.session.title)
+        const listed = s.inbox.messages.filter((m) => m.type === 'session.updated' && m.session.sessionId === sid).map((m) => m.session.title).slice(-1)
+        throw new Error(`${error.message}；新会话收到的标题：${JSON.stringify(seen)}；原会话的标题：${JSON.stringify(listed)}`)
+      })
+      const bad = await api('POST', `/v1/sessions/${sid}/fork`, { requestId: randomUUID(), beforeTurn: 99 })
+      if (bad.status !== 400) throw new Error(`不存在的轮次应当 400：${bad.status}`)
+      return `新会话 ${added.session.title}`
+    })
+
     await step('提问：手机收到 attention.requested，回答后收到 attention.resolved（this-device）', async () => {
       await api('POST', `/v1/sessions/${sid}/prompt`, { requestId: randomUUID(), text: '请 ASK 我一个问题' })
       const requested = await s.inbox.waitFor((m) => m.type === 'attention.requested' && m.attention.kind === 'question')
@@ -300,6 +318,7 @@ async function main() {
       if ((await api('GET', '/v1/sessions')).status !== 401) throw new Error('/v1/sessions 应当 401')
       if ((await api('GET', `/v1/sessions/${sid}/usage`)).status !== 401) throw new Error('撤销后不应能读用量')
       if ((await api('GET', `/v1/sessions/${sid}/plan`)).status !== 401) throw new Error('撤销后不应能读计划')
+      if ((await api('POST', `/v1/sessions/${sid}/fork`, { requestId: randomUUID(), beforeTurn: 1 })).status !== 401) throw new Error('撤销后不应能另开对话')
       if ((await api('GET', '/v1/directories')).status !== 401) throw new Error('撤销后不应能浏览目录')
       if ((await api('POST', '/v1/directories', { path: projectParent, name: 'revoked' })).status !== 401) throw new Error('撤销后不应能创建目录')
       if ((await api('POST', '/v1/workspaces', { path: projectParent })).status !== 401) throw new Error('撤销后不应能登记工作区')

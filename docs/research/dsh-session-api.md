@@ -259,6 +259,14 @@ PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.m
 
 基线依据：[分支请求类型](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/session-controller/src/types.ts)、[分支执行逻辑](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/api/session-controller/src/commands.ts)、[回复尾部按钮](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx)。
 
+**运行时实测（2026-11-14，落地方案 C1，契约测试「另开对话」、e2e、`devServerTest`）**：
+
+- 一轮的事件顺序是 `turn/end#N-1 → agent/inbox/spliced → turn/start#N → agent/inbox/spliced → step/start → … user/message …`。切在第 N−1 轮的 `turn/end` 处，子会话正好带着第 1 到 N−1 轮，以 `session/end-seed` 结尾，不会自己开始运行；切在第 N 轮 `turn/start` 的前一个事件，会把排队消息的 inbox 事件也带进去（虽然实测也没有自动运行），所以不这样切。
+- 切在第 1 轮 `turn/start` 之前（序号 3）得到一个空会话：只有初始的权限、沙箱和审批策略事件，标题为 `null`。
+- 子会话的标题和模型选择都沿用原会话（标题事件在切点之前），所以两个会话在列表里同名。Desktop 用 `session/rename` 加「(1)」；**DSH 把标题截到 `maxTitleBytes`（基础配置 80 个 UTF-8 字节，约 26 个汉字）**，长标题加编号后编号会被截掉，Desktop 也有这个问题。插件改名后看 `session/rename` 返回的实际标题，编号被截掉时缩短原标题加「…」再改一次。
+- `session/turnOutline` 投影给出每一轮 `turn/start` 的序号，插件用它定位，再在第 N 轮开始之前读一小页找第 N−1 轮的 `turn/end`。
+- 不存在的序号：`session/fork-unavailable`。部分成功的 `session/workspace-attach-failed` 没有在实测中出现（要让工作区附加失败），插件按源码处理：错误的 `details.sessionId` 是已经建好的子会话。
+
 ### 9.5 思考与整轮过程折叠：前者已实现，后者需要补充轮次模型
 
 - Android `ui/chat/MessageViews.kt` 已把 `ThinkingPart` 放进默认关闭的 `Collapsible`，工具卡片也默认折叠。运行现有转换器处理 `session-page-full.json`，得到 1 个思考部件；没有模型提供的思考内容时不应制造内容。

@@ -241,6 +241,8 @@ export class Facade {
   #now
   /** @type {Map<string, { at: number, done: Promise<unknown> }>} sessionId + requestId → 发送结果 */
   #recentPrompts = new Map()
+  /** 最近的另开对话（requestId → 结果），去重规则同 #recentPrompts @type {Map<string, { at: number, done: Promise<{ sessionId: string, workspaceAttached: boolean }> }>} */
+  #recentForks = new Map()
   /** @type {Map<string, TurnDigest>} sessionId → 最近一轮的结果（只在内存里，插件重启后重新读取） */
   #digests = new Map()
 
@@ -472,6 +474,103 @@ export class Facade {
   }
 
   /**
+   * 从第 beforeTurn 轮之前另开一个对话（protocol.md 第 4 节「另开对话」，落地方案 C1）。
+   * 按 requestId 去重：回执丢失后用同一个 requestId 重试，返回同一个新会话。
+   * @param {string} actor @param {string} sessionId @param {unknown} body `{ requestId, beforeTurn }`
+   * @returns {Promise<{ sessionId: string, workspaceAttached: boolean }>}
+   */
+  async fork(actor, sessionId, body) {
+    assertSessionId(sessionId)
+    const b = isObject(body) ? body : {}
+    if (typeof b.requestId !== 'string' || !OPAQUE_ID.test(b.requestId)) throw badRequest('requestId 格式不对')
+    const beforeTurn = b.beforeTurn
+    if (typeof beforeTurn !== 'number' || !Number.isSafeInteger(beforeTurn) || beforeTurn < 1) throw badRequest('beforeTurn 必须是正整数')
+    const key = `${sessionId}\n${b.requestId}`
+    const now = this.#now()
+    for (const [k, entry] of this.#recentForks) {
+      if (now - entry.at <= PROMPT_DEDUPE_TTL_MS && this.#recentForks.size <= PROMPT_DEDUPE_MAX) break
+      this.#recentForks.delete(k)
+    }
+    const existing = this.#recentForks.get(key)
+    if (existing) return existing.done
+    const done = this.#fork(actor, sessionId, beforeTurn)
+    const entry = { at: now, done }
+    this.#recentForks.set(key, entry)
+    try {
+      return await done
+    } catch (error) {
+      if (this.#recentForks.get(key) === entry) this.#recentForks.delete(key)
+      throw error
+    }
+  }
+
+  /** @param {string} actor @param {string} sessionId @param {number} beforeTurn */
+  async #fork(actor, sessionId, beforeTurn) {
+    const projections = unwrap(await this.#dsh.call('session/projections', { request: { sessionId } }, { actor }))
+    const values = isObject(projections) && isObject(projections.values) ? projections.values : {}
+    const outline = Array.isArray(values.turnOutline) ? values.turnOutline : []
+    const start = outline.find((t) => isObject(t) && t.turn === beforeTurn)
+    if (!isObject(start) || typeof start.seq !== 'number') throw badRequest('没有这一轮')
+    const atSeq = beforeTurn === 1 ? start.seq - 1 : await this.#turnEndBefore(actor, sessionId, start.seq, beforeTurn - 1)
+    if (atSeq < 0) throw new FacadeError(502, 'DSH_ERROR', 'DSH 无法完成这个操作（没有可以分支的位置）')
+    const result = await this.#dsh.call('session/fork', { request: { sessionId, atSeq } }, { actor })
+    /** @type {string | undefined} */
+    let child
+    let workspaceAttached = true
+    if (result.ok) {
+      child = isObject(result.value) && typeof result.value.sessionId === 'string' ? result.value.sessionId : undefined
+    } else if (result.error.code === 'session/workspace-attach-failed') {
+      // 部分成功：新会话已经建好，只是没有归到原来的项目。不重试（会再分出一个）
+      const details = /** @type {Record<string, unknown>} */ (/** @type {any} */ (result.error).details ?? {})
+      child = typeof details.sessionId === 'string' ? details.sessionId : undefined
+      workspaceAttached = false
+    } else {
+      unwrap(result)
+    }
+    if (!child || !SESSION_ID.test(child)) throw new FacadeError(502, 'DSH_ERROR', 'DSH 没有返回会话 id')
+    const title = typeof values.title === 'string' ? values.title.trim() : ''
+    if (title !== '') {
+      try {
+        await this.#renameFork(actor, child, title)
+      } catch { /* 改名失败不影响分支 */ }
+    }
+    return { sessionId: child, workspaceAttached }
+  }
+
+  /**
+   * 新会话改名为「原标题 (1)」。DSH 会把标题截到配置的字节数以内（基础配置 80 字节，约 26 个汉字），
+   * 编号被截掉时把原标题缩短、加「…」再改一次，保证编号看得见。
+   * @param {string} actor @param {string} child @param {string} title 原会话的标题
+   */
+  async #renameFork(actor, child, title) {
+    const { base, suffix } = forkTitleParts(title)
+    const desired = base + suffix
+    const result = await this.#dsh.call('session/rename', { request: { sessionId: child, title: desired } }, { actor })
+    const saved = result.ok && isObject(result.value) && typeof result.value.title === 'string' ? result.value.title : undefined
+    if (saved === undefined || saved.endsWith(suffix.trim())) return
+    const over = utf8Length(desired) - utf8Length(saved)
+    const keep = utf8Length(base) - over - utf8Length(ELLIPSIS) - 1
+    if (keep <= 0) return
+    await this.#dsh.call('session/rename', { request: { sessionId: child, title: `${truncateUtf8(base, keep).trimEnd()}${ELLIPSIS}${suffix}` } }, { actor })
+  }
+
+  /**
+   * 第 turn 轮的 turn/end 的序号：在第 turn+1 轮开始之前读一小段日志。
+   * @param {string} actor @param {string} sessionId @param {number} beforeSeq 第 turn+1 轮 turn/start 的序号 @param {number} turn
+   */
+  async #turnEndBefore(actor, sessionId, beforeSeq, turn) {
+    for (const maxMessages of [2, 50]) {
+      const page = unwrap(await this.#dsh.call('session/page', {
+        request: { address: { kind: 'session', sessionId }, maxMessages, beforeSeq },
+      }, { actor }))
+      const records = isObject(page) && Array.isArray(page.records) ? page.records : []
+      const end = records.findLast((r) => isObject(r) && isObject(r.event) && r.event.type === 'turn/end' && isObject(r.event.data) && r.event.data.turn === turn)
+      if (end && typeof end.event.seq === 'number') return end.event.seq
+    }
+    throw new FacadeError(409, 'DSH_ERROR', '上一轮还没有结束，不能从这里另开对话')
+  }
+
+  /**
    * 停止当前任务。会话空闲时也返回成功。
    * @param {string} actor @param {string} sessionId
    */
@@ -529,4 +628,44 @@ export class Facade {
   attention() {
     return this.#attention?.list() ?? []
   }
+}
+
+/**
+ * 另开对话的标题，和 Desktop 一样：末尾已经有「(n)」或「（n）」时加一，否则加「 (1)」。
+ * 参照 DSH 官方客户端的 increasedForkTitle（dsh-api-session-controller，MIT）。拆成原标题部分和编号部分。
+ * @param {string} title
+ * @returns {{ base: string, suffix: string }}
+ */
+export function forkTitleParts(title) {
+  const ascii = /^(.*?)\((\d+)\)$/u.exec(title)
+  if (ascii?.[1] !== undefined && ascii[2] !== undefined) return { base: ascii[1], suffix: `(${BigInt(ascii[2]) + 1n})` }
+  const fullWidth = /^(.*?)（(\d+)）$/u.exec(title)
+  if (fullWidth?.[1] !== undefined && fullWidth[2] !== undefined) return { base: fullWidth[1], suffix: `（${BigInt(fullWidth[2]) + 1n}）` }
+  return { base: title, suffix: ' (1)' }
+}
+
+/** @param {string} title */
+export function forkTitle(title) {
+  const { base, suffix } = forkTitleParts(title)
+  return base + suffix
+}
+
+const ELLIPSIS = '…'
+
+/** @param {string} text */
+const utf8Length = (text) => Buffer.byteLength(text, 'utf8')
+
+/**
+ * 截到 maxBytes 个 UTF-8 字节以内，不切开字符。
+ * @param {string} text @param {number} maxBytes
+ */
+export function truncateUtf8(text, maxBytes) {
+  let bytes = 0
+  let out = ''
+  for (const char of text) {
+    bytes += utf8Length(char)
+    if (bytes > maxBytes) break
+    out += char
+  }
+  return out
 }

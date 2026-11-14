@@ -346,6 +346,32 @@ async function main() {
       if (empty.context?.tokens !== undefined) throw new Error(`新会话不应当有上下文占用：${short(empty)}`)
       return `${short(usage, 160)}；新会话 ${short(empty, 120)}`
     })
+    await step('外观层：另开对话（protocol.md「另开对话」，落地方案 C1）——带着这一轮之前的内容，标题加编号，按 requestId 去重', async () => {
+      const source = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
+      for (const text of ['第一个问题', '第二个问题', '第三个问题']) {
+        await prompt(conn, source, text)
+        const count = ['第一个问题', '第二个问题', '第三个问题'].indexOf(text) + 1
+        await untilAsync(async () => (await facade.messages(ACTOR, source, { limit: 50 })).turns.filter((t) => t.result !== undefined).length >= count, `第 ${count} 轮结束`)
+      }
+      const sourceTitle = (await facade.sessions(ACTOR)).sessions.find((x) => x.sessionId === source)?.title
+      const requestId = randomUUID()
+      const forked = await facade.fork(ACTOR, source, { requestId, beforeTurn: 3 })
+      if (!forked.workspaceAttached) throw new Error('新会话应当归到原来的项目')
+      const again = await facade.fork(ACTOR, source, { requestId, beforeTurn: 3 })
+      if (again.sessionId !== forked.sessionId) throw new Error('同一个 requestId 分出了两个会话')
+      const child = await facade.messages(ACTOR, forked.sessionId, { limit: 50 })
+      const users = child.messages.filter((m) => m.role === 'user').map((m) => m.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''))
+      if (JSON.stringify(users) !== JSON.stringify(['第一个问题', '第二个问题'])) throw new Error(`新会话的内容不对：${short(users)}`)
+      if (child.turns.some((t) => t.turn > 2)) throw new Error(`新会话不应当有第 3 轮：${short(child.turns)}`)
+      const listed = await untilAsync(async () => (await facade.sessions(ACTOR)).sessions.find((x) => x.sessionId === forked.sessionId && x.title !== null), '新会话出现在列表里')
+      if (sourceTitle && listed.title !== `${sourceTitle} (1)`) throw new Error(`标题不对：${listed.title}（原来是 ${sourceTitle}）`)
+      if (listed.status === 'running') throw new Error('新会话不应当自己开始运行')
+      // 从第一条消息另开：空会话
+      const empty = await facade.fork(ACTOR, source, { requestId: randomUUID(), beforeTurn: 1 })
+      const emptyPage = await facade.messages(ACTOR, empty.sessionId, { limit: 50 })
+      if (emptyPage.messages.length !== 0) throw new Error(`从第一轮之前另开应当是空会话：${short(emptyPage.messages)}`)
+      return `子会话 ${listed.title}；空会话 ${empty.sessionId.slice(-6)}`
+    })
     await step('外观层：很长的命令输出保留开头和末尾（protocol.md 5.2，落地方案 B6）', async () => {
       const longSession = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId
       await prompt(conn, longSession, '请 LONGOUT 一下')

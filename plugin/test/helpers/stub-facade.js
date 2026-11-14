@@ -6,5 +6,5 @@ const fail = async () => { throw new Error('这个测试不应当访问 DSH') }
 export const unusedFacade = {
   directories: fail, createDirectory: fail, registerWorkspace: fail,
   workspaces: fail, sessions: fail, models: fail, permissionPresets: fail, messages: fail, usage: fail, plan: fail,
-  createSession: fail, prompt: fail, cancel: fail, selectModel: fail, setPermissionPreset: fail, answerAttention: fail,
+  createSession: fail, prompt: fail, fork: fail, cancel: fail, selectModel: fail, setPermissionPreset: fail, answerAttention: fail,
 }

@@ -5,17 +5,26 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -33,45 +42,49 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
-import io.github.qianyeeew.dshremote.data.api.Workspace
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.chat.AddImageButton
 import io.github.qianyeeew.dshremote.ui.chat.ComposerImageStrip
 import io.github.qianyeeew.dshremote.ui.chat.contextRing
-import io.github.qianyeeew.dshremote.ui.chat.extendStart
 import io.github.qianyeeew.dshremote.ui.chat.noticeText
 import io.github.qianyeeew.dshremote.ui.chat.permissionHint
 import io.github.qianyeeew.dshremote.ui.chat.permissionLabel
-import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
-import io.github.qianyeeew.dshremote.ui.common.ChoiceList
 import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
-import io.github.qianyeeew.dshremote.ui.common.DesignDivider
-import io.github.qianyeeew.dshremote.ui.common.InlineChoices
+import io.github.qianyeeew.dshremote.ui.common.ComposerOption
+import io.github.qianyeeew.dshremote.ui.common.ComposerOptionDot
+import io.github.qianyeeew.dshremote.ui.common.ComposerOptionsRow
+import io.github.qianyeeew.dshremote.ui.common.KeyboardPanel
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
+import io.github.qianyeeew.dshremote.ui.common.presetTint
+import io.github.qianyeeew.dshremote.ui.common.pressScale
 
 /** 新任务输入框上的操作。 */
 class NewTaskActions(
-    /** 展开了：读取模型和审批方式的列表。 */
+    /** 读取模型和审批方式的列表（页面打开、在线时就读，输入框下面要显示）。 */
     val onExpand: () -> Unit = {},
     val onChooseProject: (ProjectPick) -> Unit = {},
+    /** 不再指定这次的项目（回到上一次用的）。 */
+    val onClearProject: () -> Unit = {},
     val onChooseModel: (ModelRef) -> Unit = {},
     val onChoosePreset: (String) -> Unit = {},
     /** 开始任务；返回 false 表示没有开始。 */
@@ -85,318 +98,297 @@ class NewTaskActions(
     val onImagesUnavailable: () -> Unit = {},
 )
 
-/** 收起时：一行占位文字「新任务」（写过的字留着），右边带加号的实心圆（设计规格 7.1）。点了原地展开。 */
+/** 输入框下面面板里打开的是哪一种选项。 */
+enum class NewTaskMenu { MODEL, PRESET }
+
+/** 新任务输入框的占位文字：点过某个项目的加号时是「在 <项目> 工作区新建任务」，否则是「新任务」。 */
+@Composable
+internal fun newTaskHint(target: ProjectPick?): String =
+    when (target) {
+        is ProjectPick.Existing -> stringResource(R.string.new_task_in_project, target.workspace.title)
+        else -> stringResource(R.string.home_new_task)
+    }
+
+/**
+ * 收起时：一行占位文字（写过的字留着），右边带加号的实心圆。点了原地展开。
+ * [targeted]：点过某个项目的加号，描边变成主文字色，提示这次要建在那个项目里。
+ */
 @Composable
 internal fun NewTaskBar(
     text: String,
+    hint: String,
+    targeted: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val colors = DesignTheme.colors
-    Box(
+    val shape = RoundedCornerShape(26.dp)
+    Row(
         Modifier
+            .padding(horizontal = 16.dp)
+            .padding(top = 8.dp)
             .fillMaxWidth()
-            .background(colors.page)
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .height(52.dp)
+            .designPanel(shape, focused = targeted)
+            .clip(shape)
+            .clickable(enabled = enabled, onClickLabel = hint, role = Role.Button, onClick = onClick)
+            .alpha(if (enabled) 1f else DISABLED)
+            .padding(start = 18.dp, end = 6.dp)
+            .testTag("home-new-session"),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .designPanel(RoundedCornerShape(26.dp))
-                .clickable(enabled = enabled, onClickLabel = stringResource(R.string.home_new_task), role = Role.Button, onClick = onClick)
-                .alpha(if (enabled) 1f else DISABLED)
-                .padding(start = 18.dp, end = 6.dp)
-                .testTag("home-new-session"),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text.ifBlank { stringResource(R.string.home_new_task) },
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (text.isBlank()) colors.textSecondary else colors.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Box(Modifier.size(40.dp).background(colors.text, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(painterResource(R.drawable.ic_add), null, Modifier.size(20.dp), tint = colors.panel)
-            }
+        Text(
+            text.ifBlank { hint },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (text.isBlank()) colors.textSecondary else colors.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).testTag("home-new-session-text"),
+        )
+        Box(Modifier.size(40.dp).background(colors.text, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(painterResource(R.drawable.ic_add), null, Modifier.size(20.dp), tint = colors.panel)
         }
     }
 }
 
+/** 输入框下面的「模型 · 审批方式」。还没读到列表时显示默认值，不能点。 */
+@Composable
+internal fun NewTaskOptions(
+    state: NewTaskState,
+    open: NewTaskMenu?,
+    enabled: Boolean,
+    onOpen: (NewTaskMenu) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = DesignTheme.colors
+    val models = state.models
+    val model = state.model ?: models?.default
+    val preset = state.preset ?: state.presets?.default
+    val modelName =
+        model?.let { ref ->
+            models?.models?.firstOrNull { it.provider == ref.provider && it.model == ref.model }?.name ?: ref.model
+        } ?: stringResource(R.string.design_choose_model)
+    val presetName = permissionLabel(preset)
+    ComposerOptionsRow(modifier.padding(top = 2.dp, bottom = 4.dp)) {
+        ComposerOption(
+            modelName,
+            stringResource(R.string.design_model_value, modelName),
+            R.drawable.ic_dsh_bolt,
+            if (open == NewTaskMenu.MODEL) colors.text else colors.textSecondary,
+            enabled = enabled && models != null && !state.starting,
+            open = open == NewTaskMenu.MODEL,
+            onClick = { onOpen(NewTaskMenu.MODEL) },
+            modifier = Modifier.weight(1f, fill = false).testTag("new-task-model"),
+        )
+        ComposerOptionDot()
+        ComposerOption(
+            presetName,
+            stringResource(R.string.design_permission_value, presetName),
+            R.drawable.ic_dsh_shield,
+            presetTint(preset),
+            enabled = enabled && state.presets != null && !state.starting,
+            open = open == NewTaskMenu.PRESET,
+            onClick = { onOpen(NewTaskMenu.PRESET) },
+            modifier = Modifier.weight(1f, fill = false).testTag("new-task-preset"),
+        )
+    }
+}
+
 /**
- * 展开的新任务输入框（设计规格 7.6）：最上面一行「项目 <项目名>」，点了选项目（已有项目、不指定项目、新建或导入项目）；
- * 中间是任务内容和加上的图片（56 见方，右上角移除）；最下面是加号、模型、审批方式、发送键（落地方案 C2）。
+ * 展开的新任务输入框：上面是加号、任务内容和开始键，加上的图片（56 见方，右上角移除，落地方案 C2）在文字下面；
+ * 下面常驻「模型 · 审批方式」（键盘弹出时收起）。
+ * 点了模型或审批方式，键盘收起，原来键盘的位置换成选项面板。占位文字只在没有焦点时显示，点输入框就消失。
+ * 项目由首页决定（点过加号的项目，或者上一次用的），这里不再选。
+ *
+ * [startMenu] 不为 null 时是从收起的输入框下面直接点了模型或审批方式：打开面板，不弹键盘。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun NewTaskComposer(
     text: String,
     onText: (String) -> Unit,
     state: NewTaskState,
     project: ProjectPick,
-    workspaces: List<Workspace>,
+    hint: String,
     online: Boolean,
     actions: NewTaskActions,
-    onProject: (ProjectMode) -> Unit,
     modifier: Modifier = Modifier,
+    startMenu: NewTaskMenu? = null,
 ) {
     val colors = DesignTheme.colors
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    var menu by remember { mutableStateOf<Menu?>(null) }
-    // 收起的动画期间还要画最后一次展开的选项
-    var lastMenu by remember { mutableStateOf(Menu.PROJECT) }
-    val toggle = { which: Menu ->
-        menu = if (menu == which || (which == Menu.PROJECT && menu == Menu.CREATE)) null else which
-        menu?.let { lastMenu = it }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var menu by remember { mutableStateOf(startMenu) }
+    // 收起的动画期间还要画最后一次打开的选项
+    var lastMenu by remember { mutableStateOf(startMenu ?: NewTaskMenu.MODEL) }
+    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { if (startMenu == null) focus.requestFocus() }
+    val imeVisible = WindowInsets.isImeVisible
+    // 打开面板前正在打字：选完回到键盘
+    var backToKeyboard by remember { mutableStateOf(false) }
+    val toggle = { which: NewTaskMenu ->
+        if (menu == which) {
+            menu = null
+        } else {
+            if (menu == null) backToKeyboard = imeVisible
+            keyboard?.hide()
+            menu = which
+            lastMenu = which
+        }
     }
-    // 返回键先收起选项，再按一次才收起输入框（这个后注册，比首页收起输入框的那个先拿到返回键）
+    val choose = { action: () -> Unit ->
+        menu = null
+        action()
+        if (backToKeyboard) {
+            focus.requestFocus()
+            keyboard?.show()
+        }
+        backToKeyboard = false
+    }
+    // 返回键先收起面板，再按一次才收起输入框（这个后注册，比首页收起输入框的那个先拿到返回键）
     BackHandler(enabled = menu != null) { menu = null }
-    val noProject = stringResource(R.string.new_task_no_project)
     val models = state.models
     val model = state.model ?: models?.default
     val presets = state.presets
     val preset = state.preset ?: presets?.default
-    val choose = { action: () -> Unit ->
-        menu = null
-        action()
-    }
+    val description = stringResource(R.string.home_new_task)
     val pickImages =
         rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(OutgoingMessage.MAX_IMAGES)) { uris ->
             if (uris.isNotEmpty()) actions.onAddImages(uris)
         }
-    Column(
-        modifier
-            .fillMaxWidth()
-            .designPanel(RoundedCornerShape(22.dp), focused = true)
-            .padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 6.dp)
-            .testTag("new-task"),
-    ) {
-        // 项目：在「项目」那一行的正上方展开，卡片向上长
-        InlineChoices(visible = menu == Menu.PROJECT || menu == Menu.CREATE) {
-            ChoiceList(Modifier.padding(top = 6.dp)) {
-                if ((menu ?: lastMenu) == Menu.CREATE) {
-                    ChoiceRow(
-                        stringResource(R.string.project_create),
-                        { choose { onProject(ProjectMode.CREATE) } },
-                        Modifier.testTag("new-task-create"),
-                        contentPadding = InCard,
-                    )
-                    ChoiceRow(
-                        stringResource(R.string.project_import),
-                        { choose { onProject(ProjectMode.IMPORT) } },
-                        Modifier.testTag("new-task-import"),
-                        contentPadding = InCard,
-                    )
-                } else {
-                    workspaces.forEach { workspace ->
-                        val current = (project as? ProjectPick.Existing)?.workspace?.workspaceId == workspace.workspaceId
-                        ChoiceRow(
-                            workspace.title,
-                            { choose { actions.onChooseProject(ProjectPick.Existing(workspace)) } },
-                            Modifier.testTag("new-task-project:${workspace.workspaceId}"),
-                            selected = current,
-                            contentPadding = InCard,
-                        )
-                    }
-                    ChoiceRow(
-                        noProject,
-                        { choose { actions.onChooseProject(ProjectPick.None) } },
-                        Modifier.testTag("new-task-project:none"),
-                        selected = project == ProjectPick.None,
-                        muted = project != ProjectPick.None,
-                        contentPadding = InCard,
-                    )
-                    ChoiceRow(
-                        stringResource(R.string.new_task_create_or_import),
-                        {
-                            menu = Menu.CREATE
-                            lastMenu = Menu.CREATE
-                        },
-                        Modifier.testTag("new-task-create-or-import"),
-                        leadingIcon = R.drawable.ic_add,
-                        contentPadding = InCard,
-                    )
-                }
-            }
-            DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
-        }
-        val projectOpen = menu == Menu.PROJECT || menu == Menu.CREATE
-        Row(
+    Column(modifier.fillMaxWidth().testTag("new-task")) {
+        Column(
             Modifier
-                .heightIn(min = 44.dp)
-                .clickable(enabled = !state.starting, role = Role.Button) { toggle(Menu.PROJECT) }
-                .testTag("new-task-project"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(horizontal = 16.dp)
+                .padding(top = 8.dp)
+                .fillMaxWidth()
+                .designPanel(RoundedCornerShape(22.dp), focused = focused),
         ) {
-            Text(stringResource(R.string.new_task_project), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-            Text(
-                when (project) {
-                    is ProjectPick.Existing -> project.workspace.title
-                    ProjectPick.None -> noProject
-                },
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                color = colors.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            ChoiceChevron(projectOpen, Modifier.size(12.dp))
-        }
-        val hint = stringResource(R.string.home_new_task)
-        BasicTextField(
-            value = text,
-            onValueChange = onText,
-            enabled = !state.starting,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
-            cursorBrush = SolidColor(colors.text),
-            minLines = 2,
-            maxLines = 8,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(end = 10.dp)
-                    .focusRequester(focus)
-                    .onTap { menu = null }
-                    .testTag("new-task-input")
-                    .semantics { contentDescription = hint },
-            decorationBox = { field ->
-                Box {
-                    if (text.isEmpty()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                    field()
-                }
-            },
-        )
-        ComposerImageStrip(state.images, state.preparingImages, actions.onRemoveImage)
-        state.imageNotice?.let { notice ->
-            Text(
-                stringResource(noticeText(notice)),
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.textSecondary,
-                modifier = Modifier.padding(top = 8.dp).testTag("new-task-image-notice"),
-            )
-        }
-        state.error?.let { error ->
-            Text(
-                stringResource(
-                    when (error) {
-                        CreateError.OFFLINE -> R.string.new_session_offline
-                        CreateError.DSH_UNAVAILABLE -> R.string.new_session_dsh_unavailable
-                        CreateError.NEEDS_PAIRING -> R.string.new_session_needs_pairing
-                        CreateError.FAILED -> R.string.new_session_failed
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(start = 3.dp, end = 1.dp, top = 1.dp, bottom = 1.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                AddImageButton(
+                    available = online && !state.starting && state.imageSupport.canAdd && state.imageSlots > 0,
+                    onAdd = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onUnavailable = { if (state.imageSlots > 0 && !state.starting) actions.onImagesUnavailable() },
+                    modifier = Modifier.padding(bottom = 2.dp),
+                )
+                BasicTextField(
+                    value = text,
+                    onValueChange = onText,
+                    enabled = !state.starting,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.text),
+                    cursorBrush = SolidColor(colors.text),
+                    minLines = 1,
+                    maxLines = 8,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .padding(top = 12.dp, bottom = 12.dp, end = 10.dp)
+                            .focusRequester(focus)
+                            .onFocusChanged { focused = it.isFocused }
+                            .onTap {
+                                // 点输入框：键盘回来，面板让位
+                                menu = null
+                                backToKeyboard = false
+                                if (focused) keyboard?.show()
+                            }.testTag("new-task-input")
+                            .semantics { contentDescription = description },
+                    decorationBox = { field ->
+                        Box {
+                            // 占位文字只在没有焦点时显示：点了输入框就消失，直接写
+                            if (text.isEmpty() && !focused) {
+                                Text(
+                                    hint,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.testTag("new-task-hint"),
+                                )
+                            }
+                            field()
+                        }
                     },
-                ),
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.danger,
-                modifier = Modifier.padding(top = 8.dp).testTag("new-task-error"),
-            )
+                )
+                StartKey(
+                    enabled = online && (text.isNotBlank() || state.images.isNotEmpty()) && !state.starting && state.preparingImages == 0,
+                    starting = state.starting,
+                ) { actions.onStart(text, project) }
+            }
+            ComposerImageStrip(state.images, state.preparingImages, actions.onRemoveImage, Modifier.padding(start = 16.dp, bottom = 12.dp))
+            state.imageNotice?.let { notice ->
+                Text(
+                    stringResource(noticeText(notice)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp).testTag("new-task-image-notice"),
+                )
+            }
+            state.error?.let { error ->
+                Text(
+                    stringResource(
+                        when (error) {
+                            CreateError.OFFLINE -> R.string.new_session_offline
+                            CreateError.DSH_UNAVAILABLE -> R.string.new_session_dsh_unavailable
+                            CreateError.NEEDS_PAIRING -> R.string.new_session_needs_pairing
+                            CreateError.FAILED -> R.string.new_session_failed
+                        },
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.danger,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp).testTag("new-task-error"),
+                )
+            }
         }
-        // 模型和审批方式：在最下面一行的正上方展开
-        InlineChoices(visible = (menu == Menu.MODEL && models != null) || (menu == Menu.PRESET && presets != null)) {
-            DesignDivider(Modifier.padding(end = 10.dp, top = 8.dp, bottom = 4.dp))
-            ChoiceList(withSubtitles = true) {
-                if ((menu ?: lastMenu) == Menu.MODEL) {
-                    models?.models?.forEach { option ->
-                        val ref = ModelRef(option.provider, option.model)
-                        ChoiceRow(
-                            option.name,
-                            { choose { actions.onChooseModel(ref) } },
-                            subtitle = option.providerName,
-                            selected = ref == model,
-                            contentPadding = InCard,
-                        )
-                    }
-                } else {
-                    presets?.presets?.forEach { option ->
-                        val known = permissionHint(option.id)
-                        ChoiceRow(
-                            if (known != null) permissionLabel(option.id) else option.name,
-                            { choose { actions.onChoosePreset(option.id) } },
-                            subtitle = known,
-                            selected = option.id == preset,
-                            contentPadding = InCard,
-                        )
-                    }
+        // 键盘弹出时这一行收起，收起键盘后再出来
+        AnimatedVisibility(
+            visible = !imeVisible || menu != null,
+            enter = fadeIn(tween(OPTIONS_MILLIS)) + expandVertically(tween(OPTIONS_MILLIS)),
+            exit = fadeOut(tween(OPTIONS_MILLIS)) + shrinkVertically(tween(OPTIONS_MILLIS)),
+        ) {
+            NewTaskOptions(state, menu, enabled = true, onOpen = toggle)
+        }
+        if (imeVisible && menu == null) Spacer(Modifier.height(8.dp))
+        val shown = menu ?: lastMenu
+        KeyboardPanel(
+            open = menu != null,
+            title = stringResource(if (shown == NewTaskMenu.MODEL) R.string.panel_models else R.string.panel_permissions),
+        ) {
+            val rowPadding = PaddingValues(horizontal = 12.dp)
+            if (shown == NewTaskMenu.MODEL) {
+                models?.models?.forEach { option ->
+                    val ref = ModelRef(option.provider, option.model)
+                    ChoiceRow(
+                        option.name,
+                        { choose { actions.onChooseModel(ref) } },
+                        Modifier.testTag("new-task-model:${option.provider}/${option.model}"),
+                        subtitle = option.providerName,
+                        selected = ref == model,
+                        contentPadding = rowPadding,
+                    )
+                }
+            } else {
+                presets?.presets?.forEach { option ->
+                    val known = permissionHint(option.id)
+                    ChoiceRow(
+                        if (known != null) permissionLabel(option.id) else option.name,
+                        { choose { actions.onChoosePreset(option.id) } },
+                        Modifier.testTag("new-task-preset:${option.id}"),
+                        subtitle = known,
+                        selected = option.id == preset,
+                        leadingIcon = R.drawable.ic_dsh_shield,
+                        leadingTint = presetTint(option.id),
+                        contentPadding = rowPadding,
+                    )
                 }
             }
-            DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
-        }
-        Row(Modifier.extendStart(12.dp).fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            AddImageButton(
-                available = online && !state.starting && state.imageSupport.canAdd && state.imageSlots > 0,
-                onAdd = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                onUnavailable = { if (state.imageSlots > 0 && !state.starting) actions.onImagesUnavailable() },
-            )
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                val modelName =
-                    model?.let { ref ->
-                        models?.models?.firstOrNull { it.provider == ref.provider && it.model == ref.model }?.name
-                            ?: ref.model
-                    }
-                Choice(
-                    modelName ?: stringResource(R.string.design_choose_model),
-                    enabled = models != null && !state.starting,
-                    open = menu == Menu.MODEL,
-                    tag = "new-task-model",
-                    modifier = Modifier.weight(1f, fill = false),
-                ) { toggle(Menu.MODEL) }
-                Choice(
-                    permissionLabel(preset),
-                    enabled = presets != null && !state.starting,
-                    open = menu == Menu.PRESET,
-                    tag = "new-task-preset",
-                    modifier = Modifier.weight(1f, fill = false),
-                ) { toggle(Menu.PRESET) }
-            }
-            StartKey(
-                enabled = online && (text.isNotBlank() || state.images.isNotEmpty()) && !state.starting && state.preparingImages == 0,
-                starting = state.starting,
-            ) { actions.onStart(text, project) }
         }
     }
 }
 
-/** 卡片左边已经有 16 的内边距，右边只有 6：选项行左边不再加，右边补到和左边对称。 */
-private val InCard = PaddingValues(end = 10.dp)
-
-private enum class Menu { PROJECT, CREATE, MODEL, PRESET }
-
-@Composable
-private fun Choice(
-    label: String,
-    enabled: Boolean,
-    open: Boolean,
-    tag: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val colors = DesignTheme.colors
-    Row(
-        modifier
-            .heightIn(min = 48.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 4.dp)
-            .testTag(tag),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        // 展开时文字换成主文字色、字重 500，小箭头朝上（设计规格 6.10）
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (open) FontWeight.Medium else FontWeight.Normal),
-            color = (if (open) colors.text else colors.textSecondary).copy(alpha = if (enabled) 1f else DISABLED),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        ChoiceChevron(open, Modifier.size(12.dp), tint = if (open) colors.text else colors.textSecondary)
-    }
-}
-
-/** 发送键：有字时主文字色实心圆和向上箭头；开始中换成转圈标记。 */
+/** 开始键：有字时主文字色实心圆和向上箭头；开始中换成转圈标记。按下时缩小。 */
 @Composable
 private fun StartKey(
     enabled: Boolean,
@@ -405,27 +397,20 @@ private fun StartKey(
 ) {
     val colors = DesignTheme.colors
     val description = stringResource(R.string.new_task_start)
+    val press = remember { MutableInteractionSource() }
     Box(
         Modifier
             .size(48.dp)
+            .pressScale(press)
             // 新任务还没有上下文，外圈只画轨道（设计规格 6.3）
             .contextRing(ratio = null, trackOnly = true)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = press, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description }
             .testTag("new-task-start"),
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.size(30.dp).background(
-                if (enabled ||
-                    starting
-                ) {
-                    colors.text
-                } else {
-                    colors.fill
-                },
-                CircleShape,
-            ),
+            Modifier.size(30.dp).background(if (enabled || starting) colors.text else colors.fill, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             if (starting) {
@@ -441,5 +426,8 @@ private fun StartKey(
         }
     }
 }
+
+/** 配置行显示和收起的时长。 */
+private const val OPTIONS_MILLIS = 160
 
 private const val DISABLED = 0.5f

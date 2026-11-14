@@ -127,6 +127,9 @@ class NewTaskFlow(
 
     fun chooseProject(pick: ProjectPick) = mutable.update { it.copy(project = pick, error = null) }
 
+    /** 不再指定这次的项目，回到默认的（上一次用的）。 */
+    fun clearProject() = mutable.update { it.copy(project = null, error = null) }
+
     fun chooseModel(model: ModelRef) = mutable.update { it.copy(model = model, imageNotice = null) }
 
     /** 点了不可用的加号：说明原因（还没读到模型列表时顺便再读）。 */

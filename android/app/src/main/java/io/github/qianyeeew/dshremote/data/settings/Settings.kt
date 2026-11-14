@@ -36,14 +36,11 @@ class SettingsRepository internal constructor(
             )
         }
 
-    /** 首页最近列表的项目筛选（每台电脑各自记，null 是全部项目）。 */
-    fun projectFilter(hostId: String): Flow<String?> = store.data.map { it[filterKey(hostId)] }
+    /** 首页最近列表的分组方式（所有电脑共用）：项目、日期或状态的名字，null 是还没选过（按项目分组）。 */
+    val homeGrouping: Flow<String?> = store.data.map { it[GROUPING] }
 
-    suspend fun setProjectFilter(
-        hostId: String,
-        filter: String?,
-    ) {
-        store.edit { if (filter == null) it.remove(filterKey(hostId)) else it[filterKey(hostId)] = filter }
+    suspend fun setHomeGrouping(grouping: String) {
+        store.edit { it[GROUPING] = grouping }
     }
 
     /** 新任务上一次用的项目（每台电脑各自记）：项目 id，空串是「不指定项目」，null 是还没用过。 */
@@ -78,8 +75,7 @@ class SettingsRepository internal constructor(
         private val PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
         private val HINT_DISMISSED = booleanPreferencesKey("background_hint_dismissed")
         private val LAST_HOST = stringPreferencesKey("last_host_id")
-
-        private fun filterKey(hostId: String) = stringPreferencesKey("project_filter:$hostId")
+        private val GROUPING = stringPreferencesKey("home_grouping")
 
         private fun projectKey(hostId: String) = stringPreferencesKey("new_task_project:$hostId")
 

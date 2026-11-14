@@ -378,6 +378,8 @@ fun DesignBackBar(
     onBack: () -> Unit,
     title: String? = null,
     subtitle: String? = null,
+    /** 第二行最后可以点的一项（例如会话页的审批方式），接在 [subtitle] 后面。 */
+    subtitleAction: Pair<String, () -> Unit>? = null,
 ) {
     val colors = DesignTheme.colors
     Row(
@@ -407,15 +409,38 @@ fun DesignBackBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (!subtitle.isNullOrEmpty()) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag(TOP_BAR_SUBTITLE_TAG),
-                    )
+                if (!subtitle.isNullOrEmpty() || subtitleAction != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!subtitle.isNullOrEmpty()) {
+                            Text(
+                                if (subtitleAction != null) "$subtitle · " else subtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false).testTag(TOP_BAR_SUBTITLE_TAG),
+                            )
+                        }
+                        subtitleAction?.let { (label, action) ->
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(role = Role.Button, onClick = action)
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    .testTag(TOP_BAR_SUBTITLE_ACTION_TAG),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(label, style = MaterialTheme.typography.labelSmall, color = colors.text, maxLines = 1)
+                                Icon(
+                                    painterResource(R.drawable.ic_dsh_chevron_down),
+                                    null,
+                                    Modifier.size(10.dp),
+                                    tint = colors.textSecondary,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -423,3 +448,4 @@ fun DesignBackBar(
 }
 
 const val TOP_BAR_SUBTITLE_TAG = "top-bar-subtitle"
+const val TOP_BAR_SUBTITLE_ACTION_TAG = "top-bar-subtitle-action"

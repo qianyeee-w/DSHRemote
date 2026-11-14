@@ -83,7 +83,7 @@ android/app/src/main/java/io/github/qianyeeew/dshremote/
 - 指纹校验必须有单元测试，至少覆盖：指纹正确时通过、指纹错误时拒绝、没有证书时拒绝，以及 TrustManager 和 HostnameVerifier 各自单独都能拦住错误的指纹。
 - token 和指纹只能存在 Keystore 加密的存储里，不允许写进 SharedPreferences 明文或日志。持有 token 的类型不得在 `toString()` 中输出 token；OkHttp 不加会记录请求头的日志拦截器。
 - 只调用 `docs/protocol.md` 中列出的接口；WebSocket 握手不发送 `Origin`。
-- 界面的颜色和字号只从主题取：`DesignTheme.colors`（设计规格第 3 节的颜色）、`MaterialTheme.typography`、`CodeTextStyles`，不要在页面里写死颜色值。通用组件在 `ui/common/DesignComponents.kt`，原地展开的选择（选项区、选项行、首页面板、遮盖）在 `ui/common/InlineChoices.kt`，设计依据是 `docs/design/ui-redesign/`。选择一律原地展开，不用弹出窗口或选择对话框（设计规格 6.10）。
+- 界面的颜色和字号只从主题取：`DesignTheme.colors`（设计规格第 3 节的颜色）、`MaterialTheme.typography`、`CodeTextStyles`，不要在页面里写死颜色值。通用组件在 `ui/common/DesignComponents.kt`，原地展开的选择（选项行、首页电脑列表、遮盖）在 `ui/common/InlineChoices.kt`，设计依据是 `docs/design/ui-redesign/`。输入框的模型和审批方式（2026-11-14 用户确认，取代设计规格 6.10 里输入框的部分）：输入框下面常驻一行「模型 · 审批方式」，键盘弹出时这一行收起；点了其中一项，键盘收起，原来键盘的位置换成选项面板（`ui/common/KeyboardPanel.kt`，高度和键盘一样，只列这一种）。首页右上角「⋯」是唯一的弹出菜单（分组方式、新建／导入项目、电脑与设置）。点击反馈是圆角浅色底块（`ui/common/PressFeedback.kt`，主题里替换了 `LocalIndication`），圆形按钮用 `pressScale` 按下缩小，不用水波纹。
 - 字符串放进 `strings.xml`，不要硬编码，为第二版的中英文界面做准备。lint 的 `UnusedResources` 也算错误，删掉界面时记得删掉不再使用的字符串。
 - 页面拆成两层：`XxxScreen` 连接 ViewModel，`XxxContent` 只接收状态和回调。界面测试（`androidTest`）直接渲染 `XxxContent`，不需要网络和真实数据。
 - 界面测试要在**解锁的**手机上跑：锁屏时测试用的 Activity 不会显示，Compose 测试报 `No compose hierarchies found`。

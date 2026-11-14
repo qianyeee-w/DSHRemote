@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -68,24 +69,28 @@ fun StepsView(
             if (block.changedFiles > 0) add(stringResource(R.string.chat_steps_files, block.changedFiles))
         }.joinToString(" · ")
     Column(modifier.fillMaxWidth().animateContentSize()) {
-        Row(
-            Modifier
-                .heightIn(min = 48.dp)
-                .clickable(
-                    onClickLabel = stringResource(if (open) R.string.chat_steps_collapse else R.string.chat_steps_expand),
-                    role = Role.Button,
-                ) { open = !open }
-                .testTag("steps-summary"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(summary, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-            Icon(
-                painterResource(R.drawable.ic_dsh_chevron_right),
-                contentDescription = null,
-                modifier = Modifier.size(14.dp).rotate(if (open) 90f else 0f),
-                tint = colors.textSecondary,
-            )
+        // 按下的圆角底块比文字大一圈（左右各 8），文字仍和正文左边对齐
+        Row(Modifier.heightIn(min = 48.dp).offset(x = (-8).dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(
+                        onClickLabel = stringResource(if (open) R.string.chat_steps_collapse else R.string.chat_steps_expand),
+                        role = Role.Button,
+                    ) { open = !open }
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .testTag("steps-summary"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(summary, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                Icon(
+                    painterResource(R.drawable.ic_dsh_chevron_right),
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp).rotate(if (open) 90f else 0f),
+                    tint = colors.textSecondary,
+                )
+            }
         }
         if (open) {
             Column(Modifier.fillMaxWidth().testTag("steps-list")) {

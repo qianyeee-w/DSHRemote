@@ -82,10 +82,9 @@ class ImageUiTest {
     @Test
     fun availablePlusIsShownInBothComposerStates() {
         renderComposer(onlineChatState().copy(imageSupport = ImageSupport.YES))
-        // 收起时一行：加号、占位文字、发送键
+        // 收起时一行：加号、占位文字、发送键；写字时加号还在输入框左边（键盘弹出时下面的配置行会收起）
         compose.onNodeWithContentDescription(text(R.string.image_add)).assertIsDisplayed()
         compose.onNodeWithTag("chat-input").performClick()
-        compose.onNodeWithTag("chat-composer-options").assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.image_add)).assertIsDisplayed()
     }
 

@@ -12,9 +12,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.assertAll
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
@@ -23,6 +23,7 @@ import androidx.compose.ui.test.isNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -50,7 +51,7 @@ import io.github.qianyeeew.dshremote.ui.chat.ChatComposer
 import io.github.qianyeeew.dshremote.ui.chat.ChatState
 import io.github.qianyeeew.dshremote.ui.chat.Picker
 import io.github.qianyeeew.dshremote.ui.chat.USAGE_DETAILS_TAG
-import io.github.qianyeeew.dshremote.ui.common.INLINE_CHOICES_TAG
+import io.github.qianyeeew.dshremote.ui.common.KEYBOARD_PANEL_TAG
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -64,15 +65,14 @@ class ChatComposerUiTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    /** 模型和审批方式常驻在输入框下面（键盘没弹出时），不用先点输入框。 */
     @Test
-    fun emptyComposerExpandsOnFocusAndCollapsesWhenFocusLeaves() {
+    fun optionsStayUnderTheComposerWithoutFocus() {
         render()
-        compose.onNodeWithTag("chat-composer-options").assertDoesNotExist()
-        compose.onNodeWithTag("chat-send").assertIsNotEnabled()
-        compose.onNodeWithTag("chat-input").performClick()
         compose.onNodeWithTag("chat-composer-options").assertIsDisplayed()
-        compose.onNodeWithText("移开焦点").performClick()
-        compose.onNodeWithTag("chat-composer-options").assertDoesNotExist()
+        compose.onNodeWithTag("chat-model").assertIsDisplayed()
+        compose.onNodeWithTag("chat-preset").assertIsDisplayed()
+        compose.onNodeWithTag("chat-send").assertIsNotEnabled()
     }
 
     /** 没有焦点就收起（设计规格 6.3），写了一半的字留着；收起时发送键还在，发送被拒绝时字不丢。 */
@@ -81,7 +81,6 @@ class ChatComposerUiTest {
         render(ChatActions(onSend = { false }))
         compose.onNodeWithTag("chat-input").performTextInput("继续验证")
         compose.onNodeWithText("移开焦点").performClick()
-        compose.onNodeWithTag("chat-composer-options").assertDoesNotExist()
         compose.onNodeWithTag("chat-send").assertIsEnabled().performClick()
         compose.onNodeWithTag("chat-input").assertTextContains("继续验证")
     }
@@ -146,11 +145,11 @@ class ChatComposerUiTest {
     }
 
     /**
-     * 选项在输入框里、最下面一行的上方展开（设计规格 6.10）：不另开窗口，输入框一直有焦点（键盘不收起）；
-     * 点另一个触发项换成它的选项；选中一项调用对应的操作；点输入的文字、按返回键都会收起，返回键先收起选项。
+     * 点输入框下面的模型或审批方式：原来键盘的位置换成选项面板，只列这一种；写的字不变；
+     * 点另一项换成它的选项；选中一项调用对应的操作；点输入框、按返回键都会收起面板。
      */
     @Test
-    fun choicesOpenInsideTheComposerAndKeepTheFocus() {
+    fun choicesOpenInThePanelBelowTheComposer() {
         var picker by mutableStateOf<Picker>(Picker.Closed)
         val chosen = mutableListOf<String>()
         var back: OnBackPressedDispatcher? = null
@@ -162,6 +161,7 @@ class ChatComposerUiTest {
                 ChatComposer(
                     state = onlineChatState(),
                     picker = picker,
+                    initialText = "先看一下",
                     actions =
                         ChatActions(
                             onOpenModels = { picker = if (picker is Picker.Models) Picker.Closed else Picker.Models(models) },
@@ -179,31 +179,28 @@ class ChatComposerUiTest {
                 )
             }
         }
-        compose.onNodeWithTag("chat-input").performClick()
-        compose.onNodeWithTag("chat-input").performTextInput("先看一下")
         compose.onNodeWithTag("chat-model").performClick()
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertIsDisplayed()
-        compose.onNodeWithTag("chat-input").assertIsFocused()
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed()
         compose.onNodeWithTag("chat-model:test/测试模型").assertIsSelected()
+        save("composer-models")
         // 换成审批方式：已知的三种用中文名和说明，DSH 给的其他方式照常列出
         compose.onNodeWithTag("chat-preset").performClick()
+        compose.onAllNodesWithTag(KEYBOARD_PANEL_TAG).assertCountEquals(1)
         compose.onNodeWithTag("chat-model:test/m2").assertDoesNotExist()
         compose.onNodeWithText(text(R.string.design_permission_read_only_hint)).assertIsDisplayed()
         compose.onNodeWithText("Auto").assertIsDisplayed()
-        compose.onNodeWithTag("chat-input").assertIsFocused()
         compose.onNodeWithTag("chat-preset:auto").performClick()
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
-        compose.onNodeWithTag("chat-input").assertIsFocused().assertTextContains("先看一下")
-        // 点输入的文字收起
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
+        compose.onNodeWithTag("chat-input").assertTextContains("先看一下")
+        // 点输入框：面板让位
         compose.onNodeWithTag("chat-model").performClick()
         compose.onNodeWithTag("chat-input").performClick()
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
-        // 返回键先收起选项，输入框还在编辑
-        compose.onNodeWithTag("chat-model").performClick()
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
+        // 返回键先收起面板
+        compose.runOnIdle { picker = Picker.Models(models) }
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed()
         compose.runOnIdle { back!!.onBackPressed() }
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
-        compose.onNodeWithTag("chat-input").assertIsFocused()
-        compose.onNodeWithTag("chat-composer-options").assertIsDisplayed()
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("auto"), chosen) }
     }
 
@@ -243,8 +240,8 @@ class ChatComposerUiTest {
     }
 
     /**
-     * 落地方案 B4（设计规格 6.3、7.11）：长按发送键在输入框里展开用量，没写字时也能长按；
-     * 和模型、审批方式的选项一次只展开一个；返回键先收起它；拿不到的项不显示。
+     * 落地方案 B4（设计规格 6.3、7.11）：长按发送键在输入框下面的面板里看用量，没写字时也能长按；
+     * 和模型、审批方式用同一块面板，一次只开一个；返回键先收起它；拿不到的项不显示。
      */
     @Test
     fun longPressingTheSendKeyShowsUsageInPlace() {
@@ -273,14 +270,13 @@ class ChatComposerUiTest {
         compose.onNodeWithText(context.getString(R.string.usage_context_amount, "40k", "131k")).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.usage_session_value, "182k", "12k")).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.usage_percent, 76)).assertIsDisplayed()
-        compose.onNodeWithTag("chat-input").assertIsFocused()
         compose.runOnIdle { assertEquals(1, refreshed) }
         save("composer-usage")
         // 打开模型的选项：用量收起
         compose.onNodeWithTag("chat-model").performClick()
         compose.onNodeWithTag(USAGE_DETAILS_TAG).assertDoesNotExist()
         compose.runOnIdle { picker = Picker.Closed }
-        // 再展开，返回键先收起它，输入框还在编辑
+        // 再打开，返回键先收起它
         compose.onNodeWithTag("chat-send").performTouchInput { longClick() }
         compose.onNodeWithTag(USAGE_DETAILS_TAG).assertIsDisplayed()
         compose.runOnIdle { back!!.onBackPressed() }
@@ -326,7 +322,6 @@ class ChatComposerUiTest {
     fun stopRemainsAvailableWhileComposerIsCollapsed() {
         var stopped = 0
         render(ChatActions(onCancelRun = { stopped++ }), onlineChatState(SessionStatus.RUNNING))
-        compose.onNodeWithTag("chat-composer-options").assertDoesNotExist()
         compose.onNodeWithTag("chat-stop").performClick()
         compose.runOnIdle { assertEquals(1, stopped) }
     }

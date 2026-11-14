@@ -11,7 +11,6 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
@@ -53,9 +52,10 @@ import io.github.qianyeeew.dshremote.data.host.HostAddress
 import io.github.qianyeeew.dshremote.data.live.LinkStatus
 import io.github.qianyeeew.dshremote.ui.attention.AttentionCardActions
 import io.github.qianyeeew.dshremote.ui.common.COVER_TAG
-import io.github.qianyeeew.dshremote.ui.common.INLINE_CHOICES_TAG
+import io.github.qianyeeew.dshremote.ui.common.KEYBOARD_PANEL_TAG
 import io.github.qianyeeew.dshremote.ui.hosts.HostRow
 import io.github.qianyeeew.dshremote.ui.sessions.CreateError
+import io.github.qianyeeew.dshremote.ui.sessions.HomeGrouping
 import io.github.qianyeeew.dshremote.ui.sessions.NewTaskActions
 import io.github.qianyeeew.dshremote.ui.sessions.NewTaskState
 import io.github.qianyeeew.dshremote.ui.sessions.ProjectMode
@@ -72,7 +72,7 @@ import org.junit.Rule
 import org.junit.Test
 import java.io.File
 
-/** 首页（设计规格 7.1）：进行中卡片、最近列表和项目筛选、电脑切换、新任务。 */
+/** 首页（设计规格 7.1）：进行中卡片、按项目分组的最近列表、「⋯」菜单、电脑切换、新任务。 */
 class HomeLayoutUiTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -184,25 +184,36 @@ class HomeLayoutUiTest {
         compose.runOnIdle { assertEquals("working", opened) }
     }
 
-    @Test fun projectFilterIsChosenFromTheRecentHeading() {
-        var chosen: String? = "unset"
-        render(onFilter = { chosen = it })
-        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("home-filter"))
-        compose.onNodeWithText(text(R.string.home_all_projects)).performClick()
-        // 在这一行下面展开，每个项目右边是它在最近列表里的会话数
-        compose.onNodeWithTag("home-filter-panel").assertIsDisplayed()
-        compose.onNodeWithTag("home-filter:all").assertIsSelected()
-        compose.onNodeWithTag("home-filter:p1").assertTextContains("1")
-        compose.onNodeWithTag("home-filter:p2").performClick()
-        compose.runOnIdle { assertEquals("p2", chosen) }
-        compose.onNodeWithTag("home-filter-panel").assertDoesNotExist()
+    /** 右上角「⋯」：分组方式（项目、日期、状态），当前的一项带勾。 */
+    @Test fun groupingIsChosenFromTheMoreMenu() {
+        var chosen: HomeGrouping? = null
+        render(onGrouping = { chosen = it })
+        compose.onNodeWithTag("home-more").performClick()
+        compose.onNodeWithTag("home-more-menu").assertIsDisplayed()
+        compose.onNodeWithTag("home-group:PROJECT").assertIsSelected()
+        save("home-more-menu")
+        compose.onNodeWithTag("home-group:DATE").performClick()
+        compose.runOnIdle { assertEquals(HomeGrouping.DATE, chosen) }
+        compose.onNodeWithTag("home-more-menu").assertDoesNotExist()
     }
 
-    @Test fun filteredRecentListHidesOtherProjectsAndTheProjectName() {
-        render(filter = "p2")
+    /** 默认按项目分组：组名就是项目，行里不再写项目名；点组名收起这一组。 */
+    @Test fun recentIsGroupedByProjectAndGroupsFold() {
+        render()
         compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
-        compose.onNodeWithTag("recent:recent").assertDoesNotExist()
-        compose.onNodeWithText("工具脚本").assertIsDisplayed() // 只在筛选按钮上
+        compose.onNodeWithTag("group:project:p2").assertIsDisplayed()
+        compose.onNodeWithText("工具脚本").performClick()
+        compose.onNodeWithTag("recent:tools").assertDoesNotExist()
+        compose.onNodeWithText("工具脚本").performClick()
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
+    }
+
+    /** 按日期分组时，行里写项目名。 */
+    @Test fun otherGroupingsShowTheProjectInTheRow() {
+        render(grouping = HomeGrouping.DATE)
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("recent:tools"))
+        compose.onNodeWithText("工具脚本").assertIsDisplayed()
+        compose.onNodeWithTag("group:project:p2").assertDoesNotExist()
     }
 
     /** 多台电脑时从左上角的菜单切换（用户确认：首页直接显示上次用的那台）。 */
@@ -248,13 +259,13 @@ class HomeLayoutUiTest {
     }
 
     /**
-     * 新任务的项目、模型、审批方式在输入框卡片里展开（设计规格 6.10）：输入框一直有焦点，写的字不变；
-     * 一次只展开一个；点输入的文字收起；返回键先收起选项，再按一次才收起输入框。
+     * 新任务的模型、审批方式在输入框下面：点了打开选项面板（只列这一种），写的字不变；
+     * 点输入框面板让位；返回键先收起面板，再按一次才收起输入框。
      */
-    @Test fun newTaskChoicesOpenInsideTheCardAndKeepTheFocus() {
+    @Test fun newTaskChoicesOpenInThePanelBelow() {
         val chosen = mutableListOf<String>()
         render(
-            newTask =
+            newTask = {
                 NewTaskState(
                     models =
                         ModelList(
@@ -266,7 +277,8 @@ class HomeLayoutUiTest {
                             "workspace-write",
                             listOf(PermissionPreset("read-only", "r"), PermissionPreset("workspace-write", "w")),
                         ),
-                ),
+                )
+            },
             newTaskActions =
                 NewTaskActions(
                     onChooseModel = { chosen += it.model },
@@ -276,31 +288,47 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("home-new-session").performClick()
         compose.onNodeWithTag("new-task-input").performTextInput("给通知加按钮")
         compose.onNodeWithTag("new-task-preset").performClick()
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertIsDisplayed()
-        compose.onNodeWithTag("new-task-input").assertIsFocused()
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.design_permission_workspace_hint)).assertIsDisplayed()
+        // 只列审批方式
+        compose.onNodeWithText("模型二").assertDoesNotExist()
         save("new-task-preset")
-        // 换成模型：只有一个选项区
+        // 换成模型：还是同一块面板
         compose.onNodeWithTag("new-task-model").performClick()
-        compose.onAllNodesWithTag(INLINE_CHOICES_TAG).assertCountEquals(1)
+        compose.onAllNodesWithTag(KEYBOARD_PANEL_TAG).assertCountEquals(1)
         compose.onNodeWithText("模型二").performClick()
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
-        compose.onNodeWithTag("new-task-input").assertIsFocused().assertTextContains("给通知加按钮")
-        // 项目在「项目」那一行上方展开
-        compose.onNodeWithTag("new-task-project").performClick()
-        compose.onNodeWithTag("new-task-project:p1").assertIsSelected()
-        compose.onNodeWithTag("new-task-input").assertIsFocused()
-        save("new-task-project")
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
+        compose.onNodeWithTag("new-task-input").assertTextContains("给通知加按钮")
+        // 点输入框：面板让位
+        compose.onNodeWithTag("new-task-model").performClick()
         compose.onNodeWithTag("new-task-input").performClick()
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
-        // 返回键：先收起选项，再收起输入框
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
+        // 返回键：先收起面板，再收起输入框
         compose.onNodeWithTag("new-task-model").performClick()
         compose.runOnIdle { back!!.onBackPressed() }
-        compose.onNodeWithTag(INLINE_CHOICES_TAG).assertDoesNotExist()
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
         compose.onNodeWithTag("new-task").assertIsDisplayed()
         compose.runOnIdle { back!!.onBackPressed() }
         compose.onNodeWithTag("new-task").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("m2"), chosen) }
+    }
+
+    /** 收起的输入框下面也有模型和审批方式：点了直接打开面板，不先进入输入。 */
+    @Test fun optionsUnderTheCollapsedBarOpenThePanel() {
+        render(
+            newTask = {
+                NewTaskState(
+                    presets = PermissionPresetList("read-only", listOf(PermissionPreset("read-only", "r"))),
+                    models = ModelList(ModelRef("p", "m1"), listOf(ModelOption("p", "来源", "m1", "模型一"))),
+                )
+            },
+        )
+        compose.onNodeWithTag("new-task").assertDoesNotExist()
+        compose.onNodeWithTag("new-task-preset").performClick()
+        compose.onNodeWithTag("new-task").assertIsDisplayed()
+        compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed()
+        // 没点输入框：占位文字还在
+        compose.onNodeWithTag("new-task-hint").assertIsDisplayed()
     }
 
     /**
@@ -387,49 +415,75 @@ class HomeLayoutUiTest {
         compose.runOnIdle { assertEquals(2, expanded) }
     }
 
-    /** 默认用上一次的项目；可以换项目；发送键带上内容和项目。 */
-    @Test fun startUsesTheChosenProject() {
+    /**
+     * 点项目组名右边的加号：输入框提示「在 <项目> 工作区新建任务」；点输入框提示消失，写好后建在这个项目里。
+     * 没点加号时用上一次的项目；返回键取消这次的项目。
+     */
+    @Test fun plusOnAProjectGroupTargetsThatProject() {
         val started = mutableListOf<Pair<String, ProjectPick>>()
-        var project: ProjectPick by mutableStateOf(ProjectPick.Existing(workspaces[0]))
+        var task by mutableStateOf(NewTaskState())
         render(
-            newTaskProject = { project },
+            newTask = { task },
             newTaskActions =
                 NewTaskActions(
-                    onChooseProject = { project = it },
+                    onChooseProject = { task = task.copy(project = it) },
+                    onClearProject = { task = task.copy(project = null) },
                     onStart = { text, pick ->
                         started += text to pick
                         true
                     },
                 ),
         )
+        compose.onNodeWithTag("home-new-session-text").assertTextEquals(text(R.string.home_new_task))
+        compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("group:project:p2"))
+        compose.onNodeWithTag("group-new-task:project:p2").performClick()
+        compose.onNodeWithTag("home-new-session-text").assertTextEquals(context.getString(R.string.new_task_in_project, "工具脚本"))
+        // 返回键取消，再点一次加号
+        compose.runOnIdle { back!!.onBackPressed() }
+        compose.onNodeWithTag("home-new-session-text").assertTextEquals(text(R.string.home_new_task))
+        compose.onNodeWithTag("group-new-task:project:p2").performClick()
+        save("new-task-target")
         compose.onNodeWithTag("home-new-session").performClick()
+        compose.onNodeWithTag("new-task-input").performClick()
+        compose.onNodeWithTag("new-task-hint").assertDoesNotExist()
         compose.onNodeWithTag("new-task-start").assertIsNotEnabled()
-        compose.onNodeWithTag("new-task-project").assertTextContains("DSHRemote", substring = true)
-        compose.onNodeWithTag("new-task-project").performClick()
-        compose.onNodeWithTag("new-task-project:p2").performClick()
         compose.onNodeWithTag("new-task-input").performTextInput("清理脚本")
         compose.onNodeWithTag("new-task-start").performClick()
         compose.runOnIdle { assertEquals(listOf("清理脚本" to ProjectPick.Existing(workspaces[1])), started) }
     }
 
-    /** 项目列表里有「不指定项目」，最后一项「新建或导入项目」进入现有的创建／导入流程。 */
-    @Test fun projectListOffersNoProjectAndCreateOrImport() {
-        val modes = mutableListOf<ProjectMode>()
-        var picked: ProjectPick? = null
-        render(onProject = { modes += it }, newTaskActions = NewTaskActions(onChooseProject = { picked = it }))
+    /** 没点加号：用上一次的项目。 */
+    @Test fun startWithoutPlusUsesTheLastProject() {
+        val started = mutableListOf<ProjectPick>()
+        render(
+            newTaskActions =
+                NewTaskActions(
+                    onStart = { _, pick ->
+                        started += pick
+                        true
+                    },
+                ),
+        )
         compose.onNodeWithTag("home-new-session").performClick()
-        compose.onNodeWithTag("new-task-project").performClick()
-        compose.onNodeWithTag("new-task-project:none").performClick()
-        compose.runOnIdle { assertEquals(ProjectPick.None, picked) }
-        compose.onNodeWithTag("new-task-project").performClick()
-        compose.onNodeWithTag("new-task-create-or-import").performClick()
-        compose.onNodeWithTag("new-task-import").performClick()
-        compose.runOnIdle { assertEquals(listOf(ProjectMode.IMPORT), modes) }
+        compose.onNodeWithTag("new-task-input").performTextInput("看一下日志")
+        compose.onNodeWithTag("new-task-start").performClick()
+        compose.runOnIdle { assertEquals(listOf<ProjectPick>(ProjectPick.Existing(workspaces[0])), started) }
+    }
+
+    /** 「⋯」里的新建项目和导入已有项目进入现有的创建／导入流程。 */
+    @Test fun moreMenuOffersCreateAndImport() {
+        val modes = mutableListOf<ProjectMode>()
+        render(onProject = { modes += it })
+        compose.onNodeWithTag("home-more").performClick()
+        compose.onNodeWithTag("home-project-import").performClick()
+        compose.onNodeWithTag("home-more").performClick()
+        compose.onNodeWithTag("home-project-create").performClick()
+        compose.runOnIdle { assertEquals(listOf(ProjectMode.IMPORT, ProjectMode.CREATE), modes) }
     }
 
     /** 会话没能创建：留在首页，提示原因，写的字还在。 */
     @Test fun createFailureIsShownInTheComposer() {
-        render(newTask = NewTaskState(error = CreateError.OFFLINE))
+        render(newTask = { NewTaskState(error = CreateError.OFFLINE) })
         compose.onNodeWithTag("home-new-session").performClick()
         compose.onNodeWithTag("new-task-error").assertIsDisplayed()
     }
@@ -444,12 +498,12 @@ class HomeLayoutUiTest {
 
     private fun render(
         offline: Boolean = false,
-        filter: String? = null,
+        grouping: HomeGrouping = HomeGrouping.PROJECT,
         actions: AttentionCardActions = AttentionCardActions(),
         onSession: (String) -> Unit = {},
         onSwitch: (String) -> Unit = {},
-        onFilter: (String?) -> Unit = {},
-        newTask: NewTaskState = NewTaskState(),
+        onGrouping: (HomeGrouping) -> Unit = {},
+        newTask: () -> NewTaskState = { NewTaskState() },
         newTaskProject: () -> ProjectPick = { ProjectPick.Existing(workspaces[0]) },
         newTaskActions: NewTaskActions = NewTaskActions(),
         onProject: (ProjectMode) -> Unit = {},
@@ -475,10 +529,11 @@ class HomeLayoutUiTest {
                 status = if (offline) LinkStatus.Stopped else online,
                 sessions = sessions,
                 sections =
-                    homeSections(sessions, emptyList(), workspaces, filter, online = !offline, unread = unread, unreadOnly = unreadOnly) {
+                    homeSections(sessions, emptyList(), online = !offline, unread = unread, unreadOnly = unreadOnly) {
                         attention[it.sessionId]
                     },
                 workspaces = workspaces,
+                grouping = grouping,
                 hostId = "first",
                 reconnect = reconnect,
                 drafts = drafts,
@@ -488,7 +543,7 @@ class HomeLayoutUiTest {
             DshRemoteTheme {
                 SessionListContent(
                     state = state,
-                    newTask = newTask,
+                    newTask = newTask(),
                     defaultProject = newTaskProject(),
                     newTaskActions = newTaskActions,
                     onProject = onProject,
@@ -507,7 +562,7 @@ class HomeLayoutUiTest {
                             onOpenHostDetail = onHostDetail,
                         ),
                     attentionActions = actions,
-                    onFilter = onFilter,
+                    onGrouping = onGrouping,
                     onToggleUnread = onToggleUnread,
                     onDismissReconnect = onDismissReconnect,
                 )

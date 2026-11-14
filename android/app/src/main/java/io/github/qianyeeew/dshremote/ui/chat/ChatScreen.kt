@@ -52,6 +52,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
@@ -316,13 +317,17 @@ private fun ChatTopBar(
     state: ChatState,
     actions: ChatActions,
 ) {
-    val subtitle =
-        listOfNotNull(
-            state.hostName,
-            state.projectName,
-            state.session?.permissionPreset?.let { permissionLabel(it) },
-        ).joinToString(" · ")
-    DesignBackBar(actions.onBack, sessionTitleText(state.session?.title), subtitle)
+    val subtitle = listOfNotNull(state.hostName, state.projectName).joinToString(" · ")
+    val keyboard = LocalSoftwareKeyboardController.current
+    // 审批方式可以点：在输入框下面打开审批方式的面板（键盘先收起）
+    val preset =
+        state.session?.permissionPreset?.let { id ->
+            permissionLabel(id) to {
+                keyboard?.hide()
+                actions.onOpenPresets()
+            }
+        }
+    DesignBackBar(actions.onBack, sessionTitleText(state.session?.title), subtitle, subtitleAction = preset.takeIf { state.online })
 }
 
 /** 最新的消息在底部（reverseLayout），滚到顶部附近时取更早的一页。 */

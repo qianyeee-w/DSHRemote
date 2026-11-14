@@ -45,8 +45,8 @@ class VisualLayoutUiTest {
         renderChat()
         compose.onNodeWithTag("chat-input").assertIsDisplayed()
         save("chat-reading")
-        compose.onNodeWithTag("chat-input").performClick().performTextInput("请补充重连失败的处理方式")
         compose.onNodeWithTag("chat-composer-options").assertIsDisplayed()
+        compose.onNodeWithTag("chat-input").performClick().performTextInput("请补充重连失败的处理方式")
         compose.onNodeWithTag("chat-send").assertIsDisplayed()
         save("chat-writing")
     }

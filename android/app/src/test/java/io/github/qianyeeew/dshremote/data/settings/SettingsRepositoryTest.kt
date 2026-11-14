@@ -9,12 +9,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-/** 首页要记的两项：上次用的电脑、每台电脑的项目筛选。 */
+/** 首页要记的两项：上次用的电脑、最近列表的分组方式。 */
 class SettingsRepositoryTest {
     @get:Rule val folder = TemporaryFolder()
 
     @Test
-    fun lastHostAndPerHostProjectFilter() =
+    fun lastHostAndHomeGrouping() =
         runTest {
             val store =
                 PreferenceDataStoreFactory.create(
@@ -25,14 +25,9 @@ class SettingsRepositoryTest {
             settings.setLastHost("host-2")
             assertEquals("host-2", settings.settings.first().lastHostId)
 
-            assertNull(settings.projectFilter("host-1").first())
-            settings.setProjectFilter("host-1", "w1")
-            settings.setProjectFilter("host-2", "cwd:/tmp")
-            assertEquals("w1", settings.projectFilter("host-1").first())
-            assertEquals("cwd:/tmp", settings.projectFilter("host-2").first())
-            // 回到「全部项目」时删掉这一项
-            settings.setProjectFilter("host-1", null)
-            assertNull(settings.projectFilter("host-1").first())
-            assertEquals("cwd:/tmp", settings.projectFilter("host-2").first())
+            // 首页的分组方式：所有电脑共用，没选过时为 null（按项目分组）
+            assertNull(settings.homeGrouping.first())
+            settings.setHomeGrouping("DATE")
+            assertEquals("DATE", settings.homeGrouping.first())
         }
 }

@@ -13,6 +13,8 @@ import io.github.qianyeeew.dshremote.data.api.Workspace
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.time.LocalDate
+import java.time.ZoneId
 
 class HomeSectionsTest {
     private fun session(
@@ -55,7 +57,7 @@ class HomeSectionsTest {
                 session("idle-new", updatedAt = 8),
             )
         val orphan = approval("o", "child")
-        val sections = homeSections(sessions, listOf(orphan), workspaces, null) { null }
+        val sections = homeSections(sessions, listOf(orphan)) { null }
         assertEquals(
             listOf("waiting:listed", "waiting:waiting-old", "orphan:o", "running:running"),
             sections.active.map { it.key },
@@ -67,37 +69,80 @@ class HomeSectionsTest {
     @Test
     fun waitingRowsCarryTheirEarliestAttention() {
         val a = approval("a1", "s")
-        val sections = homeSections(listOf(session("s", SessionStatus.WAITING)), emptyList(), workspaces, null) { a }
+        val sections = homeSections(listOf(session("s", SessionStatus.WAITING)), emptyList()) { a }
         assertEquals(ActiveItem.Waiting(session("s", SessionStatus.WAITING), a), sections.active.single())
     }
 
     @Test
-    fun projectFilterOnlyNarrowsTheRecentList() {
+    fun projectGroupsFollowTheLatestActivityAndUnregisteredDirectoriesCannotStartTasks() {
         val sessions =
             listOf(
                 session("a", updatedAt = 3, workspaceId = "w1"),
-                session("b", updatedAt = 2, workspaceId = "w2"),
+                session("b", updatedAt = 5, workspaceId = "w2"),
                 session("c", updatedAt = 1, cwd = "/tmp/scratch"),
                 session("d", SessionStatus.RUNNING, workspaceId = "w2"),
-                session("e"),
+                session("e", updatedAt = 4),
                 session("f", updatedAt = 0, workspaceId = "w1"),
             )
-        val all = homeSections(sessions, emptyList(), workspaces, null) { null }
-        // 会话数只算最近列表里的（运行中的 d 在卡片里，不算）
-        assertEquals(
-            listOf(ProjectOption("w1", "DSHRemote", 2), ProjectOption("cwd:/tmp/scratch", "scratch", 1), ProjectOption("w2", "工具脚本", 1)),
-            all.projects,
-        )
-        val tools = homeSections(sessions, emptyList(), workspaces, "w2") { null }
-        assertEquals("w2", tools.filter)
-        assertEquals(listOf("b"), tools.recent.map { it.sessionId })
-        // 卡片不受筛选影响
-        assertEquals(listOf("running:d"), tools.active.map { it.key })
-        val byDirectory = homeSections(sessions, emptyList(), workspaces, "cwd:/tmp/scratch") { null }
-        assertEquals(listOf("c"), byDirectory.recent.map { it.sessionId })
+        val recent = homeSections(sessions, emptyList()) { null }.recent
+        val groups = recentGroups(recent, HomeGrouping.PROJECT, workspaces, emptySet(), now = 10)
+        // 运行中的 d 在卡片里，不进分组；没有项目的会话放在最后
+        assertEquals(listOf("project:w2", "project:w1", "project:cwd:/tmp/scratch", "project:none"), groups.map { it.key })
+        assertEquals(listOf("工具脚本", "DSHRemote", "scratch", null), groups.map { it.name })
+        assertEquals(R.string.home_group_no_project, groups.last().titleRes)
+        assertEquals(listOf(listOf("b"), listOf("a", "f"), listOf("c"), listOf("e")), groups.map { g -> g.sessions.map { it.sessionId } })
+        // 只有登记过的项目能在组名右边新建任务
+        assertEquals(listOf("w2", "w1", null, null), groups.map { it.workspace?.workspaceId })
     }
 
-    /** 落地方案 B2：没看过的失败排在最前面，看过的失败照常按时间；「只看未读」和项目筛选同时生效。 */
+    @Test
+    fun dateGroupsUseTheComputerClock() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val now =
+            LocalDate
+                .of(2026, 11, 14)
+                .atTime(10, 0)
+                .atZone(zone)
+                .toInstant()
+                .toEpochMilli()
+        val hour = 3_600_000L
+        val sessions =
+            listOf(
+                session("today", updatedAt = now - hour),
+                session("yesterday", updatedAt = now - 20 * hour),
+                session("week", updatedAt = now - 4 * 24 * hour),
+                session("old", updatedAt = now - 30 * 24 * hour),
+            )
+        val groups = recentGroups(sessions, HomeGrouping.DATE, workspaces, emptySet(), now, zone)
+        assertEquals(
+            listOf(R.string.home_group_today, R.string.home_group_yesterday, R.string.home_group_week, R.string.home_group_earlier),
+            groups.map { it.titleRes },
+        )
+        assertEquals(listOf("today", "yesterday", "week", "old"), groups.map { it.sessions.single().sessionId })
+        // 空的组不出现
+        assertEquals(1, recentGroups(sessions.take(1), HomeGrouping.DATE, workspaces, emptySet(), now, zone).size)
+    }
+
+    @Test
+    fun statusGroupsPutFailuresFirstThenUnread() {
+        val failed = LastTurn(TurnResult.FAILED, 1)
+        val sessions = listOf(session("seen"), session("unread"), session("failed", lastTurn = failed))
+        val groups = recentGroups(sessions, HomeGrouping.STATUS, workspaces, setOf("unread", "failed"), now = 0)
+        assertEquals(
+            listOf(R.string.home_group_failed, R.string.home_group_unread, R.string.home_group_seen),
+            groups.map { it.titleRes },
+        )
+        assertEquals(listOf("failed", "unread", "seen"), groups.map { it.sessions.single().sessionId })
+    }
+
+    @Test
+    fun unknownGroupingFallsBackToProjects() {
+        assertEquals(HomeGrouping.PROJECT, HomeGrouping.of(null))
+        assertEquals(HomeGrouping.PROJECT, HomeGrouping.of("gone"))
+        assertEquals(HomeGrouping.DATE, HomeGrouping.of("DATE"))
+    }
+
+    /** 落地方案 B2：没看过的失败排在最前面，看过的失败照常按时间；「只看未读」只留没看过的。 */
     @Test
     fun unreadFailuresComeFirstAndUnreadOnlyNarrowsTheList() {
         val failed = LastTurn(TurnResult.FAILED, 1)
@@ -110,7 +155,7 @@ class HomeSectionsTest {
                 session("failed-unread-2", updatedAt = 1, workspaceId = "w2", lastTurn = failed),
             )
         val unread = setOf("plain-unread", "failed-unread", "failed-unread-2")
-        val all = homeSections(sessions, emptyList(), workspaces, null, unread = unread) { null }
+        val all = homeSections(sessions, emptyList(), unread = unread) { null }
         assertEquals(
             listOf("failed-unread", "failed-unread-2", "new", "failed-read", "plain-unread"),
             all.recent.map { it.sessionId },
@@ -118,26 +163,14 @@ class HomeSectionsTest {
         assertEquals(3, all.unreadCount)
         assertEquals(unread, all.unread)
 
-        val onlyUnread = homeSections(sessions, emptyList(), workspaces, null, unread = unread, unreadOnly = true) { null }
+        val onlyUnread = homeSections(sessions, emptyList(), unread = unread, unreadOnly = true) { null }
         assertEquals(true, onlyUnread.unreadOnly)
         assertEquals(listOf("failed-unread", "failed-unread-2", "plain-unread"), onlyUnread.recent.map { it.sessionId })
 
-        // 项目筛选下只数这个项目的未读
-        val w2 = homeSections(sessions, emptyList(), workspaces, "w2", unread = unread, unreadOnly = true) { null }
-        assertEquals(2, w2.unreadCount)
-        assertEquals(listOf("failed-unread-2", "plain-unread"), w2.recent.map { it.sessionId })
-
         // 没有未读时「只看未读」自动退回全部
-        val none = homeSections(sessions, emptyList(), workspaces, null, unread = emptySet(), unreadOnly = true) { null }
+        val none = homeSections(sessions, emptyList(), unread = emptySet(), unreadOnly = true) { null }
         assertEquals(false, none.unreadOnly)
         assertEquals(5, none.recent.size)
-    }
-
-    @Test
-    fun aFilterThatNoLongerExistsFallsBackToAllProjects() {
-        val sections = homeSections(listOf(session("a", workspaceId = "w1")), emptyList(), workspaces, "gone") { null }
-        assertNull(sections.filter)
-        assertEquals(listOf("a"), sections.recent.map { it.sessionId })
     }
 
     @Test
@@ -162,7 +195,7 @@ class HomeSectionsTest {
     fun offlineRunningSessionsMoveToRecent() {
         val sessions =
             listOf(session("running", SessionStatus.RUNNING, updatedAt = 2), session("waiting", SessionStatus.WAITING, updatedAt = 1))
-        val sections = homeSections(sessions, emptyList(), workspaces, null, online = false) { null }
+        val sections = homeSections(sessions, emptyList(), online = false) { null }
         assertEquals(listOf("waiting:waiting"), sections.active.map { it.key })
         assertEquals(listOf("running"), sections.recent.map { it.sessionId })
     }

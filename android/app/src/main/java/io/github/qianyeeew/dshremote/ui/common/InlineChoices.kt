@@ -146,6 +146,7 @@ fun ChoiceRow(
     trailing: String? = null,
     trailingColor: Color = Color.Unspecified,
     leadingIcon: Int? = null,
+    leadingTint: Color = Color.Unspecified,
     trailingIcon: Int? = null,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
 ) {
@@ -163,7 +164,11 @@ fun ChoiceRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (leadingIcon != null) Icon(painterResource(leadingIcon), null, Modifier.size(18.dp), tint = colors.text)
+        if (leadingIcon !=
+            null
+        ) {
+            Icon(painterResource(leadingIcon), null, Modifier.size(18.dp), tint = leadingTint.takeOrElse { colors.text })
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 title,

@@ -4,19 +4,26 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -36,12 +43,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -50,11 +59,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Attention
@@ -62,15 +68,17 @@ import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.attention.ComposerAttention
-import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
-import io.github.qianyeeew.dshremote.ui.common.ChoiceList
 import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
-import io.github.qianyeeew.dshremote.ui.common.DesignDivider
-import io.github.qianyeeew.dshremote.ui.common.InlineChoices
+import io.github.qianyeeew.dshremote.ui.common.ComposerOption
+import io.github.qianyeeew.dshremote.ui.common.ComposerOptionDot
+import io.github.qianyeeew.dshremote.ui.common.ComposerOptionsRow
+import io.github.qianyeeew.dshremote.ui.common.KeyboardPanel
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
 import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
+import io.github.qianyeeew.dshremote.ui.common.presetTint
+import io.github.qianyeeew.dshremote.ui.common.pressScale
 
 /** 发送键此刻的作用（设计规格 6.3）。 */
 enum class SendKeyMode {
@@ -96,9 +104,11 @@ fun sendKeyMode(
     }
 
 /**
- * 输入框（设计规格 6.3）。收起（没有焦点）时一行：加号、占位文字、发送键；展开（获得焦点）时描边变成主文字色，
- * 上面是输入的文字，然后是加上的图片（7.6），下面一行是加号、模型、审批方式、发送键。加了图片时一直展开。
- * 加号选图片用系统的照片选择器（不需要存储权限）；看不了图时加号画成不可用，点了说明原因（落地方案 C2）。
+ * 输入框（设计规格 6.3）。没有焦点时一行：加号、占位文字、发送键；获得焦点时描边变成主文字色，可以写多行；
+ * 加上的图片（7.6）在文字下面，加了图片时一直展开。加号选图片用系统的照片选择器（不需要存储权限）；
+ * 看不了图时加号画成不可用，点了说明原因（落地方案 C2）。
+ * 输入框下面常驻一行「模型 · 审批方式」，键盘弹出时收起。点了其中一项，键盘收起，原来键盘的位置换成
+ * 选项面板（[KeyboardPanel]），输入框不动；长按发送键在同一块面板里看用量。
  *
  * 有待处理事项时按 [attention]：审批在等时不能写（DSH 停着等审批，消息不会改变这次审批），只留停止；
  * 只有一个问题的提问时，写的就是自己的答案，经 [onAnswer] 提交；多个问题时在面板里逐题写。
@@ -108,7 +118,7 @@ fun sendKeyMode(
 fun ChatComposer(
     state: ChatState,
     actions: ChatActions,
-    /** 输入框里展开的模型或审批方式的选项（设计规格 6.10）。 */
+    /** 输入框下面面板里的模型或审批方式的选项。 */
     picker: Picker = Picker.Closed,
     /** 打开页面时输入框里已有的文字（新任务的消息没发出去时放回来）。 */
     initialText: String = "",
@@ -147,30 +157,51 @@ fun ChatComposer(
     val hasImages = state.images.isNotEmpty() || state.preparingImages > 0
     var focused by remember { mutableStateOf(false) }
     val pickerOpen = picker != Picker.Closed
-    // 长按发送键展开的用量（7.11）。和模型、审批方式的选项一次只展开一个
+    // 长按发送键看用量（7.11），和模型、审批方式用同一块面板，一次只开一个
     var usageOpen by remember { mutableStateOf(false) }
     LaunchedEffect(pickerOpen) { if (pickerOpen) usageOpen = false }
-    val expanded = focused || pickerOpen || usageOpen || hasImages
-    // 收起的动画期间还要画最后一次展开的选项
+    val panelOpen = pickerOpen || usageOpen
+    val expanded = focused || panelOpen || hasImages
+    // 收起的动画期间还要画最后一次打开的选项
     var lastPicker by remember { mutableStateOf<Picker>(Picker.Closed) }
     if (pickerOpen) lastPicker = picker
-    // 返回键先收起选项和用量，再按一次才收起输入框
+    // 返回键先收起面板，再按一次才收起输入框
     BackHandler(enabled = pickerOpen) { actions.onClosePicker() }
     BackHandler(enabled = usageOpen) { usageOpen = false }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.isImeVisible
+    val inputFocus = remember { FocusRequester() }
+    // 打开面板前正在打字：选完回到键盘
+    var backToKeyboard by remember { mutableStateOf(false) }
+    val openPanel = { open: () -> Unit ->
+        if (!panelOpen) backToKeyboard = imeVisible
+        keyboard?.hide()
+        open()
+    }
+    val afterChoice = {
+        if (backToKeyboard) {
+            inputFocus.requestFocus()
+            keyboard?.show()
+        }
+        backToKeyboard = false
+    }
     val toggleUsage = {
         if (pickerOpen) actions.onClosePicker()
+        if (!usageOpen) {
+            if (!panelOpen) backToKeyboard = imeVisible
+            keyboard?.hide()
+            actions.onRefreshUsage()
+        }
         usageOpen = !usageOpen
-        if (usageOpen) actions.onRefreshUsage()
     }
     val ratio = state.usage?.context?.ratio
     val almostFull = ratio != null && ratio >= CONTEXT_ALMOST_FULL
     val focus = LocalFocusManager.current
     val haptic = LocalHapticFeedback.current
-    val imeVisible = WindowInsets.isImeVisible
     var hadKeyboard by remember { mutableStateOf(false) }
     // 收起键盘、又没写字时退出编辑，输入框跟着收起
-    LaunchedEffect(imeVisible, pickerOpen, usageOpen) {
-        if (hadKeyboard && !imeVisible && !pickerOpen && !usageOpen && text.isBlank()) focus.clearFocus()
+    LaunchedEffect(imeVisible, panelOpen) {
+        if (hadKeyboard && !imeVisible && !panelOpen && text.isBlank()) focus.clearFocus()
         hadKeyboard = imeVisible
     }
     val hint =
@@ -185,16 +216,6 @@ fun ChatComposer(
             },
         )
     val writable = state.canSend && attention !is ComposerAttention.Approval && attention !is ComposerAttention.AnswerAbove
-    // 回答提问时写的是答案，不能带图片
-    val showAddImage = attention == ComposerAttention.None
-    val addImage: @Composable (Modifier) -> Unit = { modifier ->
-        AddImageButton(
-            available = writable && state.imageSupport.canAdd && state.imageSlots > 0,
-            onAdd = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            onUnavailable = { if (state.imageSlots > 0) actions.onImagesUnavailable() },
-            modifier = modifier,
-        )
-    }
     val send = {
         val accepted =
             when (attention) {
@@ -207,24 +228,39 @@ fun ChatComposer(
             haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
         }
     }
-    val mode = sendKeyMode(state, (text.isNotBlank() || (state.images.isNotEmpty() && attention == ComposerAttention.None)) && writable)
+    // 回答提问时写的是答案，不能带图片
+    val showAddImage = attention == ComposerAttention.None
+    val mode = sendKeyMode(state, (text.isNotBlank() || (state.images.isNotEmpty() && showAddImage)) && writable)
     val shape = RoundedCornerShape(if (expanded) 22.dp else 26.dp)
-    Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
+    Column(Modifier.fillMaxWidth()) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .designPanel(shape, focused = expanded)
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp)
+                .designPanel(shape, focused = focused)
                 .animateContentSize(tween(160))
-                .padding(
-                    start = if (!expanded && showAddImage) 4.dp else 16.dp,
-                    end = 6.dp,
-                    top = if (expanded) 12.dp else 0.dp,
-                    bottom = if (expanded) 6.dp else 0.dp,
-                ).testTag("chat-composer"),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .testTag("chat-composer"),
         ) {
-            Row(Modifier.heightIn(min = if (expanded) 24.dp else 50.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!expanded && showAddImage) addImage(Modifier)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 50.dp)
+                    .padding(
+                        start = if (showAddImage) 3.dp else 16.dp,
+                        end = 1.dp,
+                        top = if (expanded) 1.dp else 0.dp,
+                        bottom = if (expanded) 1.dp else 0.dp,
+                    ),
+                verticalAlignment = if (expanded) Alignment.Bottom else Alignment.CenterVertically,
+            ) {
+                if (showAddImage) {
+                    AddImageButton(
+                        available = writable && state.imageSupport.canAdd && state.imageSlots > 0,
+                        onAdd = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        onUnavailable = { if (state.imageSlots > 0) actions.onImagesUnavailable() },
+                        modifier = Modifier.padding(bottom = if (expanded) 2.dp else 0.dp),
+                    )
+                }
                 BasicTextField(
                     value = field,
                     onValueChange = edit,
@@ -235,10 +271,15 @@ fun ChatComposer(
                     modifier =
                         Modifier
                             .weight(1f)
+                            .padding(vertical = if (expanded) 12.dp else 0.dp)
+                            .focusRequester(inputFocus)
                             .onFocusChanged { focused = it.isFocused }
                             .onTap {
+                                // 点输入框：键盘回来，面板让位
                                 if (pickerOpen) actions.onClosePicker()
                                 usageOpen = false
+                                backToKeyboard = false
+                                if (focused) keyboard?.show()
                             }.padding(end = 10.dp)
                             .testTag("chat-input")
                             .semantics { contentDescription = hint },
@@ -257,80 +298,93 @@ fun ChatComposer(
                         }
                     },
                 )
-                if (!expanded) SendKey(mode, ratio, onSend = send, onStop = actions.onCancelRun, onLongPress = toggleUsage)
+                SendKey(mode, ratio, onSend = send, onStop = actions.onCancelRun, onLongPress = toggleUsage)
             }
-            if (expanded && showAddImage) ComposerImageStrip(state.images, state.preparingImages, actions.onRemoveImage)
-            // 选项在最下面一行的正上方展开，输入框卡片向上长；不另开窗口，焦点和键盘都不变
-            InlineChoices(visible = expanded && pickerOpen) {
-                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp, bottom = 4.dp))
-                PickerChoices(lastPicker, state, actions)
-                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
+            if (showAddImage) {
+                ComposerImageStrip(
+                    state.images,
+                    state.preparingImages,
+                    actions.onRemoveImage,
+                    Modifier.padding(start = 16.dp, bottom = 12.dp),
+                )
             }
-            InlineChoices(visible = expanded && usageOpen && !pickerOpen) {
-                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp, bottom = 4.dp))
-                UsageDetails(state.usage)
-                DesignDivider(Modifier.padding(end = 10.dp, top = 4.dp))
-            }
-            if (expanded) {
-                Row(
-                    // 有加号时这一行向左伸进内边距：加号的点按区域比图标大，图标和上面的文字对齐（设计稿 margin-left -12）
-                    Modifier
-                        .let { if (showAddImage) it.extendStart(12.dp) else it }
-                        .fillMaxWidth()
-                        .testTag("chat-composer-options"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    if (showAddImage) addImage(Modifier)
-                    val model = state.session?.model?.model ?: stringResource(R.string.design_choose_model)
-                    val preset = permissionLabel(state.session?.permissionPreset)
-                    // 两项各自按内容宽度，都很长时各占一半
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        ComposerChoice(
-                            model,
-                            stringResource(R.string.design_model_value, model),
-                            state.online,
-                            open = picker.kind == PickerKind.MODELS,
-                            actions.onOpenModels,
-                            Modifier.weight(1f, fill = false).testTag("chat-model"),
-                        )
-                        ComposerChoice(
-                            preset,
-                            stringResource(R.string.design_permission_value, preset),
-                            state.online,
-                            open = picker.kind == PickerKind.PRESETS,
-                            actions.onOpenPresets,
-                            Modifier.weight(1f, fill = false).testTag("chat-preset"),
-                        )
-                    }
-                    if (almostFull) {
-                        Text(
-                            stringResource(R.string.usage_context_almost_full),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.waitingText,
-                            maxLines = 1,
-                            modifier = Modifier.testTag("chat-context-almost-full"),
-                        )
-                    }
-                    SendKey(mode, ratio, onSend = send, onStop = actions.onCancelRun, onLongPress = toggleUsage)
+        }
+        // 模型、审批方式：平时常驻在输入框下面；键盘弹出时收起，收起键盘后再出来
+        AnimatedVisibility(
+            visible = !imeVisible || panelOpen,
+            enter = fadeIn(tween(OPTIONS_MILLIS)) + expandVertically(tween(OPTIONS_MILLIS)),
+            exit = fadeOut(tween(OPTIONS_MILLIS)) + shrinkVertically(tween(OPTIONS_MILLIS)),
+        ) {
+            ComposerOptionsRow(Modifier.padding(top = 2.dp, bottom = 4.dp).testTag("chat-composer-options")) {
+                val model = state.session?.model?.model ?: stringResource(R.string.design_choose_model)
+                val presetId = state.session?.permissionPreset
+                val preset = permissionLabel(presetId)
+                ComposerOption(
+                    model,
+                    stringResource(R.string.design_model_value, model),
+                    R.drawable.ic_dsh_bolt,
+                    if (picker.kind == PickerKind.MODELS) colors.text else colors.textSecondary,
+                    enabled = state.online,
+                    open = picker.kind == PickerKind.MODELS,
+                    onClick = { openPanel(actions.onOpenModels) },
+                    modifier = Modifier.weight(1f, fill = false).testTag("chat-model"),
+                )
+                ComposerOptionDot()
+                ComposerOption(
+                    preset,
+                    stringResource(R.string.design_permission_value, preset),
+                    R.drawable.ic_dsh_shield,
+                    presetTint(presetId),
+                    enabled = state.online,
+                    open = picker.kind == PickerKind.PRESETS,
+                    onClick = { openPanel(actions.onOpenPresets) },
+                    modifier = Modifier.weight(1f, fill = false).testTag("chat-preset"),
+                )
+                if (almostFull) {
+                    Text(
+                        stringResource(R.string.usage_context_almost_full),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.waitingText,
+                        maxLines = 1,
+                        modifier = Modifier.testTag("chat-context-almost-full"),
+                    )
                 }
+            }
+        }
+        if (imeVisible && !panelOpen) Spacer(Modifier.height(8.dp))
+        val title =
+            stringResource(
+                when {
+                    usageOpen -> R.string.panel_usage
+                    lastPicker.kind == PickerKind.MODELS -> R.string.panel_models
+                    else -> R.string.panel_permissions
+                },
+            )
+        KeyboardPanel(open = panelOpen, title = title) {
+            if (usageOpen) {
+                Box(Modifier.padding(horizontal = 12.dp)) { UsageDetails(state.usage) }
+            } else {
+                PickerChoices(lastPicker, state, actions, onChosen = afterChoice)
             }
         }
     }
 }
 
-/** 选项区的内容：读取中、没有可选的、或者模型（下面一行灰字写来源）和审批方式（下面一行写说明）。 */
+/** 面板里的内容：读取中、没有可选的、或者模型（下面一行灰字写来源）和审批方式（下面一行写说明）。 */
 @Composable
 private fun PickerChoices(
     picker: Picker,
     state: ChatState,
     actions: ChatActions,
+    onChosen: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val choose = { action: () -> Unit ->
         haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
         action()
+        onChosen()
     }
+    val rowPadding = PaddingValues(horizontal = 12.dp)
     when (picker) {
         Picker.Closed -> Unit
         is Picker.Loading -> PickerMessage(stringResource(R.string.chat_picker_loading), loading = true)
@@ -338,50 +392,52 @@ private fun PickerChoices(
             if (picker.list.models.isEmpty()) {
                 PickerMessage(stringResource(R.string.chat_picker_empty), loading = false)
             } else {
-                ChoiceList(withSubtitles = true) {
-                    val current = state.session?.model
-                    picker.list.models.forEach { option ->
-                        val ref = ModelRef(option.provider, option.model)
-                        ChoiceRow(
-                            option.name,
-                            { choose { actions.onChooseModel(ref) } },
-                            Modifier.testTag("chat-model:${option.provider}/${option.model}"),
-                            subtitle = listOfNotNull(option.providerName, option.description).joinToString(" · "),
-                            selected = ref == current,
-                            contentPadding = PaddingValues(end = 10.dp),
-                        )
-                    }
+                val current = state.session?.model
+                picker.list.models.forEach { option ->
+                    val ref = ModelRef(option.provider, option.model)
+                    ChoiceRow(
+                        option.name,
+                        { choose { actions.onChooseModel(ref) } },
+                        Modifier.testTag("chat-model:${option.provider}/${option.model}"),
+                        subtitle = listOfNotNull(option.providerName, option.description).joinToString(" · "),
+                        selected = ref == current,
+                        contentPadding = rowPadding,
+                    )
                 }
             }
         is Picker.Presets ->
             if (picker.list.presets.isEmpty()) {
                 PickerMessage(stringResource(R.string.chat_picker_empty), loading = false)
             } else {
-                ChoiceList(withSubtitles = true) {
-                    picker.list.presets.forEach { preset ->
-                        val known = permissionHint(preset.id)
-                        ChoiceRow(
-                            if (known != null) permissionLabel(preset.id) else preset.name,
-                            { choose { actions.onChoosePreset(preset.id) } },
-                            Modifier.testTag("chat-preset:${preset.id}"),
-                            subtitle = known,
-                            selected = preset.id == state.session?.permissionPreset,
-                            contentPadding = PaddingValues(end = 10.dp),
-                        )
-                    }
+                picker.list.presets.forEach { preset ->
+                    val known = permissionHint(preset.id)
+                    ChoiceRow(
+                        if (known != null) permissionLabel(preset.id) else preset.name,
+                        { choose { actions.onChoosePreset(preset.id) } },
+                        Modifier.testTag("chat-preset:${preset.id}"),
+                        subtitle = known,
+                        selected = preset.id == state.session?.permissionPreset,
+                        leadingIcon = R.drawable.ic_dsh_shield,
+                        leadingTint = presetTint(preset.id),
+                        contentPadding = rowPadding,
+                    )
                 }
             }
     }
 }
 
-/** 选项区里的一句话：正在读取（带转圈标记），或者没有可选的。 */
+/** 面板里的一句话：正在读取（带转圈标记），或者没有可选的。 */
 @Composable
 private fun PickerMessage(
     text: String,
     loading: Boolean,
 ) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("chat-picker-message"),
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 12.dp)
+            .testTag("chat-picker-message"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -390,37 +446,8 @@ private fun PickerMessage(
     }
 }
 
-/** 模型、审批方式：带小箭头的灰字，点了在上方展开选项；展开时文字换成主文字色、字重 500，小箭头朝上。 */
-@Composable
-private fun ComposerChoice(
-    label: String,
-    description: String,
-    enabled: Boolean,
-    open: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier,
-) {
-    val colors = DesignTheme.colors
-    Row(
-        modifier
-            .heightIn(min = 48.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) { contentDescription = description }
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (open) FontWeight.Medium else FontWeight.Normal),
-            color = (if (open) colors.text else colors.textSecondary).copy(alpha = if (enabled) 1f else 0.5f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        ChoiceChevron(open, Modifier.size(12.dp), tint = if (open) colors.text else colors.textSecondary)
-    }
-}
+/** 配置行显示和收起的时长。 */
+private const val OPTIONS_MILLIS = 160
 
 /**
  * 发送键：发送、不可点、停止三种（[SendKeyMode]）。看上去直径 30，可点区域 48。
@@ -438,11 +465,15 @@ private fun SendKey(
     val haptic = LocalHapticFeedback.current
     val description = stringResource(if (mode == SendKeyMode.STOP) R.string.chat_stop else R.string.chat_send)
     val idle = mode == SendKeyMode.IDLE
+    val press = remember { MutableInteractionSource() }
     Box(
         Modifier
             .size(48.dp)
+            .pressScale(press)
             .contextRing(contextRatio)
             .combinedClickable(
+                interactionSource = press,
+                indication = null,
                 role = Role.Button,
                 onLongClickLabel = stringResource(R.string.usage_show),
                 onLongClick = {
@@ -494,18 +525,4 @@ internal fun permissionHint(preset: String): String? =
         "workspace-write" -> stringResource(R.string.design_permission_workspace_hint)
         "danger-full-access" -> stringResource(R.string.design_permission_full_hint)
         else -> null
-    }
-
-/** 向左多占 [by] 的宽度（像 CSS 的负 margin-left），右边界不变。 */
-internal fun Modifier.extendStart(by: Dp): Modifier =
-    layout { measurable, constraints ->
-        val extra = by.roundToPx()
-        val placeable =
-            measurable.measure(
-                constraints.copy(
-                    minWidth = (constraints.minWidth + extra).coerceAtMost(Constraints.Infinity),
-                    maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + extra else Constraints.Infinity,
-                ),
-            )
-        layout(placeable.width - extra, placeable.height) { placeable.place(-extra, 0) }
     }

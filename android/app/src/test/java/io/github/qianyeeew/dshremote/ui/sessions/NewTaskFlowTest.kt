@@ -159,6 +159,16 @@ class NewTaskFlowTest {
         assertEquals(deepseek, state.models?.default)
     }
 
+    /** 首页点了某个项目的加号，返回键取消：回到默认的项目，选好的模型不受影响。 */
+    @Test
+    fun clearingTheProjectFallsBackToTheDefault() {
+        flow.chooseModel(reasoner)
+        flow.chooseProject(ProjectPick.None)
+        flow.clearProject()
+        assertNull(flow.state.value.project)
+        assertEquals(reasoner, flow.state.value.model)
+    }
+
     /** 默认是上一次用的项目；还没用过时用第一个项目；一个项目都没有时不指定。 */
     @Test
     fun defaultProjectIsTheLastUsedOne() {

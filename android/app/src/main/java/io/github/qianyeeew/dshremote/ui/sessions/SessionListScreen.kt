@@ -1,6 +1,9 @@
 package io.github.qianyeeew.dshremote.ui.sessions
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -24,7 +28,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,11 +50,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -71,7 +79,6 @@ import io.github.qianyeeew.dshremote.ui.attention.approvalAction
 import io.github.qianyeeew.dshremote.ui.attention.approvalTarget
 import io.github.qianyeeew.dshremote.ui.chat.LocalImagePreparer
 import io.github.qianyeeew.dshremote.ui.common.ChoiceChevron
-import io.github.qianyeeew.dshremote.ui.common.ChoiceList
 import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
 import io.github.qianyeeew.dshremote.ui.common.Covered
 import io.github.qianyeeew.dshremote.ui.common.DesignDivider
@@ -132,7 +139,11 @@ fun SessionListScreen(
     // 项目名来自电脑上登记的项目：页面可见并且在线时刷新一次
     val online = state?.status is LinkStatus.Online
     LifecycleStartEffect(online) {
-        if (online) viewModel.catalog.refresh()
+        if (online) {
+            viewModel.catalog.refresh()
+            // 输入框下面常驻模型和审批方式，页面一打开就读
+            viewModel.newTask.loadOptions()
+        }
         onStopOrDispose {}
     }
     val current = state ?: return
@@ -152,6 +163,7 @@ fun SessionListScreen(
                     viewModel.catalog.refresh()
                 },
                 onChooseProject = viewModel.newTask::chooseProject,
+                onClearProject = viewModel.newTask::clearProject,
                 onChooseModel = viewModel.newTask::chooseModel,
                 onChoosePreset = viewModel.newTask::choosePreset,
                 onStart = viewModel.newTask::start,
@@ -165,7 +177,7 @@ fun SessionListScreen(
             ),
         onProject = viewModel.projects::open,
         attentionActions = AttentionCardActions.of(viewModel.attention),
-        onFilter = viewModel::chooseProjectFilter,
+        onGrouping = viewModel::chooseGrouping,
         onToggleUnread = viewModel::toggleUnreadOnly,
         onDismissReconnect = viewModel::dismissReconnect,
         attentionNotice = attentionNotice,
@@ -185,8 +197,9 @@ fun SessionListScreen(
 }
 
 /**
- * 首页（设计规格 7.1）：顶栏是电脑名；进行中卡片（等你处理的在前，然后是运行中的）；「最近」一行和项目筛选；
- * 最近的会话；底部收起的输入框「新任务」。页面不加大标题，没有搜索图标（搜索还没做）。
+ * 首页（设计规格 7.1）：顶栏是电脑名和「⋯」菜单；进行中卡片（等你处理的在前，然后是运行中的）；「最近」一行；
+ * 最近的会话，默认按项目分组（「⋯」里可以改成按日期或状态），项目组名右边的加号在这个项目里新建任务；
+ * 底部是收起的输入框「新任务」和下面的「模型 · 审批方式」。页面不加大标题，没有搜索图标（搜索还没做）。
  */
 @Composable
 fun SessionListContent(
@@ -197,15 +210,19 @@ fun SessionListContent(
     newTaskActions: NewTaskActions = NewTaskActions(),
     onProject: (ProjectMode) -> Unit = {},
     attentionActions: AttentionCardActions = AttentionCardActions(),
-    onFilter: (String?) -> Unit = {},
+    onGrouping: (HomeGrouping) -> Unit = {},
     onToggleUnread: () -> Unit = {},
     onDismissReconnect: () -> Unit = {},
     attentionNotice: Resolution? = null,
     onDismissAttentionNotice: () -> Unit = {},
 ) {
     var choosingRepair by remember { mutableStateOf(false) }
-    // 电脑列表或项目筛选，一次只展开一个（设计规格 6.10）
+    // 电脑列表（设计规格 6.10）
     var panel by remember { mutableStateOf<HomePanel?>(null) }
+    // 收起的组（按组的 key 记）
+    var folded by rememberSaveable { mutableStateOf(listOf<String>()) }
+    // 从收起的输入框下面直接点了模型或审批方式：展开时先打开面板，不弹键盘
+    var startMenu by remember { mutableStateOf<NewTaskMenu?>(null) }
     // 新任务：写过的字在收起后保留（设计规格 7.6）
     var taskText by rememberSaveable { mutableStateOf("") }
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -217,6 +234,10 @@ fun SessionListContent(
         }
     }
     BackHandler(enabled = expanded) { expanded = false }
+    // 点过某个项目的加号、还没开始写：返回键先取消这次的项目
+    val target = newTask.project
+    BackHandler(enabled = !expanded && target != null) { newTaskActions.onClearProject() }
+    val hint = newTaskHint(target)
     BackHandler(enabled = panel != null) { panel = null }
     val listState = rememberLazyListState()
     // 电脑列表在列表最上面：列表滑下去了也要让它看得见
@@ -242,16 +263,29 @@ fun SessionListContent(
     }
     Scaffold(
         topBar = {
-            HomeTopBar(state, navigation, open = panel == HomePanel.HOSTS) {
-                panel = if (panel == HomePanel.HOSTS) null else HomePanel.HOSTS
+            HomeTopBar(
+                state,
+                navigation,
+                open = panel == HomePanel.HOSTS,
+                onToggle = { panel = if (panel == HomePanel.HOSTS) null else HomePanel.HOSTS },
+            ) {
+                HomeMoreMenu(state.grouping, onGrouping, onProject, navigation.onOpenSettings)
             }
         },
         bottomBar = {
             if (!expanded) {
                 Covered(panel != null, uncover) {
-                    NewTaskBar(taskText, enabled = online) {
-                        expanded = true
-                        newTaskActions.onExpand()
+                    Column(Modifier.fillMaxWidth().background(colors.page).navigationBarsPadding()) {
+                        NewTaskBar(taskText, hint, targeted = target is ProjectPick.Existing, enabled = online) {
+                            startMenu = null
+                            expanded = true
+                            newTaskActions.onExpand()
+                        }
+                        NewTaskOptions(newTask, open = null, enabled = online, onOpen = { menu ->
+                            startMenu = menu
+                            expanded = true
+                            newTaskActions.onExpand()
+                        })
                     }
                 }
             }
@@ -305,31 +339,45 @@ fun SessionListContent(
             state.reconnect?.let { line ->
                 item(key = "reconnect") { Covered(covered, uncover) { ReconnectNotice(line) } }
             }
-            if (sections.recent.isNotEmpty() || sections.projects.isNotEmpty()) {
+            if (sections.recent.isNotEmpty()) {
                 item(key = "recent-heading") {
-                    Covered(panel == HomePanel.HOSTS, uncover) {
-                        RecentHeading(sections, open = panel == HomePanel.FILTER, onToggleUnread = onToggleUnread) {
-                            panel = if (panel == HomePanel.FILTER) null else HomePanel.FILTER
+                    Covered(covered, uncover) { RecentHeading(sections, onToggleUnread = onToggleUnread) }
+                }
+                val groups = recentGroups(sections.recent, state.grouping, state.workspaces, sections.unread, now)
+                groups.forEach { group ->
+                    val isFolded = group.key in folded
+                    item(key = "group:${group.key}") {
+                        Covered(covered, uncover) {
+                            GroupHeader(
+                                group,
+                                folded = isFolded,
+                                targeted = (target as? ProjectPick.Existing)?.workspace?.workspaceId == group.workspace?.workspaceId,
+                                onToggle = { folded = if (isFolded) folded - group.key else folded + group.key },
+                                onNewTask =
+                                    group.workspace?.takeIf { online }?.let { workspace ->
+                                        {
+                                            // 点加号：输入框提示「在 <项目> 工作区新建任务」，不弹键盘；点输入框再开始写
+                                            newTaskActions.onChooseProject(ProjectPick.Existing(workspace))
+                                            newTaskActions.onExpand()
+                                        }
+                                    },
+                            )
                         }
                     }
-                }
-                item(key = "filter-panel") {
-                    FilterPanel(sections, visible = panel == HomePanel.FILTER) { key ->
-                        panel = null
-                        onFilter(key)
-                    }
-                }
-                items(sections.recent, key = { "recent:${it.sessionId}" }) { session ->
-                    Covered(covered, uncover) {
-                        RecentRow(
-                            session,
-                            project = if (sections.filter == null) projectNameOf(session, workspaces) else null,
-                            unread = session.sessionId in sections.unread,
-                            draft = state.drafts[session.sessionId],
-                            online = online,
-                            now = now,
-                            modifier = Modifier.alpha(if (online) 1f else STALE_ALPHA),
-                        ) { navigation.onOpenSession(session.sessionId) }
+                    if (!isFolded) {
+                        items(group.sessions, key = { "recent:${it.sessionId}" }) { session ->
+                            Covered(covered, uncover) {
+                                RecentRow(
+                                    session,
+                                    project = if (state.grouping == HomeGrouping.PROJECT) null else projectNameOf(session, workspaces),
+                                    unread = session.sessionId in sections.unread,
+                                    draft = state.drafts[session.sessionId],
+                                    online = online,
+                                    now = now,
+                                    modifier = Modifier.alpha(if (online) 1f else STALE_ALPHA),
+                                ) { navigation.onOpenSession(session.sessionId) }
+                            }
+                        }
                     }
                 }
             }
@@ -354,18 +402,16 @@ fun SessionListContent(
                 text = taskText,
                 onText = { taskText = it },
                 state = newTask,
-                project = newTask.project ?: defaultProject,
-                workspaces = state.workspaces,
+                project = target ?: defaultProject,
+                hint = hint,
                 online = online,
                 actions = newTaskActions,
-                onProject = onProject,
+                startMenu = startMenu,
                 modifier =
                     Modifier
-                        .align(
-                            Alignment.BottomCenter,
-                        ).navigationBarsPadding()
-                        .imePadding()
-                        .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .imePadding(),
             )
         }
     }
@@ -382,7 +428,7 @@ fun SessionListContent(
 }
 
 /** 首页上原地展开的面板（设计规格 6.10）。 */
-private enum class HomePanel { HOSTS, FILTER }
+private enum class HomePanel { HOSTS, }
 
 /**
  * 顶栏：电脑名（17 号 600）和一个小箭头，点了在顶栏下面展开电脑列表（设计规格 7.7）。
@@ -394,6 +440,7 @@ private fun HomeTopBar(
     navigation: SessionListNavigation,
     open: Boolean,
     onToggle: () -> Unit,
+    more: @Composable () -> Unit,
 ) {
     val colors = DesignTheme.colors
     val single = navigation.hosts.size <= 1
@@ -402,7 +449,7 @@ private fun HomeTopBar(
             .fillMaxWidth()
             .background(colors.page)
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(start = if (navigation.onBack != null) 4.dp else 20.dp, end = 20.dp, top = 8.dp)
+            .padding(start = if (navigation.onBack != null) 4.dp else 12.dp, end = 16.dp, top = 8.dp)
             .heightIn(min = 52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -416,33 +463,226 @@ private fun HomeTopBar(
                 )
             }
         }
-        Row(
+        // 电脑名占满左边剩下的宽度（太长时截断），「⋯」贴在最右边
+        Box(Modifier.weight(1f)) {
+            Row(
+                Modifier
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(
+                        onClickLabel = stringResource(if (single) R.string.computers_and_settings else R.string.home_switch_host),
+                        role = Role.Button,
+                        onClick = if (single) navigation.onOpenSettings else onToggle,
+                    ).padding(horizontal = 8.dp)
+                    .testTag("home-host"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    state.hostName,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = colors.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (single) {
+                    Icon(
+                        painterResource(R.drawable.ic_dsh_chevron_right),
+                        null,
+                        Modifier.size(14.dp).testTag("home-host-settings"),
+                        tint = colors.textSecondary,
+                    )
+                } else {
+                    ChoiceChevron(open, Modifier.size(14.dp))
+                }
+            }
+        }
+        more()
+    }
+}
+
+/**
+ * 顶栏右边的「⋯」：分组方式（项目、日期、状态），新建项目、导入已有项目，电脑与设置。
+ */
+@Composable
+private fun HomeMoreMenu(
+    grouping: HomeGrouping,
+    onGrouping: (HomeGrouping) -> Unit,
+    onProject: (ProjectMode) -> Unit,
+    onSettings: () -> Unit,
+) {
+    val colors = DesignTheme.colors
+    var open by remember { mutableStateOf(false) }
+    val close = { action: () -> Unit ->
+        open = false
+        action()
+    }
+    Box {
+        Box(
             Modifier
-                .heightIn(min = 48.dp)
-                .clickable(
-                    onClickLabel = stringResource(if (single) R.string.computers_and_settings else R.string.home_switch_host),
-                    role = Role.Button,
-                    onClick = if (single) navigation.onOpenSettings else onToggle,
-                ).testTag("home-host"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(colors.fill)
+                .clickable(role = Role.Button, onClickLabel = stringResource(R.string.home_more)) { open = true }
+                .testTag("home-more"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(painterResource(R.drawable.ic_dsh_more), stringResource(R.string.home_more), Modifier.size(20.dp), tint = colors.text)
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = colors.panel,
+            tonalElevation = 0.dp,
+            shadowElevation = 6.dp,
+            border = BorderStroke(1.dp, colors.panelBorder),
+            modifier = Modifier.widthIn(min = 220.dp).testTag("home-more-menu"),
         ) {
             Text(
-                state.hostName,
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                stringResource(R.string.home_grouping),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 2.dp),
             )
-            if (single) {
-                Icon(
-                    painterResource(R.drawable.ic_dsh_chevron_right),
-                    null,
-                    Modifier.size(14.dp).testTag("home-host-settings"),
-                    tint = colors.textSecondary,
+            HomeGrouping.entries.forEach { option ->
+                val selected = option == grouping
+                MenuRow(
+                    stringResource(
+                        when (option) {
+                            HomeGrouping.PROJECT -> R.string.home_group_by_project
+                            HomeGrouping.DATE -> R.string.home_group_by_date
+                            HomeGrouping.STATUS -> R.string.home_group_by_status
+                        },
+                    ),
+                    icon = if (selected) R.drawable.ic_dsh_check else null,
+                    selected = selected,
+                    tag = "home-group:${option.name}",
+                ) { close { onGrouping(option) } }
+            }
+            DesignDivider(Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+            MenuRow(stringResource(R.string.project_create), R.drawable.ic_dsh_folder, tag = "home-project-create") {
+                close { onProject(ProjectMode.CREATE) }
+            }
+            MenuRow(stringResource(R.string.project_import), R.drawable.ic_dsh_folder, tag = "home-project-import") {
+                close { onProject(ProjectMode.IMPORT) }
+            }
+            MenuRow(
+                stringResource(R.string.computers_and_settings),
+                R.drawable.ic_dsh_chevron_right,
+                tag = "home-computers-settings-menu",
+            ) {
+                close(onSettings)
+            }
+        }
+    }
+}
+
+/** 「⋯」菜单里的一行：左边一个图标的位置（没有图标时空着，文字对齐），圆角按下底块。 */
+@Composable
+private fun MenuRow(
+    label: String,
+    icon: Int?,
+    selected: Boolean = false,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    val colors = DesignTheme.colors
+    Row(
+        Modifier
+            .padding(horizontal = 6.dp)
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) colors.fill else Color.Transparent)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(horizontal = 12.dp)
+            .testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+            if (icon != null) Icon(painterResource(icon), null, Modifier.size(16.dp), tint = colors.text)
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal),
+            color = colors.text,
+        )
+    }
+}
+
+/**
+ * 最近列表一组的组名：按项目分组时左边是文件夹图标和项目名，点组名收起或展开这一组；右边的加号在这个项目里新建任务
+ * （[onNewTask] 为 null 时没有加号）。[targeted]：刚点过这个项目的加号，加号垫一层浅填充。
+ */
+@Composable
+private fun GroupHeader(
+    group: RecentGroup,
+    folded: Boolean,
+    targeted: Boolean,
+    onToggle: () -> Unit,
+    onNewTask: (() -> Unit)?,
+) {
+    val colors = DesignTheme.colors
+    val name = group.name ?: stringResource(group.titleRes ?: R.string.home_group_no_project)
+    val turn by animateFloatAsState(if (folded) -90f else 0f, tween(180), label = "group-chevron")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .heightIn(min = 40.dp)
+            .testTag("group:${group.key}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f)) {
+            Row(
+                Modifier
+                    .offset(x = (-8).dp)
+                    .heightIn(min = 36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = stringResource(if (folded) R.string.home_group_expand else R.string.home_group_collapse, name),
+                        onClick = onToggle,
+                    ).padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (group.name != null) {
+                    Icon(painterResource(R.drawable.ic_dsh_folder), null, Modifier.size(16.dp), tint = colors.textSecondary)
+                }
+                Text(
+                    name,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
-            } else {
-                ChoiceChevron(open, Modifier.size(14.dp))
+                Text(group.sessions.size.toString(), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+                Icon(painterResource(R.drawable.ic_dsh_chevron_down), null, Modifier.size(10.dp).rotate(turn), tint = colors.textSecondary)
+            }
+        }
+        if (onNewTask != null) {
+            Box(
+                Modifier
+                    .offset(x = 8.dp)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (targeted) colors.fill else Color.Transparent)
+                    .clickable(role = Role.Button, onClick = onNewTask)
+                    .testTag("group-new-task:${group.key}"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_dsh_plus),
+                    stringResource(R.string.new_task_in_project_action, name),
+                    Modifier.size(18.dp),
+                    tint = if (targeted) colors.text else colors.textSecondary,
+                )
             }
         }
     }
@@ -768,74 +1008,26 @@ private fun TitleLine(
     }
 }
 
-/** 「最近」一行：左边「最近」，右边项目筛选（默认「全部项目」），点了在这一行下面展开项目列表。选择记在本地设置里。 */
+/** 「最近」一行：左边「最近」，有未读时跟着「N 条未读」。 */
 @Composable
 private fun RecentHeading(
     sections: HomeSections,
-    open: Boolean,
     onToggleUnread: () -> Unit,
-    onToggle: () -> Unit,
 ) {
     val colors = DesignTheme.colors
-    val current = sections.projects.firstOrNull { it.key == sections.filter }?.name ?: stringResource(R.string.home_all_projects)
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.design_recent), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-            if (sections.unreadCount > 0) UnreadToggle(sections.unreadCount, sections.unreadOnly, onToggleUnread)
-        }
-        if (sections.projects.isNotEmpty()) {
-            Row(
-                Modifier
-                    .heightIn(min = 48.dp)
-                    .clickable(role = Role.Button, onClick = onToggle)
-                    .testTag("home-filter"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    current,
-                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (open) FontWeight.Medium else FontWeight.Normal),
-                    color = if (open) colors.text else colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                ChoiceChevron(open, Modifier.size(12.dp), tint = if (open) colors.text else colors.textSecondary)
-            }
-        }
-    }
-}
-
-/** 项目筛选的列表：「全部项目」和最近列表里出现过的项目，每个项目右边是它的会话数。 */
-@Composable
-private fun FilterPanel(
-    sections: HomeSections,
-    visible: Boolean,
-    onChoose: (String?) -> Unit,
-) {
-    InlinePanel(visible, Modifier.testTag("home-filter-panel")) {
-        ChoiceList {
-            ChoiceRow(
-                stringResource(R.string.home_all_projects),
-                { onChoose(null) },
-                Modifier.testTag("home-filter:all"),
-                selected = sections.filter == null,
-            )
-            sections.projects.forEach { project ->
-                ChoiceRow(
-                    project.name,
-                    { onChoose(project.key) },
-                    Modifier.testTag("home-filter:${project.key}"),
-                    selected = project.key == sections.filter,
-                    trailing = project.count.toString(),
-                )
-            }
-        }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(stringResource(R.string.design_recent), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        if (sections.unreadCount > 0) UnreadToggle(sections.unreadCount, sections.unreadOnly, onToggleUnread)
     }
 }
 
 /**
  * 最近的一行：会话名（拿到未读数据之前都按已读，400）、右边时间；第二行左边是最后的结果（[recentLine]），
- * 右边是项目名，筛选到单个项目时不显示。
+ * 右边是项目名，按项目分组时不显示（组名就是项目）。
  */
 @Composable
 private fun RecentRow(

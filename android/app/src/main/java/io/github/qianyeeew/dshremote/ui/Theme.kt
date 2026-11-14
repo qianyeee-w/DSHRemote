@@ -1,5 +1,6 @@
 package io.github.qianyeeew.dshremote.ui
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.qianyeeew.dshremote.ui.common.RoundedPressIndication
 
 /**
  * 设计规格（docs/design/ui-redesign/README.md）第 3 节的颜色。
@@ -198,10 +200,18 @@ fun DshRemoteTheme(
                     large = RoundedCornerShape(18.dp),
                     extraLarge = RoundedCornerShape(22.dp),
                 ),
-            content = content,
-        )
+        ) {
+            // 点击反馈：圆角浅色底块，不用水波纹（见 ui/common/PressFeedback.kt）
+            CompositionLocalProvider(
+                LocalIndication provides RoundedPressIndication(colors.text.copy(alpha = PRESS_ALPHA)),
+                content = content,
+            )
+        }
     }
 }
+
+/** 按下底块的浓度：主文字色的 7%。 */
+private const val PRESS_ALPHA = 0.07f
 
 private fun style(
     font: FontFamily,

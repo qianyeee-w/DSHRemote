@@ -47,7 +47,9 @@ data class SessionListState(
     /** 不属于列表中任何会话的待处理事项（例如子代理发起的），在列表上方单独显示。 */
     val otherAttention: List<Attention> = emptyList(),
     /** 首页的两段（设计规格 7.1）。默认按 [sessions] 和 [otherAttention] 算，不带项目名和事项。 */
-    val sections: HomeSections = homeSections(sessions, otherAttention, emptyList(), null) { null },
+    val sections: HomeSections = homeSections(sessions, otherAttention) { null },
+    /** 最近列表的分组方式。 */
+    val grouping: HomeGrouping = HomeGrouping.PROJECT,
     /** 已登记的项目，用来显示项目名。 */
     val workspaces: List<Workspace> = emptyList(),
     /** 卡片里处理事项的状态（提交中、失败）。 */
@@ -140,9 +142,9 @@ class SessionListViewModel(
     projectBackend: ProjectBackend,
     responder: AttentionResponder = AttentionResponder { _, _ -> throw OfflineException() },
     resolvedEvents: Flow<LiveEvent.AttentionResolved> = emptyFlow(),
-    /** 最近列表的项目筛选（存在本地设置里，见 [io.github.qianyeeew.dshremote.data.settings.SettingsRepository.projectFilter]）。 */
-    projectFilter: Flow<String?> = flowOf(null),
-    private val saveProjectFilter: suspend (String?) -> Unit = {},
+    /** 最近列表的分组方式（存在本地设置里，见 [io.github.qianyeeew.dshremote.data.settings.SettingsRepository.homeGrouping]）。 */
+    grouping: Flow<String?> = flowOf(null),
+    private val saveGrouping: suspend (HomeGrouping) -> Unit = {},
     /** 新任务上一次用的项目（[NO_PROJECT] 是不指定）。 */
     lastProject: Flow<String?> = flowOf(null),
     saveLastProject: suspend (String) -> Unit = {},
@@ -162,8 +164,9 @@ class SessionListViewModel(
     /** 已登记的项目（显示项目名）。页面可见时刷新。 */
     val catalog = WorkspaceCatalog(viewModelScope, creator::workspaces)
 
-    fun chooseProjectFilter(filter: String?) {
-        viewModelScope.launch { saveProjectFilter(filter) }
+    /** 「⋯」菜单里换了分组方式。 */
+    fun chooseGrouping(grouping: HomeGrouping) {
+        viewModelScope.launch { saveGrouping(grouping) }
     }
 
     /** 「N 条未读」：只看未读，再点一次看全部。只在这次打开期间有效，不记住。 */
@@ -189,10 +192,10 @@ class SessionListViewModel(
         combine(
             hosts,
             states,
-            combine(catalog.state, projectFilter, attention.ui, ::Triple),
+            combine(catalog.state, grouping, attention.ui, ::Triple),
             combine(seen, reconnect, unreadOnly, ::Triple),
             drafts,
-        ) { list, live, (workspaces, filter, attentionUi), (record, offline, onlyUnread), sessionDrafts ->
+        ) { list, live, (workspaces, groupingName, attentionUi), (record, offline, onlyUnread), sessionDrafts ->
             val host = list.firstOrNull { it.hostId == hostId } ?: return@combine null
             val hostState = live[hostId]
             val sessions = hostState?.sessions?.values.orEmpty()
@@ -211,14 +214,13 @@ class SessionListViewModel(
                     homeSections(
                         sessions,
                         others,
-                        workspaces.workspaces,
-                        filter,
                         online = hostState?.status is LinkStatus.Online,
                         unread = unread,
                         unreadOnly = onlyUnread,
                     ) { session ->
                         pendingAttention(hostState, session, session.sessionId).firstOrNull { !done(it) }
                     },
+                grouping = HomeGrouping.of(groupingName),
                 workspaces = workspaces.workspaces,
                 attentionUi = attentionUi,
                 hostId = hostId,

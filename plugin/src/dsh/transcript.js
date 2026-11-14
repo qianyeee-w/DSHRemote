@@ -15,6 +15,7 @@
 
 import { deriveTurnTokenUsage } from '../vendor/dsh-turn-usage.mjs'
 import { imagePart } from './images.js'
+import { markdownToPlainLine } from './plain-text.js'
 
 /** 工具输入中单个字符串字段的上限（字符） */
 export const TOOL_INPUT_STRING_LIMIT = 2_000
@@ -511,7 +512,7 @@ export function turnDigest(records) {
     if (message.role !== 'assistant' || message.turn !== last.turn) continue
     for (const part of message.parts) if (part.type === 'text' && part.text.trim() !== '') reply = part.text
   }
-  const clean = reply?.replace(/\s+/g, ' ').trim()
+  const clean = reply ? markdownToPlainLine(reply) : ''
   return { lastTurn, lastReply: clean ? truncate(clean, LAST_REPLY_LIMIT).text : null }
 }
 

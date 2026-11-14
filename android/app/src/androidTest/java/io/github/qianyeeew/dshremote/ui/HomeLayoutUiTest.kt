@@ -1,12 +1,14 @@
 package io.github.qianyeeew.dshremote.ui
 
 import android.graphics.Bitmap
+import android.view.View
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
@@ -78,6 +80,7 @@ class HomeLayoutUiTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val online = LinkStatus.Online(HostAddress("192.168.1.12", 3290))
     private var back: OnBackPressedDispatcher? = null
+    private var view: View? = null
 
     private val shell =
         Attention(
@@ -287,6 +290,8 @@ class HomeLayoutUiTest {
         )
         compose.onNodeWithTag("home-new-session").performClick()
         compose.onNodeWithTag("new-task-input").performTextInput("给通知加按钮")
+        // 键盘在的时候这一行收起：先收起键盘
+        compose.hideKeyboard(view!!)
         compose.onNodeWithTag("new-task-preset").performClick()
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.design_permission_workspace_hint)).assertIsDisplayed()
@@ -303,7 +308,8 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("new-task-model").performClick()
         compose.onNodeWithTag("new-task-input").performClick()
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
-        // 返回键：先收起面板，再收起输入框
+        // 返回键：先收起面板，再收起输入框（点输入框时键盘回来了，先收起它）
+        compose.hideKeyboard(view!!)
         compose.onNodeWithTag("new-task-model").performClick()
         compose.runOnIdle { back!!.onBackPressed() }
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertDoesNotExist()
@@ -328,7 +334,7 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("new-task").assertIsDisplayed()
         compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed()
         // 没点输入框：占位文字还在
-        compose.onNodeWithTag("new-task-hint").assertIsDisplayed()
+        compose.onNodeWithTag("new-task-hint", useUnmergedTree = true).assertIsDisplayed()
     }
 
     /**
@@ -434,13 +440,13 @@ class HomeLayoutUiTest {
                     },
                 ),
         )
-        compose.onNodeWithTag("home-new-session-text").assertTextEquals(text(R.string.home_new_task))
+        barText().assertTextEquals(text(R.string.home_new_task))
         compose.onNodeWithTag("home-list").performScrollToNode(hasTestTag("group:project:p2"))
         compose.onNodeWithTag("group-new-task:project:p2").performClick()
-        compose.onNodeWithTag("home-new-session-text").assertTextEquals(context.getString(R.string.new_task_in_project, "工具脚本"))
+        barText().assertTextEquals(context.getString(R.string.new_task_in_project, "工具脚本"))
         // 返回键取消，再点一次加号
         compose.runOnIdle { back!!.onBackPressed() }
-        compose.onNodeWithTag("home-new-session-text").assertTextEquals(text(R.string.home_new_task))
+        barText().assertTextEquals(text(R.string.home_new_task))
         compose.onNodeWithTag("group-new-task:project:p2").performClick()
         save("new-task-target")
         compose.onNodeWithTag("home-new-session").performClick()
@@ -496,6 +502,9 @@ class HomeLayoutUiTest {
         compose.onNodeWithTag("home-list").performScrollToNode(hasText("清理临时目录"))
     }
 
+    /** 收起的新任务输入框里的文字。它被合并进了整条输入框的按钮语义，要在未合并的树里找。 */
+    private fun barText() = compose.onNodeWithTag("home-new-session-text", useUnmergedTree = true)
+
     private fun render(
         offline: Boolean = false,
         grouping: HomeGrouping = HomeGrouping.PROJECT,
@@ -540,6 +549,7 @@ class HomeLayoutUiTest {
             )
         compose.setContent {
             back = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            view = LocalView.current
             DshRemoteTheme {
                 SessionListContent(
                     state = state,

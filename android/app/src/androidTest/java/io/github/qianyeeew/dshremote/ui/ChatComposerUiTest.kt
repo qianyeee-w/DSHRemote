@@ -67,13 +67,13 @@ import io.github.qianyeeew.dshremote.ui.common.KEYBOARD_PANEL_TAG
 import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.dismissPanelOnOutsideTap
 import io.github.qianyeeew.dshremote.ui.common.rememberPanelDismiss
-import java.io.File
-import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
+import kotlin.math.abs
 
 /** 和背景的亮度差超过这么多算笔画。 */
 private const val INK_CONTRAST = 60f
@@ -241,7 +241,13 @@ class ChatComposerUiTest {
                 val dismiss = rememberPanelDismiss()
                 CompositionLocalProvider(LocalPanelDismiss provides dismiss) {
                     Column(Modifier.fillMaxSize().dismissPanelOnOutsideTap(dismiss)) {
-                        Box(Modifier.fillMaxWidth().weight(1f).clickable { behind++ }.testTag("behind"))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clickable { behind++ }
+                                .testTag("behind"),
+                        )
                         ChatComposer(
                             onlineChatState(),
                             ChatActions(
@@ -255,7 +261,12 @@ class ChatComposerUiTest {
             }
         }
         compose.onNodeWithTag("chat-model").performClick()
-        val panel = compose.onNodeWithTag(KEYBOARD_PANEL_TAG).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val panel =
+            compose
+                .onNodeWithTag(KEYBOARD_PANEL_TAG)
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot
         val density = compose.density.density
         assertTrue("面板高 ${panel.height / density}dp", panel.height / density < 220f)
         compose.onNodeWithTag("chat-model:test/m2").assertIsDisplayed()

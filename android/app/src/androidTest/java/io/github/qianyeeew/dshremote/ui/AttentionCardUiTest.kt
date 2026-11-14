@@ -50,7 +50,6 @@ import io.github.qianyeeew.dshremote.ui.attention.Resolution
 import io.github.qianyeeew.dshremote.ui.chat.ChatActions
 import io.github.qianyeeew.dshremote.ui.chat.ChatContent
 import io.github.qianyeeew.dshremote.ui.chat.Picker
-import java.io.File
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -58,6 +57,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /** 审批和提问的卡片（m2-android.md 3.5）。 */
 @RunWith(AndroidJUnit4::class)

@@ -65,9 +65,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.qianyeeew.dshremote.ui.DesignTheme
-import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------------
 // 输入框下面的配置行和选项面板。

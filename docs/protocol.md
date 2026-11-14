@@ -232,6 +232,7 @@ App 先连接服务器取得证书，计算出指纹，用**大号字体显示�
 - 工具的 `summary` 是一行给人看的说明（例如「运行命令：npm test」「读取：src/a.js」），插件不认识的工具只显示工具名。
 - 工具的 `input` 和 `output` 可能很大，插件按上限截断，并标记 `truncated: true`：`input` 中每个字符串字段最多 2,000 个字符，`output` 最多 8,000 个字符，截断处以 `…` 结尾。
 - **命令的输出保留开头和末尾**（`bash`、`pwsh`，落地方案 B6）：命令的结果通常在末尾，所以超过 8,000 个字符时，插件保留开头约 1,000 个字符和末尾约 7,000 个字符（尽量切在换行处），去掉中间，标记 `truncated: true`，**末尾不加 `…`**，并带上 `omitted: { offset, chars, lines }`：`output` 的前 `offset` 个字符是开头，之后是末尾；中间去掉了 `chars` 个字符、`lines` 个换行。`offset` 和 `chars` 按 UTF-16 码元计（JavaScript 和 Kotlin 的字符串下标），切点不会落在代理对中间。旧插件没有 `omitted`，命令输出和其他工具一样保留开头。
+- **DSH 自己截断过的输出**：工具结果超过 DSH 的预算（`dsh-spill-policy` 的 `maxInlineTokens`）时，DSH 按原顺序保留开头和末尾，并在最后附一段英文提示「(Omitted N bytes. Full formatted result stored at: <电脑上的路径>. …)」，完整结果存在电脑上的文件里。插件去掉这段提示（路径不发给手机），标记 `outputSaved: true`，再按上面的规则截取。两段之间 DSH 去掉了多少，插件不知道，所以 `omitted` 只说明插件自己去掉的部分。
 - DSH 的内部事件和遥测事件（如 `request/header`、`session-log-*`）**不转发给 App**。
 
 ### 5.3 待处理事项（attention）

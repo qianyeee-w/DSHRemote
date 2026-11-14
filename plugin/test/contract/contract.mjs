@@ -384,10 +384,14 @@ async function main() {
       const output = (part.output ?? '').replace(/\r\n/g, '\n')
       const omitted = part.omitted
       if (!omitted || part.truncated !== true) throw new Error(`应当去掉中间：${short({ ...part, output: output.slice(0, 80) }, 300)}`)
-      if (!output.startsWith('line 1\n')) throw new Error(`开头不对：${short(output.slice(0, 40))}`)
-      if (!output.trimEnd().endsWith(`line ${LONG_OUTPUT_LINES}`)) throw new Error(`末尾不对（DSH 可能自己截断了输出）：${short(output.slice(-120))}`)
+      // DSH 的 bash、pwsh 自己只保留输出的末尾，所以开头不一定是 line 1（调研文档 9.3c）
+      if (part.outputSaved !== true) throw new Error('20000 行的输出 DSH 一定会截断，应当标记 outputSaved')
+      if (output.includes('[output truncated; full output:')) throw new Error(`bash/pwsh 的截断提示（带电脑上的路径）没有去掉：${short(output.slice(-160))}`)
+      // 输出很大时 DSH 自己会截断（保留开头和末尾，最后附一段带电脑路径的提示）：插件去掉提示，末尾仍是真正的最后一行
+      if (output.includes('Full formatted result stored at')) throw new Error(`DSH 的截断提示（带电脑上的路径）没有去掉：${short(output.slice(-160))}`)
+      if (!output.trimEnd().endsWith(`line ${LONG_OUTPUT_LINES}`)) throw new Error(`末尾不对：${short(output.slice(-120))}`)
       if (output.length > 8_000) throw new Error(`超过上限：${output.length}`)
-      return `offset=${omitted.offset} chars=${omitted.chars} lines=${omitted.lines} 保留=${output.length}`
+      return `offset=${omitted.offset} chars=${omitted.chars} lines=${omitted.lines} 保留=${output.length} outputSaved=${part.outputSaved === true}`
     })
     await step('外观层：计划（protocol.md「计划」，落地方案 B5）——模型写的任务清单和目标；新一轮开始时任务清单被清空', async () => {
       const planned = valueOf(await conn.call('session/create', { request: {} }, { actor: ACTOR }))?.sessionId

@@ -247,7 +247,12 @@ PROBE_WORKDIR=/tmp/probe-ws node <仓库>/docs/research/probe-0.2.2-rc.1/probe.m
 
 ### 9.3c 命令输出的长度（2026-11-14，落地方案 B6）
 
-实测（契约测试 `LONGOUT` 一项）：DSH 0.2.2-rc.1 不截断 `bash` 的输出，5,000 行、约 48 KB 的输出整段出现在 `tool/result` 里。所以插件对命令输出保留开头和末尾（protocol.md 5.2）就能拿到真正的最后几行。
+**更正（2026-11-14）**：最初在 Linux 上用 5,000 行、约 48 KB 的输出实测，整段出现在 `tool/result` 里，得出「DSH 不截断命令输出」；但同一个测试在 Windows CI 上失败。实际上 DSH 有**两层**截断，只是 48 KB 恰好都没触发：
+
+1. `dsh-tool-bash`、`dsh-tool-pwsh` 的输出超过限制时**只保留末尾**（可能从半行开始），在这一段后面加一行 `[output truncated; full output: <电脑上的日志路径>]`，完整输出存在临时文件里。
+2. `dsh-spill-policy`（`maxInlineTokens`，默认 12500 token）对**所有工具**的结果生效：超过预算时按原顺序保留开头和末尾，中间用 `\n\n[...]\n\n` 连接，最后附 `\n\n(Omitted N bytes. Full formatted result stored at: <路径>. Use read with offset/limit, or grep this path to search within it.)`（`formatSpillNotice`）。
+
+两段提示都在真正的最后一行之后，都带电脑上的路径。插件去掉这两种提示、标记 `outputSaved`（protocol.md 5.2），再对剩下的内容保留开头和末尾。契约测试的 `LONGOUT` 加大到 20,000 行，两个平台上都一定触发 DSH 的截断。
 
 ### 9.4 新对话分支：公开接口已存在，难点是边界与恢复
 

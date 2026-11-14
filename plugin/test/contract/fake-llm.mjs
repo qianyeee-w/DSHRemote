@@ -23,7 +23,7 @@ export const FAKE_REPLY = '你好，这是假模型的回复。'
 export const STREAM_REPLY = '这是一段分块慢慢输出的回复，用来验证手机上能实时看到模型正在输出的内容。'
 export const TOOL_DONE_REPLY = '已完成，结果收到了。'
 /** LONGOUT 关键词时命令输出的行数（「line 1」到「line N」） */
-export const LONG_OUTPUT_LINES = 5_000
+export const LONG_OUTPUT_LINES = 20_000
 /** TODO 关键词时模型写的任务清单 */
 export const TODO_ITEMS = [
   { content: '读连接状态的代码', status: 'completed' },

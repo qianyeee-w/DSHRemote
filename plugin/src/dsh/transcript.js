@@ -48,6 +48,7 @@ export const LAST_REPLY_LIMIT = 120
  * @property {string} [output]
  * @property {true} [truncated]
  * @property {{ offset: number, chars: number, lines: number }} [omitted] 命令输出去掉了中间（protocol.md 5.2）
+ * @property {true} [outputSaved] DSH 自己截断过结果，完整输出存在电脑上（protocol.md 5.2）
  */
 
 /**
@@ -110,6 +111,38 @@ export function clipCommandOutput(text) {
     text: text.slice(0, headEnd) + text.slice(tailStart),
     omitted: { offset: headEnd, chars: middle.length, lines: middle.split('\n').length - 1 },
   }
+}
+
+/**
+ * DSH 截断过大的工具结果时附在最后的提示（dsh-spill-policy 的 formatSpillNotice）：
+ * 「(Omitted N bytes.[ Omitted K images.] Full formatted result stored at: <路径>. <提示>)」，和前面的内容隔一个空行，
+ * 也可能只有提示。
+ */
+const SPILL_NOTICE = /(?:^|\n\n)\((?:Omitted \d+ bytes\.|More bytes were omitted\.|)(?: Omitted [1-9]\d* images\.)? Full formatted result stored at: [^\n]*\)$/
+
+/**
+ * bash、pwsh 工具自己截断输出时，在被截断的那一段后面加的一行（dsh-tool-bash / dsh-tool-pwsh 的 streamText）：
+ * 「[output truncated; full output: <路径>]」。它只保留输出的末尾。
+ */
+const STREAM_NOTICE = /\n\[output truncated; full output: [^\n]*\]$/gm
+
+/**
+ * 去掉 DSH 附在输出里的截断提示（里面是电脑上的路径，不发给手机），返回剩下的内容和是否截断过（protocol.md 5.2）：
+ * 最后的 spill 提示，以及 bash、pwsh 每段输出后面的「[output truncated; full output: …]」。
+ * 通用截断策略连接开头和末尾的「[...]」本身就说明这里省略了内容，保留。
+ * @param {string} text
+ * @returns {{ text: string, saved: boolean }}
+ */
+export function stripSpillNotice(text) {
+  let saved = false
+  const match = SPILL_NOTICE.exec(text)
+  if (match) {
+    text = text.slice(0, match.index)
+    saved = true
+  }
+  const without = text.replace(STREAM_NOTICE, '')
+  if (without !== text) saved = true
+  return { text: without, saved }
 }
 
 /** 在 index 处切开，但不切开代理对：index 落在一对的中间时往后挪一位。 @param {string} text @param {number} index */
@@ -303,7 +336,8 @@ export function convertRecords(records, startTurn) {
         const callId = typeof message.toolCallId === 'string' ? message.toolCallId : undefined
         const part = callId ? pendingTools.get(callId) : undefined
         if (!callId || !part) break
-        const text = toolResultText(message.content)
+        const { text, saved } = stripSpillNotice(toolResultText(message.content))
+        if (saved) { part.outputSaved = true; part.truncated = true }
         if (COMMAND_TOOLS.has(part.name)) {
           const output = clipCommandOutput(text)
           part.output = output.text

@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { convertRecords, convertPage, extractTurns, turnUsage, clipCommandOutput, COMMAND_HEAD_LIMIT, COMMAND_TAIL_LIMIT, turnBefore, turnDigest, turnResult, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT, TURN_ERROR_LIMIT, LAST_REPLY_LIMIT } from '../../src/dsh/transcript.js'
+import { convertRecords, convertPage, extractTurns, turnUsage, clipCommandOutput, stripSpillNotice, COMMAND_HEAD_LIMIT, COMMAND_TAIL_LIMIT, turnBefore, turnDigest, turnResult, toolSummary, TOOL_OUTPUT_LIMIT, TOOL_INPUT_STRING_LIMIT, TURN_ERROR_LIMIT, LAST_REPLY_LIMIT } from '../../src/dsh/transcript.js'
 
 /** @param {string} name */
 const fixture = (name) => JSON.parse(readFileSync(new URL(`../fixtures/dsh-0.2.2-rc.1/${name}`, import.meta.url), 'utf8'))
@@ -152,6 +152,30 @@ test('命令输出（落地方案 B6）：超过上限时保留开头和末尾�
   assert.equal(shortPart.output, 'a\nb\n')
   assert.equal(shortPart.truncated, undefined)
   assert.equal(shortPart.omitted, undefined)
+})
+
+test('DSH 自己截断过的输出（spill 提示）：去掉提示和里面的路径，标记 outputSaved，末尾是真正的最后几行', () => {
+  // Windows CI 上实际出现的格式
+  const windows = 'line 1\r\nline 2\r\nline 4999\r\nline 5000\r\n\n\n(Omitted 40210 bytes. Full formatted result stored at: C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\dsh-spill-JxSWUs\\session-ab0c9acd18c3\\22fdd4831af5-pwsh.txt. Use read with offset/limit, or grep this path to search within it.)'
+  assert.deepEqual(stripSpillNotice(windows), { text: 'line 1\r\nline 2\r\nline 4999\r\nline 5000\r\n', saved: true })
+  assert.equal(stripSpillNotice('(More bytes were omitted. Omitted 2 images. Full formatted result stored at: /tmp/x/a (1).txt. Use read.)').saved, true)
+  assert.equal(stripSpillNotice('( Full formatted result stored at: /tmp/a.txt. Use read.)').text, '')
+  // Linux 上实际出现的两层：bash 只保留末尾并加一行提示，spill 再截一次
+  const linux = '2\nline 14183\n\n[...]\n\nline 20000\n\n[output truncated; full output: /tmp/dsh-subprocess-GJpLEp/x-stdout.log]\n\n(Omitted 14376 bytes. Full formatted result stored at: /tmp/dsh-spill-AeaGoi/s/d-bash.txt. Use read with offset/limit, or grep this path to search within it.)'
+  const stripped = stripSpillNotice(linux)
+  assert.equal(stripped.saved, true)
+  assert.equal(stripped.text, '2\nline 14183\n\n[...]\n\nline 20000\n')
+  // bash 后面还有 stderr 时，中间那行提示也去掉
+  assert.deepEqual(stripSpillNotice('out\n[output truncated; full output: /tmp/a.log]\n[stderr]\nerr'), { text: 'out\n[stderr]\nerr', saved: true })
+  // 正常的输出、只是提到这句话的输出不动
+  assert.deepEqual(stripSpillNotice('ok\n'), { text: 'ok\n', saved: false })
+  assert.equal(stripSpillNotice('Full formatted result stored at: x)').saved, false)
+  // 经过转换：工具部件不带路径
+  const [message] = convertRecords([assistantWithTool('c1', '{"command":"x"}', 'pwsh'), toolResult('c1', windows)])
+  const part = /** @type {import('../../src/dsh/transcript.js').ToolPart} */ (message?.parts[0])
+  assert.equal(part.outputSaved, true)
+  assert.equal(part.truncated, true)
+  assert.ok(!String(part.output).includes('dsh-spill') && String(part.output).trimEnd().endsWith('line 5000'))
 })
 
 test('命令输出：一整行没有换行时按字符切，不切开代理对', () => {

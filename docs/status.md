@@ -35,7 +35,7 @@
 - 模型、审批方式、用量的面板：高度跟着选项走，最多和键盘一样高（原来固定和键盘一样高，两个模型也占半屏）；键盘开着时点选项，键盘收起后输入框会落到面板上沿，不再保持不动。点输入区以外的地方收起面板，这一下不传给下面的控件（`ui/common/KeyboardPanel.kt` 的 `PanelDismiss`，会话页和首页新任务都用）。拖动列表不收起。
 - 审批卡片：命令和工作目录最多约 6 行高，再长在卡片里滚动，底边渐隐提示，「拒绝」「允许」始终看得见。
 
-插件 `npm run check` 通过。App 这次在云端开发机上下载依赖时一直被 Maven Central 限流（429），没能在本地构建，`test`、`lint ktlintCheck`、`assembleDebug` 交给 GitHub 上的 android 工作流（手动触发）检查；新增的两个界面测试在 `androidTest`，需要真机跑，这次没有跑。
+插件 `npm run check` 通过。App 这次在云端开发机上下载依赖时一直被 Maven Central 限流（429），没能在本地构建，`test`、`lint ktlintCheck`、`assembleDebug` 由 GitHub 上的 android 工作流在这个分支上手动触发跑过，全部通过；新增的两个界面测试在 `androidTest`，需要真机跑，这次没有跑。
 
 **开发优先级**：M3 之后各项功能的排序见 [`roadmap.md`](roadmap.md) 开头的「开发优先级」。这份排序是 2026-11-12 的建议稿，**用户确认前不按它开工**。
 

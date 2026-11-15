@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -256,6 +257,47 @@ fun Modifier.dismissPanelOnOutsideTap(holder: PanelDismiss): Modifier =
                 }
             }
         }
+
+/**
+ * 输入框下面的配置行（模型 · 审批方式）：键盘弹出时**藏在键盘后面**，而不是从布局里拿掉。
+ * 这一行只占「键盘没盖住的那一截」高度（至少 [KeyboardGap]），多出来的部分画在键盘底下。
+ * 键盘收起时这一行跟着露出来，输入框随键盘一起下移、碰到这一行就停住，只有一段连续的动作；
+ * 原来要等键盘完全收起后这一行才长出来，输入框先落到底再被顶上去（用户真机走查）。
+ *
+ * [exposed] 时整行都占位（面板开着：面板自己补足键盘让出的那一截）。外层要用 imePadding（扣掉导航条）。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TuckUnderKeyboard(
+    exposed: Boolean,
+    content: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current
+    val nav = WindowInsets.navigationBars.getBottom(density)
+    val ime = (WindowInsets.ime.getBottom(density) - nav).coerceAtLeast(0)
+    val gap = with(density) { KeyboardGap.roundToPx() }
+    Layout(content) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(constraints.copy(minHeight = 0)) }
+        val full = placeables.maxOfOrNull { it.height } ?: 0
+        val width = placeables.maxOfOrNull { it.width } ?: constraints.minWidth
+        val height = tuckedHeight(full, ime, gap, exposed)
+        layout(width, height) { placeables.forEach { it.place(0, 0) } }
+    }
+}
+
+/**
+ * 配置行占的高度：整行高 [full]，键盘（已扣掉导航条）高 [ime]。键盘盖住的部分不占位，但至少留 [gap]；
+ * [exposed] 时占整行。所以输入框底边离屏幕底部始终是 max(整行, 键盘 + 空隙)，随键盘连续变化。
+ */
+internal fun tuckedHeight(
+    full: Int,
+    ime: Int,
+    gap: Int,
+    exposed: Boolean,
+): Int = if (exposed) full else (full - ime).coerceAtLeast(minOf(gap, full))
+
+/** 键盘弹出时输入框和键盘之间留的空隙。 */
+private val KeyboardGap = 8.dp
 
 /** 键盘弹出的动画一般三百毫秒左右，超过这个时间还没到位就不等了。 */
 private const val KEYBOARD_ANIMATION_LIMIT = 600L

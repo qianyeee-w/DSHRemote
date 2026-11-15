@@ -5,12 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,7 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -74,6 +67,7 @@ import io.github.qianyeeew.dshremote.ui.common.KeyboardPanel
 import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
+import io.github.qianyeeew.dshremote.ui.common.TuckUnderKeyboard
 import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
 import io.github.qianyeeew.dshremote.ui.common.panelArea
@@ -345,15 +339,10 @@ internal fun NewTaskComposer(
                 )
             }
         }
-        // 键盘弹出时这一行收起，收起键盘后再出来
-        AnimatedVisibility(
-            visible = !imeVisible || menu != null,
-            enter = fadeIn(tween(OPTIONS_MILLIS)) + expandVertically(tween(OPTIONS_MILLIS)),
-            exit = fadeOut(tween(OPTIONS_MILLIS)) + shrinkVertically(tween(OPTIONS_MILLIS)),
-        ) {
+        // 键盘弹出时这一行藏在键盘后面，收键盘时跟着露出来
+        TuckUnderKeyboard(exposed = menu != null) {
             NewTaskOptions(state, menu, enabled = true, onOpen = toggle)
         }
-        if (imeVisible && menu == null) Spacer(Modifier.height(8.dp))
         val shown = menu ?: lastMenu
         KeyboardPanel(
             open = menu != null,
@@ -435,7 +424,5 @@ private fun StartKey(
     }
 }
 
-/** 配置行显示和收起的时长。 */
-private const val OPTIONS_MILLIS = 160
 
 private const val DISABLED = 0.5f

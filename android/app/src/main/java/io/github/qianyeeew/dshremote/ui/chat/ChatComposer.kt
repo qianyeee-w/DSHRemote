@@ -4,13 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -20,10 +15,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -76,6 +69,7 @@ import io.github.qianyeeew.dshremote.ui.common.KeyboardPanel
 import io.github.qianyeeew.dshremote.ui.common.LocalPanelDismiss
 import io.github.qianyeeew.dshremote.ui.common.StatusMark
 import io.github.qianyeeew.dshremote.ui.common.StatusMarker
+import io.github.qianyeeew.dshremote.ui.common.TuckUnderKeyboard
 import io.github.qianyeeew.dshremote.ui.common.designPanel
 import io.github.qianyeeew.dshremote.ui.common.onTap
 import io.github.qianyeeew.dshremote.ui.common.panelArea
@@ -312,12 +306,8 @@ fun ChatComposer(
                 )
             }
         }
-        // 模型、审批方式：平时常驻在输入框下面；键盘弹出时收起，收起键盘后再出来
-        AnimatedVisibility(
-            visible = !imeVisible || panelOpen,
-            enter = fadeIn(tween(OPTIONS_MILLIS)) + expandVertically(tween(OPTIONS_MILLIS)),
-            exit = fadeOut(tween(OPTIONS_MILLIS)) + shrinkVertically(tween(OPTIONS_MILLIS)),
-        ) {
+        // 模型、审批方式：常驻在输入框下面；键盘弹出时藏在键盘后面，收键盘时跟着露出来
+        TuckUnderKeyboard(exposed = panelOpen) {
             ComposerOptionsRow(Modifier.padding(top = 2.dp, bottom = 4.dp).testTag("chat-composer-options")) {
                 val model = state.session?.model?.model ?: stringResource(R.string.design_choose_model)
                 val presetId = state.session?.permissionPreset
@@ -354,7 +344,6 @@ fun ChatComposer(
                 }
             }
         }
-        if (imeVisible && !panelOpen) Spacer(Modifier.height(8.dp))
         val title =
             stringResource(
                 when {
@@ -458,8 +447,6 @@ private fun PickerMessage(
     }
 }
 
-/** 配置行显示和收起的时长。 */
-private const val OPTIONS_MILLIS = 160
 
 /**
  * 发送键：发送、不可点、停止三种（[SendKeyMode]）。看上去直径 30，可点区域 48。

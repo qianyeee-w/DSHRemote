@@ -447,7 +447,6 @@ private fun PickerMessage(
     }
 }
 
-
 /**
  * 发送键：发送、不可点、停止三种（[SendKeyMode]）。看上去直径 30，可点区域 48。
  * 外圈表示上下文用了多少（[contextRing]）；长按展开用量（7.11），不能发送时也可以长按。

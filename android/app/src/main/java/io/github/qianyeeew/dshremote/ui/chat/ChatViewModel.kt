@@ -633,7 +633,7 @@ class ChatViewModel(
         }
     }
 
-    /** 读用量（打开会话、一轮结束、用户长按发送键时）。读不到时保留上一次的，不显示成 0。 */
+    /** 读用量（打开会话、一轮结束、用户按住发送键时）。读不到时保留上一次的，不显示成 0。 */
     fun refreshUsage() {
         viewModelScope.launch {
             try {

@@ -7,8 +7,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +35,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,6 +46,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -50,6 +56,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -59,6 +68,7 @@ import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.Attention
 import io.github.qianyeeew.dshremote.data.api.ModelRef
 import io.github.qianyeeew.dshremote.data.api.OutgoingMessage
+import io.github.qianyeeew.dshremote.data.api.SessionUsage
 import io.github.qianyeeew.dshremote.ui.DesignTheme
 import io.github.qianyeeew.dshremote.ui.attention.ComposerAttention
 import io.github.qianyeeew.dshremote.ui.common.ChoiceRow
@@ -76,6 +86,8 @@ import io.github.qianyeeew.dshremote.ui.common.panelArea
 import io.github.qianyeeew.dshremote.ui.common.presetTint
 import io.github.qianyeeew.dshremote.ui.common.pressScale
 import io.github.qianyeeew.dshremote.ui.input
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** 发送键此刻的作用（设计规格 6.3）。 */
 enum class SendKeyMode {
@@ -105,7 +117,7 @@ fun sendKeyMode(
  * 加上的图片（7.6）在文字下面，加了图片时一直展开。加号选图片用系统的照片选择器（不需要存储权限）；
  * 看不了图时加号画成不可用，点了说明原因（落地方案 C2）。
  * 输入框下面常驻一行「模型 · 审批方式」，键盘弹出时收起。点了其中一项，键盘收起，原来键盘的位置换成
- * 选项面板（[KeyboardPanel]），输入框不动；长按发送键在同一块面板里看用量。
+ * 选项面板（[KeyboardPanel]），输入框不动。按住发送键时，发送键上方浮出用量气泡，松手就消失（[SendKey]）。
  *
  * 有待处理事项时按 [attention]：审批在等时不能写（DSH 停着等审批，消息不会改变这次审批），只留停止；
  * 只有一个问题的提问时，写的就是自己的答案，经 [onAnswer] 提交；多个问题时在面板里逐题写。
@@ -154,24 +166,19 @@ fun ChatComposer(
     val hasImages = state.images.isNotEmpty() || state.preparingImages > 0
     var focused by remember { mutableStateOf(false) }
     val pickerOpen = picker != Picker.Closed
-    // 长按发送键看用量（7.11），和模型、审批方式用同一块面板，一次只开一个
-    var usageOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(pickerOpen) { if (pickerOpen) usageOpen = false }
-    val panelOpen = pickerOpen || usageOpen
-    val expanded = focused || panelOpen || hasImages
+    val expanded = focused || pickerOpen || hasImages
     // 收起的动画期间还要画最后一次打开的选项
     var lastPicker by remember { mutableStateOf<Picker>(Picker.Closed) }
     if (pickerOpen) lastPicker = picker
     // 返回键先收起面板，再按一次才收起输入框
     BackHandler(enabled = pickerOpen) { actions.onClosePicker() }
-    BackHandler(enabled = usageOpen) { usageOpen = false }
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.isImeVisible
     val inputFocus = remember { FocusRequester() }
     // 打开面板前正在打字：选完回到键盘
     var backToKeyboard by remember { mutableStateOf(false) }
     val openPanel = { open: () -> Unit ->
-        if (!panelOpen) backToKeyboard = imeVisible
+        if (!pickerOpen) backToKeyboard = imeVisible
         keyboard?.hide()
         open()
     }
@@ -182,23 +189,14 @@ fun ChatComposer(
         }
         backToKeyboard = false
     }
-    val toggleUsage = {
-        if (pickerOpen) actions.onClosePicker()
-        if (!usageOpen) {
-            if (!panelOpen) backToKeyboard = imeVisible
-            keyboard?.hide()
-            actions.onRefreshUsage()
-        }
-        usageOpen = !usageOpen
-    }
     val ratio = state.usage?.context?.ratio
     val almostFull = ratio != null && ratio >= CONTEXT_ALMOST_FULL
     val focus = LocalFocusManager.current
     val haptic = LocalHapticFeedback.current
     var hadKeyboard by remember { mutableStateOf(false) }
     // 收起键盘、又没写字时退出编辑，输入框跟着收起
-    LaunchedEffect(imeVisible, panelOpen) {
-        if (hadKeyboard && !imeVisible && !panelOpen && text.isBlank()) focus.clearFocus()
+    LaunchedEffect(imeVisible, pickerOpen) {
+        if (hadKeyboard && !imeVisible && !pickerOpen && text.isBlank()) focus.clearFocus()
         hadKeyboard = imeVisible
     }
     val hint =
@@ -274,7 +272,6 @@ fun ChatComposer(
                             .onTap {
                                 // 点输入框：键盘回来，面板让位
                                 if (pickerOpen) actions.onClosePicker()
-                                usageOpen = false
                                 backToKeyboard = false
                                 if (focused) keyboard?.show()
                             }.padding(end = 10.dp)
@@ -295,7 +292,7 @@ fun ChatComposer(
                         }
                     },
                 )
-                SendKey(mode, ratio, onSend = send, onStop = actions.onCancelRun, onLongPress = toggleUsage)
+                SendKey(mode, ratio, state.usage, onSend = send, onStop = actions.onCancelRun, onHold = actions.onRefreshUsage)
             }
             if (showAddImage) {
                 ComposerImageStrip(
@@ -307,7 +304,7 @@ fun ChatComposer(
             }
         }
         // 模型、审批方式：常驻在输入框下面；键盘弹出时藏在键盘后面，收键盘时跟着露出来
-        TuckUnderKeyboard(exposed = panelOpen) {
+        TuckUnderKeyboard(exposed = pickerOpen) {
             ComposerOptionsRow(Modifier.padding(top = 2.dp, bottom = 4.dp).testTag("chat-composer-options")) {
                 val model = state.session?.model?.model ?: stringResource(R.string.design_choose_model)
                 val presetId = state.session?.permissionPreset
@@ -347,26 +344,20 @@ fun ChatComposer(
         val title =
             stringResource(
                 when {
-                    usageOpen -> R.string.panel_usage
                     lastPicker.kind == PickerKind.MODELS -> R.string.panel_models
                     else -> R.string.panel_permissions
                 },
             )
         // 点输入区外面：只收起面板，不回到键盘
         KeyboardPanel(
-            open = panelOpen,
+            open = pickerOpen,
             title = title,
             onDismiss = {
                 if (pickerOpen) actions.onClosePicker()
-                usageOpen = false
                 backToKeyboard = false
             },
         ) {
-            if (usageOpen) {
-                Box(Modifier.padding(horizontal = 12.dp)) { UsageDetails(state.usage) }
-            } else {
-                PickerChoices(lastPicker, state, actions, onChosen = afterChoice)
-            }
+            PickerChoices(lastPicker, state, actions, onChosen = afterChoice)
         }
     }
 }
@@ -449,44 +440,96 @@ private fun PickerMessage(
 
 /**
  * 发送键：发送、不可点、停止三种（[SendKeyMode]）。看上去直径 30，可点区域 48。
- * 外圈表示上下文用了多少（[contextRing]）；长按展开用量（7.11），不能发送时也可以长按。
+ * 外圈表示上下文用了多少（[contextRing]）。按住它，上方浮出用量气泡（7.11），松手就消失；不能发送时也可以按住。
+ * 按住时调 [onHold] 刷新一次用量，气泡先显示手上已有的 [usage]。读屏用户没法按住，用「长按」操作打开气泡，几秒后自己收起。
  */
 @Composable
 private fun SendKey(
     mode: SendKeyMode,
     contextRatio: Float?,
+    usage: SessionUsage?,
     onSend: () -> Unit,
     onStop: () -> Unit,
-    onLongPress: () -> Unit,
+    onHold: () -> Unit,
 ) {
     val colors = DesignTheme.colors
     val haptic = LocalHapticFeedback.current
     val description = stringResource(if (mode == SendKeyMode.STOP) R.string.chat_stop else R.string.chat_send)
     val idle = mode == SendKeyMode.IDLE
     val press = remember { MutableInteractionSource() }
+    val scope = rememberCoroutineScope()
+    var holding by remember { mutableStateOf(false) }
+    var announced by remember { mutableStateOf(false) }
+    LaunchedEffect(announced) {
+        if (announced) {
+            delay(USAGE_ANNOUNCE_MILLIS)
+            announced = false
+        }
+    }
+    val tap = {
+        when (mode) {
+            SendKeyMode.STOP -> onStop()
+            SendKeyMode.SEND -> onSend()
+            SendKeyMode.IDLE -> Unit
+        }
+    }
+    val currentTap by rememberUpdatedState(tap)
+    val currentHold by rememberUpdatedState(onHold)
+    val showUsage = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        currentHold()
+    }
+    val longPressLabel = stringResource(R.string.usage_show)
     Box(
         Modifier
             .size(48.dp)
             .pressScale(press)
             .contextRing(contextRatio)
-            .combinedClickable(
-                interactionSource = press,
-                indication = null,
-                role = Role.Button,
-                onLongClickLabel = stringResource(R.string.usage_show),
-                onLongClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onLongPress()
-                },
-                onClick = {
-                    when (mode) {
-                        SendKeyMode.STOP -> onStop()
-                        SendKeyMode.SEND -> onSend()
-                        SendKeyMode.IDLE -> Unit
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val pressed = PressInteraction.Press(down.position)
+                    scope.launch { press.emit(pressed) }
+                    var cancelled = false
+                    val up =
+                        withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            waitForUpOrCancellation().also { if (it == null) cancelled = true }
+                        }
+                    when {
+                        cancelled -> scope.launch { press.emit(PressInteraction.Cancel(pressed)) }
+                        up != null -> {
+                            up.consume()
+                            scope.launch { press.emit(PressInteraction.Release(pressed)) }
+                            currentTap()
+                        }
+                        else -> {
+                            // 按住了：气泡一直在，直到所有手指离开屏幕
+                            showUsage()
+                            holding = true
+                            try {
+                                do {
+                                    val event = awaitPointerEvent()
+                                    event.changes.forEach { it.consume() }
+                                } while (event.changes.any { it.pressed })
+                            } finally {
+                                holding = false
+                                scope.launch { press.emit(PressInteraction.Release(pressed)) }
+                            }
+                        }
                     }
-                },
-            ).semantics {
+                }
+            }.semantics {
+                role = Role.Button
                 contentDescription = description
+                onClick {
+                    currentTap()
+                    true
+                }
+                onLongClick(longPressLabel) {
+                    showUsage()
+                    announced = true
+                    true
+                }
                 if (idle) disabled()
             }.testTag(if (mode == SendKeyMode.STOP) "chat-stop" else "chat-send"),
         contentAlignment = Alignment.Center,
@@ -502,8 +545,12 @@ private fun SendKey(
                 tint = if (mode == SendKeyMode.IDLE) colors.textSecondary else colors.panel,
             )
         }
+        if (holding || announced) UsageBubble(usage)
     }
 }
+
+/** 读屏用户打开的用量气泡停留多久。 */
+private const val USAGE_ANNOUNCE_MILLIS = 5_000L
 
 @Composable
 internal fun permissionLabel(preset: String?): String =

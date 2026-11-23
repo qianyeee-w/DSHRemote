@@ -10,27 +10,39 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import io.github.qianyeeew.dshremote.R
 import io.github.qianyeeew.dshremote.data.api.SessionUsage
 import io.github.qianyeeew.dshremote.ui.DesignTheme
+import io.github.qianyeeew.dshremote.ui.common.designPanel
 import kotlin.math.roundToInt
 
 // ---------------------------------------------------------------------------
 // 用量与上下文（设计规格 6.3、6.7、7.11，落地方案 B4）。每个数字放在它起作用的地方：
-// 上下文在发送键的外圈上，本轮用量在这一轮的结尾，长按发送键看整个会话。拿不到的项不显示，不当成 0。
+// 上下文在发送键的外圈上，本轮用量在这一轮的结尾，按住发送键在气泡里看整个会话。拿不到的项不显示，不当成 0。
 // ---------------------------------------------------------------------------
 
 /** 上下文用到这么多算「快满」：外圈变琥珀色，发送键左边写「上下文快满」。 */
@@ -87,7 +99,7 @@ fun Modifier.contextRing(
 }
 
 /**
- * 长按发送键展开的用量（7.11）：上下文一句人话、用量条、「约 59k，上限 128k · 估算值」；分隔线；
+ * 按住发送键时气泡里的用量（7.11）：上下文一句人话、用量条、「约 59k，上限 128k · 估算值」；分隔线；
  * 这次会话的输入和输出；缓存命中（分母为零时不显示）。拿不到的项不显示；全都拿不到时说一句。
  */
 @Composable
@@ -158,3 +170,61 @@ private fun UsageRow(
 }
 
 const val USAGE_DETAILS_TAG = "usage-details"
+const val USAGE_BUBBLE_TAG = "usage-bubble"
+
+/**
+ * 按住发送键时浮出的用量气泡（7.11）：右边和发送键对齐，在它上方；上方放不下时放到下方。
+ * 不抢焦点，也不接触摸：手指一直按在发送键上，松手时由发送键收起它。
+ */
+@Composable
+fun UsageBubble(usage: SessionUsage?) {
+    val density = LocalDensity.current
+    val gap = with(density) { BubbleGap.roundToPx() }
+    val margin = with(density) { BubbleMargin.roundToPx() }
+    val position =
+        remember(gap, margin) {
+            object : PopupPositionProvider {
+                override fun calculatePosition(
+                    anchorBounds: IntRect,
+                    windowSize: IntSize,
+                    layoutDirection: LayoutDirection,
+                    popupContentSize: IntSize,
+                ): IntOffset = usageBubblePosition(anchorBounds, windowSize, popupContentSize, gap, margin)
+            }
+        }
+    val shape = RoundedCornerShape(16.dp)
+    Popup(popupPositionProvider = position, properties = PopupProperties(focusable = false)) {
+        Box(
+            Modifier
+                .width(BubbleWidth)
+                .shadow(8.dp, shape)
+                .designPanel(shape)
+                .padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp)
+                .testTag(USAGE_BUBBLE_TAG),
+        ) {
+            UsageDetails(usage)
+        }
+    }
+}
+
+/**
+ * 气泡左上角的位置：右边和 [anchor] 的右边对齐，但离窗口左右两边至少 [margin]；
+ * 底边在 [anchor] 上方 [gap] 处，上方放不下时顶边在 [anchor] 下方 [gap] 处。
+ */
+internal fun usageBubblePosition(
+    anchor: IntRect,
+    window: IntSize,
+    content: IntSize,
+    gap: Int,
+    margin: Int,
+): IntOffset {
+    val maxX = (window.width - content.width - margin).coerceAtLeast(margin)
+    val x = (anchor.right - content.width).coerceIn(margin, maxX)
+    val above = anchor.top - gap - content.height
+    val y = if (above >= 0) above else anchor.bottom + gap
+    return IntOffset(x, y)
+}
+
+private val BubbleWidth = 280.dp
+private val BubbleGap = 6.dp
+private val BubbleMargin = 12.dp

@@ -237,7 +237,7 @@ fun ChatContent(
     LaunchedEffect(fork) { if (fork is ForkState.Done) forking = null }
     val clipboard = LocalClipboardManager.current
 
-    // 模型、审批方式、用量的面板开着时，点输入区外面收起
+    // 模型、审批方式的面板开着时，点输入区外面收起
     val panelDismiss = rememberPanelDismiss()
     CompositionLocalProvider(LocalPanelDismiss provides panelDismiss) {
         Scaffold(
